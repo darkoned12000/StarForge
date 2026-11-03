@@ -18,6 +18,7 @@ Every step also satisfies the Definition of Done in ARCHITECTURE.md.
 | Vision goal                         | Proof                                                | Milestone |
 |-------------------------------------|------------------------------------------------------|-----------|
 | Accurate positioning at astronomical distances | Same scene at 0 and 1e12 m renders identically | M2, M3 |
+| Unbounded exploration, no loading zones | Content is a deterministic function of position (bit-exact across runs); simulated long flight stays precise | M2, M6 |
 | High-performance GPU rendering      | Measured frame times, budgets from a baseline        | M4        |
 | Enormous object counts / GPU-driven | 1M instances culled and drawn on GPU, beats baseline | M5        |
 | Scalable planetary rendering        | Orbit-to-surface descent, bounded patches            | M7        |
@@ -33,6 +34,9 @@ Every step also satisfies the Definition of Done in ARCHITECTURE.md.
 | 1.3 ✅ | `VulkanContext`: instance, validation, debug messenger, GPU selection, capabilities, feature override, driver decode | T1 + run on target GPU | RX 7900 XTX selected, capabilities logged |
 | 1.4 ✅ | Headless `VulkanDevice`: logical device with 1.3 features, graphics queue, object naming. Messenger counts validation errors and warnings | T2 | Create and destroy with no window; error count is 0 (warnings are reported and reviewed) |
 | 1.5 ✅ | `gpu_resources`: VMA allocator, `Buffer`, staging upload | T2 | 1 MiB GPU roundtrip (CPU → staging → device-local → readback) matches byte-for-byte; no leaks at shutdown; zero validation errors |
+| 1.6 ✅ | Compute dispatch: load SPIR-V built by Slang, run a known kernel over N floats | T2 | GPU output equals CPU reference; proves Slang → SPIR-V → GPU |
+| 1.7 ✅ | `VulkanSwapchain`: surface, present queue, format and present-mode choice, recreation on resize, minimize and out-of-date | T1 (format and extent selection) + T5 | Resize and minimize checklist passes |
+| 1.8 ✅ | Frame loop: command pools, frames in flight, semaphores and fences, cleared frame via dynamic rendering and synchronization2 | T5 + validation | 600 frames incl. resizes with 0 validation errors; clean shutdown |
 
 ### 1.5 Subtasks
 
@@ -56,9 +60,6 @@ Every step also satisfies the Definition of Done in ARCHITECTURE.md.
 - Resources destroyed in dependency-safe order (buffers → allocator → device → instance).
 - Existing M1.3 and M1.4 tests continue to pass.
 
-| 1.6 ✅ | Compute dispatch: load SPIR-V built by Slang, run a known kernel over N floats | T2 | GPU output equals CPU reference; proves Slang → SPIR-V → GPU |
-| 1.7 ✅ | `VulkanSwapchain`: surface, present queue, format and present-mode choice, recreation on resize, minimize and out-of-date | T1 (format and extent selection) + T5 | Resize and minimize checklist passes |
-| 1.8 ✅ | Frame loop: command pools, frames in flight, semaphores and fences, cleared frame via dynamic rendering and synchronization2 | T5 + validation | 600 frames incl. resizes with 0 validation errors; clean shutdown |
 
 Note for 1.6: the kernel in `shaders/compute/test_compute.slang` is
 used if it has a checkable output; otherwise replace it with a simple
@@ -66,18 +67,26 @@ known kernel (for example `y = a*x + b`).
 
 Exit: a cleared frame on screen, validation-clean, resizing correctly.
 
-## M2 – Precision (CPU only)
+## M2 – Precision and World Addressing (CPU only)
+
+Requirements and reasoning: [decisions/001-world-scale-requirements.md](decisions/001-world-scale-requirements.md).
 
 | Step | Deliverable | Verified by | Done when |
 |------|-------------|-------------|-----------|
-| 2.1 | Math types (decision note: glm vs a minimal own library) | T1 | Vec3 float/double, Mat4, basic ops tested |
-| 2.2 | Precision demo: error of naive float positions at 1e6 to 1e12 m | T1 | Test asserts the naive error exceeds a stated bound (proves the problem exists) |
-| 2.3 | `WorldPosition` representation (decision note) | T1 | Round-trip and arithmetic tests at 1e12 m |
-| 2.4 | Camera-relative conversion | T1 | Offsets within 10 km of the camera accurate to better than 1 mm at 1e12 m |
-| 2.5 | Floating-origin rebase policy | T1 | Relative positions unchanged across rebases |
+| 2.0 | Requirements note: required extent, near-camera resolution, determinism, how positions reach a float32 shader, consumers | Review | Note agreed; numbers in it are the acceptance criteria for 2.1–2.5 |
+| 2.1 | Characterization tool: reach and spacing of float, double, int64 millimetres, and int64 cell + double offset, from 1e6 m to beyond 1e24 m. Uses no math library | T1 + generated table | Table committed to the note; test asserts naive float error exceeds a stated bound at each distance (proves the problem) and the chosen candidate meets the requirements |
+| 2.2 | Math library: GLM wrapped behind STARFORGE aliases (see [ADR-0005](decisions/0005-math-library.md)) and **convention tests**: handedness, up axis, column-major layout, Vulkan Y-down clip space, depth 0..1, reverse-Z (near → 1, far → 0) | T1 | Conventions documented and tested. Library internals are not tested |
+| 2.3 | `WorldPosition` (decision note + implementation): power-of-two cells with a local offset, shift-based coarse cell index at any scale (floor semantics), overflow detection, NaN/infinity rejected, stable cell hash | T1 | Round-trip and arithmetic correct at 1e12 m and at the maximum extent; negative coordinates and cell boundaries correct; known cells hash to known values |
+| 2.4 | Camera-relative conversion of positions **and full transforms** (compose in double, cast to float once). Includes the large-object case: planet radius 6.4e6 m, camera near its surface, with a per-object local origin | T1 | Error stays within the bound derived from the representation; the large-object case has no vertex jitter at the surface |
+| 2.5 | Translation-invariance property tests: random inputs, negative coordinates, cell boundaries, near-overflow. Same relative scene shifted by T from 0 to the maximum extent | T1 | Camera-relative results match within the bound for every T |
 
-Exit: precision claim demonstrated with numbers, before any code
-stores positions.
+Deferred (not scheduled): floating-origin rebase. Rendering is
+camera-relative per frame, so a rebase is only needed by float-based
+simulation (for example physics). Add it when the first such consumer
+exists.
+
+Exit: precision and addressing claims demonstrated with numbers,
+before any code stores positions.
 
 ## M3 – Geometry and Precision on the GPU
 
@@ -109,12 +118,19 @@ Performance budgets are set from the 4.3 numbers, not guessed.
   1M instances beat the M4 baseline (T4); runs correctly with
   `STARFORGE_DISABLE_FEATURES=drawIndirectCount,bindless` (fallbacks).
 
-## M6 – Scale Hierarchy
+## M6 – Deterministic Exploration (goal and proof)
 
-- **Goal:** coordinates spanning systems and galaxies; distant objects
-  handled without precision loss.
-- **Proof:** translation-invariance test repeated at galactic scale
-  (T1 + T3).
+- **Goal:** content is a pure function of position:
+  `generate(seed, cell, scale level)`. No zones, no loading screens;
+  content near the camera is generated on demand. Only player changes
+  are stored, keyed by cell and object ID. Scale levels use the
+  power-of-two cell hierarchy decided in M2.
+- **Proof:** the same cell generates bit-identical content in any visit
+  order and on any machine (T1); a simulated long flight reaches
+  generated content with positions still precise (T1 + T3);
+  translation-invariance holds at the maximum extent. Distant,
+  not-yet-resolvable content (fields, stars) has a cheap representation
+  so there is something to discover from far away.
 
 ## M7 – Planets
 

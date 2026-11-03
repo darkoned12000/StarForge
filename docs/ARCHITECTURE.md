@@ -207,7 +207,12 @@ is shaped by using the internals first.
 - **Depends on:** core only. No Vulkan.
 - **Verified by:** T1, with the precision demo quantifying the error
   of the naive approach and the fix.
-- **Open decision (M2):** 64-bit integer cell plus float offset versus
+- **Settled (M2):** 64-bit integer cell plus double offset for world
+  positions; GLM wrapped behind STARFORGE aliases for math types (see
+  [ADR-0005](decisions/0005-math-library.md)). A double has about 1e-4 m
+  spacing at 1e12 m but about 1e5 m at 1e21 m, so doubles suit a
+  solar system but not a galaxy; the hierarchy in M6 interacts with
+  this choice.
   double positions rendered camera-relative. A double has about 1e-4 m
   spacing at 1e12 m but about 1e5 m at 1e21 m, so doubles suit a
   solar system but not a galaxy; the hierarchy in M6 interacts with
