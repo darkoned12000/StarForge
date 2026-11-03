@@ -1,0 +1,29 @@
+# Build output
+build/
+build-*/
+cmake-build-*/
+
+# IDE
+.idea/
+.vscode/
+.zed/
+
+# Compilation database
+compile_commands.json
+
+# Generated shaders
+*.spv
+*.dxil
+*.metallib
+
+# Debugging
+*.core
+core
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak

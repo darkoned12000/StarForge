@@ -1,0 +1,50 @@
+{
+  "version": 8,
+  "cmakeMinimumRequired": { "major": 3, "minor": 30, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "linux-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "linux-debug",
+      "inherits": "linux-base",
+      "displayName": "Linux Debug (validation on)",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "STARFORGE_ENABLE_VALIDATION": "ON"
+      }
+    },
+    {
+      "name": "linux-release",
+      "inherits": "linux-base",
+      "displayName": "Linux Release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "STARFORGE_ENABLE_VALIDATION": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "debug", "configurePreset": "linux-debug" },
+    { "name": "release", "configurePreset": "linux-release" }
+  ],
+  "testPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "linux-debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "release",
+      "configurePreset": "linux-release",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

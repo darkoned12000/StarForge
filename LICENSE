@@ -1,0 +1,16 @@
+Copyright (c) 2026 Ray Hague. All rights reserved.
+
+This software and associated documentation files (the "Software") are the
+proprietary property of the copyright holder.
+
+Even if this repository is hosted publicly (for example, on GitHub), no
+license or right is granted, either expressly or by implication, to any person
+obtaining a copy of or viewing this Software to use, copy, modify, merge,
+publish, distribute, sublicense, create derivative works of, or sell copies of
+the Software without prior written permission from the copyright holder, except
+for the limited rights required by the hosting platform's terms of service
+(such as viewing the repository and creating a personal fork on GitHub if
+publicly hosted).
+
+Third-party files located in `third_party/` remain under their respective
+open-source licenses as stated in their headers.
