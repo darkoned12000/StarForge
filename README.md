@@ -163,6 +163,21 @@ Milestone M3: Geometry and Precision on the GPU
 - [x] 3.4c Naive control error table
 - [x] 3.5 Sandbox integration
 
+Milestone M4: Measure
+
+- [ ] 4.0 Decision notes: Tracy, benchmark methodology
+- [ ] 4.1a Statistics library (percentiles) + T1 tests
+- [ ] 4.1b JSON writer with versioned schema + T1 tests
+- [ ] 4.1c GPU timestamps + named scopes + T2 tests
+- [ ] 4.1d CPU frame timing
+- [ ] 4.2a Headless harness
+- [ ] 4.2b Noise-floor measurement
+- [ ] 4.2c Compare tool + T1 tests
+- [ ] 4.3a Scene spec
+- [ ] 4.3b Naive + competent CPU-driven baselines
+- [ ] 4.3c Sweep (10k/100k/1M × visibility)
+- [ ] 4.3d Per-machine baseline files
+
 See [docs/ROADMAP.md](docs/ROADMAP.md) for details.
 
 ## License

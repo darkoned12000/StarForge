@@ -211,14 +211,66 @@ Exit: vision goal "accurate positioning across astronomical distances" proven en
 
 ## M4 – Measure
 
+### 4.0 Decision notes (Review)
+
+Before implementation, resolve these design decisions and record them as ADRs:
+- **Tracy:** Adopt or not. Decide using project profiling needs; do not add
+  speculatively. Arch packages Tracy. Wrap in a project macro so it can be
+  compiled out entirely. Tracy's GPU zones use `VK_EXT_calibrated_timestamps`;
+  verify RADV supports it on the target driver.
+- **Benchmark methodology:** Offscreen (headless, no vsync/compositor interference),
+  GPU clocks (document pinning via amdgpu sysfs or record that clocks were
+  unpinned), CPU governor recorded, validation off, Release build only.
+- **Metrics:** GPU time (median, p95, p99, min, max, stddev), CPU submission
+  time (separate), VMA memory statistics. Report distributions, not just means.
+- **JSON schema:** versioned, with commit hash + dirty flag, GPU/driver/kernel/CPU
+  model, compiler/build flags, resolution, present mode, scene parameters + seed,
+  `STARFORGE_DISABLE_FEATURES` setting.
+- **Noise policy:** Measure noise floor across several separate process launches
+  (not within one run); set the acceptance threshold from the data, not a guess.
+- **Budgets:** Set top-down from a frame-time target (e.g., 144 fps = 6.9 ms on
+  the 7900 XTX), split across subsystems. The baseline shows the gap to close,
+  not the target. State explicitly that single-GPU numbers don't transfer.
+
+### 4.1 Timestamp and statistics infrastructure
+
 | Step | Deliverable | Verified by | Done when |
 |------|-------------|-------------|-----------|
-| 4.1 | GPU timestamp queries, frame-time logging | T2 | Timestamps are non-zero and monotonic |
-| 4.2 | Benchmark harness: warmup, N frames, JSON with commit, GPU, driver, build type | T4 | Repeated runs vary by less than a stated percentage |
-| 4.3 | CPU-driven baseline: 100k instances | T4 | `benchmarks/baseline.json` recorded (Release) |
-| 4.4 | Decision note: Tracy, adopt or not | Review | Note written with reasoning |
+| 4.1a | Statistics library: percentile calculation (median, p95, p99, min, max, stddev) | T1 | Pure CPU unit tests pass; percentiles verified against known distributions |
+| 4.1b | JSON writer with versioned schema (commit, GPU, driver, build flags, scene params, metrics) | T1 | Serialization round-trips; schema validated |
+| 4.1c | GPU timestamps: per-frame query pools (one per frame in flight), `timestampValidBits`/`timestampPeriod` handling, `vkCmdWriteTimestamp2` with `synchronization2`, named scopes emitting `VK_EXT_debug_utils` labels | T2 | N vs 2N compute kernel shows ~2× timestamp ratio; timestamps non-zero and monotonic |
+| 4.1d | CPU frame timing (wall-clock per frame, no sleeps) and per-frame logging | T1/T2 | CPU time recorded separately from GPU time |
 
-Performance budgets are set from the 4.3 numbers, not guessed.
+Dependencies: 4.1a and 4.1b can start immediately (pure CPU). 4.1c needs a
+compute workload (available from M1.6).
+
+### 4.2 Benchmark harness (T4)
+
+| Step | Deliverable | Verified by | Done when |
+|------|-------------|-------------|-----------|
+| 4.2a | Headless harness: fixed frame count, seeded deterministic scene, system metadata collection, refuses non-Release/validation builds | T4 | Harness runs N frames offscreen with no vsync/compositor interference |
+| 4.2b | Noise-floor measurement across separate process launches; set acceptance threshold from data | T4 | Threshold documented and derived from measured noise |
+| 4.2c | Compare tool: takes two JSON baselines, reports per-metric ratios, flags differences exceeding noise threshold | T1 | Tool correctly identifies regressions above noise floor |
+
+Dependencies: needs 4.1a–4.1d.
+
+### 4.3 CPU-driven baseline (T4)
+
+| Step | Deliverable | Verified by | Done when |
+|------|-------------|-------------|-----------|
+| 4.3a | Scene spec: mesh, distribution, camera path, resolution, visible fractions (documented, reviewed) | Review | Spec agreed and committed |
+| 4.3b | Naive CPU-driven baseline (no culling, 100k separate draws) and competent CPU-driven baseline (CPU frustum culling + instanced/multi-draw-indirect) | T4 | Both baselines recorded; competent baseline is the comparison target for M5 |
+| 4.3c | Sweep: 10k, 100k, 1M instances × ~100%, ~10%, ~1% visible fraction | T4 | Baseline curves recorded (including 1M even if CPU path is slow) |
+| 4.3d | Per-machine baseline files (`benchmarks/baselines/<gpu>-<driver>.json`) with full metadata; re-baselining procedure documented | T4 | Baseline files committed; compare tool works across files |
+
+Dependencies: needs M3 (instanced draws, depth, camera). 4.3a (scene spec) can
+start during M3.
+
+### Exit
+
+Budgets derived top-down from the frame-time target, with the baseline showing
+the gap to close. CPU and GPU time recorded separately. VMA memory statistics
+included.
 
 ## M5 – GPU-Driven Rendering (goal and proof)
 
