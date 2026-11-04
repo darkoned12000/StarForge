@@ -96,6 +96,7 @@ cannot be disabled.
     src/platform/        SDL3 window, surface, and event handling
     src/vulkan/          Private Vulkan backend (instance, device, swapchain, frame loop)
     src/gpu_resources/   VMA allocator, buffers, staging upload, compute pipeline
+    src/bench/           Benchmark result schema, JSON I/O, and metadata
     apps/sandbox/        Thin host application for experiments
     tests/               CPU unit tests (T1) and headless GPU tests (T2/T3)
     shaders/             Slang shader sources
@@ -166,12 +167,12 @@ Milestone M3: Geometry and Precision on the GPU
 Milestone M4: Measure
 
 - [ ] 4.0 Decision notes: Tracy, benchmark methodology, timing modes, noise policy, metrics, JSON schema, workload profiles, budgets
-- [ ] 4.1a Statistics library (percentiles) + T1 tests
-- [ ] 4.1b JSON writer with versioned schema + T1 tests
-- [ ] 4.1c GPU timestamps + named scopes + T2 tests
-- [ ] 4.1d CPU frame timing (recording, submission, preparation, interval)
-- [ ] 4.1e VMA memory statistics
-- [ ] 4.1f Timestamp validation and availability
+- [x] 4.1a Statistics library (percentiles) + T1 tests
+- [x] 4.1b JSON writer with versioned schema + T1 tests
+- [x] 4.1c GPU timestamps + named scopes + T2 tests
+- [x] 4.1d CPU frame timing (recording, submission, preparation, interval)
+- [x] 4.1e VMA memory statistics
+- [x] 4.1f Timestamp validation and availability
 - [ ] 4.2a Headless harness (latency + throughput modes)
 - [ ] 4.2b Warm-up and benchmark phases
 - [ ] 4.2c Noise-floor measurement

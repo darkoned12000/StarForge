@@ -89,6 +89,8 @@ M3+.
 | `starforge_gpu_tests`| `tests/`           | present | T2/T3 headless GPU tests (`gpu` label)   |
 | `starforge_math`     | `src/math/`        | present | Vector/matrix types (GLM behind aliases) |
 | `starforge_spatial`  | `src/spatial/`     | present | World positions, camera-relative math    |
+| `starforge_stats`    | `src/stats/`       | present | Percentile and summary statistics        |
+| `starforge_bench`    | `src/bench/`       | present | Benchmark result schema and JSON I/O     |
 | `starforge_bench`    | `apps/bench/`      | M4      | Benchmark harness, JSON output           |
 
 New subsystems are static libraries following the same pattern.

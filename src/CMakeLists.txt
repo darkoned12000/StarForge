@@ -9,8 +9,10 @@
 # `starforge` is the umbrella target applications link against.
 
 add_subdirectory(core)
+add_subdirectory(bench)
 add_subdirectory(math)
 add_subdirectory(spatial)
+add_subdirectory(stats)
 add_subdirectory(platform)
 add_subdirectory(vulkan)
 add_subdirectory(gpu_resources)
@@ -19,8 +21,10 @@ add_library(starforge INTERFACE)
 target_link_libraries(starforge
     INTERFACE
         starforge_core
+        starforge_bench
         starforge_math
         starforge_spatial
+        starforge_stats
         starforge_platform
         starforge_vulkan
         starforge_gpu

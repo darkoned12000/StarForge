@@ -78,4 +78,25 @@ std::uint32_t Allocator::allocationCount() const noexcept
     return stats.total.statistics.allocationCount;
 }
 
+Allocator::MemorySnapshot Allocator::captureMemorySnapshot() const noexcept
+{
+    MemorySnapshot snapshot{};
+    if (allocator_ == VK_NULL_HANDLE)
+    {
+        return snapshot;
+    }
+
+    VmaTotalStatistics stats{};
+    vmaCalculateStatistics(allocator_, &stats);
+
+    // blockBytes: total device memory allocated from Vulkan (allocatedBytes).
+    // allocationBytes: total bytes consumed by active suballocations (usedBytes).
+    snapshot.allocatedBytes = stats.total.statistics.blockBytes;
+    snapshot.usedBytes = stats.total.statistics.allocationBytes;
+    snapshot.allocationCount = stats.total.statistics.allocationCount;
+    snapshot.blockCount = stats.total.statistics.blockCount;
+
+    return snapshot;
+}
+
 } // namespace starforge::gpu_resources

@@ -27,13 +27,18 @@ add_executable(starforge_tests
     test_translation_invariance.cpp
     test_render_object.cpp
     test_invariance_proof.cpp
+    test_statistics.cpp
+    test_benchmark_result.cpp
+    test_cpu_timer.cpp
 )
 
 target_link_libraries(starforge_tests
     PRIVATE
         starforge_core
+        starforge_bench
         starforge_math
         starforge_spatial
+        starforge_stats
         starforge_vulkan
         doctest::doctest
 )
@@ -56,6 +61,8 @@ add_executable(starforge_gpu_tests
     test_cube_render.cpp
     test_depth_ordering.cpp
     test_naive_control.cpp
+    test_gpu_timestamps.cpp
+    test_vma_memory_snapshot.cpp
 )
 
 target_link_libraries(starforge_gpu_tests
@@ -77,6 +84,11 @@ target_include_directories(starforge_gpu_tests SYSTEM
     PRIVATE
         ${PROJECT_SOURCE_DIR}/third_party/stb
         ${glm_SOURCE_DIR}
+)
+
+target_include_directories(starforge_tests SYSTEM
+    PRIVATE
+        ${PROJECT_SOURCE_DIR}/third_party
 )
 
 if(TARGET starforge_shaders)

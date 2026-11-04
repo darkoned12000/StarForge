@@ -6,6 +6,8 @@ not a separate build or application entry point.
 - `core/` — logging, version, and foundational utilities.
 - `math/` — vector/matrix types (GLM behind STARFORGE aliases) and Vulkan clip-space projection helpers.
 - `spatial/` — `WorldPosition` (`int64` cell + `double` offset) and camera-relative transform math.
+- `stats/` — percentile and summary statistics for benchmarking.
+- `bench/` — benchmark result schema, JSON serialization, and metadata.
 - `platform/` — SDL3 window, surface, and event handling.
 - `vulkan/` — private Vulkan backend (instance, device, swapchain, frame renderer).
 - `gpu_resources/` — VMA allocator, buffers, staging upload, and compute pipeline helpers.

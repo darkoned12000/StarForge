@@ -6,6 +6,7 @@ add_library(starforge_vulkan STATIC
     vulkan_pipeline.cpp
     vulkan_renderer.cpp
     vulkan_swapchain.cpp
+    vulkan_timestamps.cpp
 )
 
 target_include_directories(starforge_vulkan PUBLIC ${PROJECT_SOURCE_DIR}/src)

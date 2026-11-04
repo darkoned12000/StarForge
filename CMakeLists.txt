@@ -89,6 +89,13 @@ starforge_add_shader(
 )
 
 starforge_add_shader(
+    SOURCE "${PROJECT_SOURCE_DIR}/shaders/compute/timestamp_test.slang"
+    STAGE  compute
+    ENTRY  computeMain
+    OUTPUT_NAME timestamp_test
+)
+
+starforge_add_shader(
     SOURCE "${PROJECT_SOURCE_DIR}/shaders/graphics/test_triangle.slang"
     STAGE  vertex
     ENTRY  vertexMain

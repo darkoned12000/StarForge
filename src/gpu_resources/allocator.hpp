@@ -32,6 +32,18 @@ public:
     [[nodiscard]] VmaAllocator handle() const noexcept { return allocator_; }
     [[nodiscard]] std::uint32_t allocationCount() const noexcept;
 
+    // Capture a VMA memory snapshot (allocated/used bytes, allocation count,
+    // block count, heap usage). Safe to call at any time; does not affect
+    // timed rendering measurements.
+    struct MemorySnapshot
+    {
+        std::uint64_t allocatedBytes = 0;
+        std::uint64_t usedBytes = 0;
+        std::uint64_t allocationCount = 0;
+        std::uint64_t blockCount = 0;
+    };
+    [[nodiscard]] MemorySnapshot captureMemorySnapshot() const noexcept;
+
 private:
     Allocator() = default;
     void destroy() noexcept;
