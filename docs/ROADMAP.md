@@ -334,7 +334,235 @@ established noise threshold.
   1M instances beat the M4 baseline (T4); runs correctly with
   `STARFORGE_DISABLE_FEATURES=drawIndirectCount,bindless` (fallbacks).
 
+### Missing architectural & implementation requirements (must integrate)
+
+Before sequencing the milestone, five critical items must be addressed:
+
+1. **Culling synchronization barriers (compute-to-indirect / compute-to-vertex):**
+   GPU culling writes directly to an indirect command buffer and an instance
+   index buffer. A pipeline barrier using `VkBufferMemoryBarrier2` is required
+   to transition from `VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT`
+   (`VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT`) to both
+   `VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT` (`VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT`)
+   and `VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT` (`VK_ACCESS_2_SHADER_STORAGE_READ_BIT`).
+
+2. **Atomic counter reset strategy:**
+   Before the culling compute shader can append visible instances or increment
+   draw counts, the indirect command's instanceCount must be reset to zero.
+   This requires a `vkCmdFillBuffer` (or clear compute pass) at the start of
+   each frame, followed by an execution barrier prior to the culling dispatch.
+
+3. **Double-buffering for indirect & compaction buffers:**
+   Because two frames execute in flight, GPU-generated buffers
+   (VkDrawIndirectCommand, culled instance index arrays) cannot be singletons.
+   Writing to them on frame N while frame N-1 is rendering creates GPU-GPU
+   data races. These buffers must be duplicated per frame slot.
+
+4. **Data separation for culling memory bandwidth (SoA bounding spheres):**
+   Streaming full 64-byte transform matrices into the culling compute shader
+   wastes GPU memory bandwidth. Storing bounding spheres in a separate compact
+   SoA buffer (vec4(centerX, centerY, centerZ, radius) = 16 bytes per instance)
+   reduces culling read bandwidth from 64 MB to 16 MB at 1M instances.
+
+5. **Concrete fallback behavior definitions:**
+   - `drawIndirectCount` disabled: use standard `vkCmdDrawIndirect` with a
+     single instanced draw call where the GPU atomically writes instanceCount,
+     while vertexCount remains static (36).
+   - `bindless` disabled: fall back to a single global storage buffer bound via
+     BDA or descriptor set 0, indexed by the compacted instance IDs.
+
+### Phase 1: Foundation & Deferred Hygiene (T1 / CPU Focus)
+
+Address test isolation, CMake configuration, and math contract regressions
+before writing GPU culling code.
+
+**Step 1.1: Test Suite Decoupling & CMake Fixes**
+- Split `vulkan_capabilities` and `vulkan_version` into a lightweight,
+  loader-independent target (`starforge_vulkan_core`).
+- Remove `starforge_vulkan` from `starforge_tests` so CPU-only unit tests
+  compile and run on machines without Vulkan runtime drivers.
+- Replace raw `${glm_SOURCE_DIR}` variable with target linkage via
+  `starforge_math`.
+- Update `gpu_main.cpp` to query Vulkan instance creation and physical
+  device suitability first; exit with code 77 immediately if hardware
+  requirements are unmet.
+
+**Step 1.2: Frustum & Math Normalization Fixes**
+- Refactor `test_benchmark_scene.cpp` to use `math::perspectiveVulkanReverseZ`
+  instead of raw `glm::perspective`.
+- Assert in `buildFrustum` tests that plane normal vectors are strictly
+  unit-length: |A² + B² + C² - 1.0| < 10⁻⁶.
+- Implement the randomized oracle test in `test_benchmark_scene.cpp`,
+  comparing `cullInstances` against an analytical plane-distance test over
+  randomized cameras, orientations, and scales.
+
+**Step 1.3: Winding Order & Viewport Correction**
+- Remove the negative Y-scale in projection matrices (`proj[1][1] *= -1.0f`)
+  in `math.hpp`.
+- Update renderer/pipeline setup to use Vulkan 1.1 negative-height viewports:
+  viewport.y = height, viewport.height = -height
+- Verify front-face winding remains counter-clockwise
+  (VK_FRONT_FACE_COUNTER_CLOCKWISE) across test renders.
+
+### Phase 2: Vulkan Resource Architecture & API Hardening
+
+Eliminate execution stalls, resource leaks, and synchronization flaws in
+`starforge_gpu`.
+
+**Step 2.1: Vulkan RAII & Image Abstraction**
+- Convert `ImageUsage` from an enum to a type-safe bitmask flag set
+  (`ImageUsageFlags`), supporting combined usages (e.g., ColorAttachment | Sampled).
+- Add layout tracking to `Image` (updating internal layout on transitions)
+  to eliminate invalid oldLayout assumptions in convenience methods.
+- Wrap `VkImageView` in an RAII `ImageView` handle managed by `Image` or
+  returned as an explicit owner type.
+
+**Step 2.2: Command Pooling, Fence Caching, and Queue Synchronization**
+- Refactor `Uploader` and `ComputePipeline` to use cached, resettable command
+  pools (`VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT`) tied to the device
+  or frame lifecycle.
+- Replace single-use fence creation/destruction with cached fences.
+- Add mutex synchronization or dedicated queue abstractions to `VulkanDevice`
+  to guarantee host synchronization on `vkQueueSubmit2` when called from
+  background threads.
+
+**Step 2.3: Compute & Timestamp Test Hardening**
+- Extend `test_compute_dispatch.cpp` to cover 2D and 3D dispatch dimensions,
+  multiple consecutive dispatches on the same pipeline, and boundary checks
+  for invalid buffer counts.
+- Add a GPU BDA readback compute test to `test_bda_simple.cpp`, verifying
+  that a compute shader can dereference and write to a 64-bit device address,
+  and assert 4-byte/8-byte address alignment.
+- Fix `test_gpu_timestamps.cpp` by implementing actual compute kernel
+  executions for N vs 2N scaling, testing frame index 1 recycling, and
+  exercising nested parent/child scopes.
+
+### Phase 3: GPU Culling Pipeline Implementation (M5 Core)
+
+Implement the GPU-driven culling and indirect generation path.
+
+**Step 3.1: Scene Data Layout & Double-Buffered Storage**
+- Define instance layout:
+  - `InstanceBounds`: contiguous buffer of vec4 (center XYZ, bounding radius W)
+    for culling.
+  - `InstanceData`: contiguous buffer of full transforms/material indices
+    accessed via BDA.
+- Allocate double-buffered GPU-driven output resources for each frame in flight:
+  - `VkBuffer` for `VkDrawIndirectCommand` (or `VkDrawIndexedIndirectCommand`).
+  - `VkBuffer` for the compacted visible instance ID array (`uint32_t[]`).
+
+**Step 3.2: Slang Culling Compute Shader (cull.slang)**
+- Input: 6 frustum planes (push constants), total instance count, instance
+  bounds buffer address.
+- Output: indirect command buffer, visible instance index list.
+- Logic:
+  - Compute thread index i = GlobalInvocationID.x.
+  - If i >= totalInstances, return.
+  - Test bounding sphere against the 6 frustum planes.
+  - If visible: call InterlockedAdd on indirectCommand.instanceCount; write i
+    to visibleIndices[atomicOffset].
+
+**Step 3.3: Render Pass Integration & Barriers**
+- Record frame commands in order:
+  1. `vkCmdFillBuffer` to zero out the indirect command's instanceCount.
+  2. `VkBufferMemoryBarrier2`: TRANSFER_WRITE → COMPUTE_SHADER_READ_WRITE.
+  3. `vkCmdBindPipeline` and `vkCmdDispatch` for culling compute.
+  4. `VkBufferMemoryBarrier2`: COMPUTE_SHADER_WRITE → INDIRECT_COMMAND_READ
+     (for draw buffer) and VERTEX_SHADER_READ (for instance index buffer).
+  5. `vkCmdDrawIndirect` (or `vkCmdDrawIndirectCount`).
+
+### Phase 4: Verification, Fallbacks, and Parity (T2 Proof)
+
+Validate GPU culling correctness against the CPU oracle and verify runtime
+feature degradation paths.
+
+**Step 4.1: T2 Parity Test (Compute vs. CPU Reference)**
+- Create `tests/test_gpu_cull_parity.cpp`.
+- Generate randomized test scenes (100 to 50k instances) with varying
+  visibility fractions (1%, 10%, 100%).
+- Run CPU `cullInstances` and GPU compute culling on the same scene.
+- Read back the indirect draw instanceCount and compacted index buffer:
+  - Assert visible count matches CPU count:
+    `CHECK(gpuVisibleCount == cpuVisibleCount)`.
+  - Sort index arrays and assert bit-for-bit equivalence with CPU visible sets.
+
+**Step 4.2: Feature Fallback Verification**
+- Test execution under `STARFORGE_DISABLE_FEATURES=drawIndirectCount`:
+  Verify pipeline falls back to `vkCmdDrawIndirect` with a single draw call
+  consuming the GPU-written instanceCount.
+- Test execution under `STARFORGE_DISABLE_FEATURES=bindless`:
+  Verify vertex stage reads instance data via a standard descriptor storage
+  buffer rather than variable/partially-bound descriptor arrays.
+- Add CI test runs verifying the test suite passes under both feature-disabled
+  states.
+
+### Phase 5: 1M Instance Scaling & Baseline Comparison (T4 Proof)
+
+Measure submission times, GPU culling overhead, and frame interval scaling
+against M4 baselines.
+
+**Step 5.1: Benchmark Harness Cleanup**
+- Update `test_benchmark_baseline.cpp` to use `REQUIRE(result.has_value())`
+  instead of `if (result)`.
+- Redirect baseline JSON dumps to
+  `${CMAKE_CURRENT_BINARY_DIR}/benchmarks/baselines/`.
+- Add a low-count validated baseline run with validation layers enabled to
+  catch command recording regressions.
+- Add assertions that the competent baseline draws fewer instances than the
+  naive baseline.
+
+**Step 5.2: 1M Instance Benchmark Execution**
+- Run the M5 GPU-driven pipeline on Profile A at 10k, 100k, and 1M instance
+  counts.
+- Record metrics using GpuTimer and CPU timers:
+  - Assert CPU submission time remains approximately flat (≤ 0.50 ms) as
+    instance count scales from 10k to 1M.
+  - Assert GPU culling duration scales linearly (≤ 0.50 ms at 100k).
+  - Assert total frame time beats the M4 competent CPU baseline at 100k and
+    1M instances.
+- Output comparison reports via the compare tool to verify performance
+  budgets from ADR-004 are respected.
+
+### M5 Execution Matrix
+
+| Phase | Primary Deliverables | Verification Target | Blocked By |
+|-------|---------------------|---------------------|------------|
+| Phase 1 | CMake decoupling, unit frustum normals, randomized CPU oracle, viewport Y-flip | `starforge_tests` runs without Vulkan runtime; passes oracle tests | None |
+| Phase 2 | ImageView RAII, ImageUsageFlags, pool/fence recycling, 2D/3D compute & BDA tests | `starforge_gpu_tests` clean under validation; zero allocation thrashing | Phase 1 |
+| Phase 3 | Slang culling shader, SoA bounding buffers, double-buffered indirect commands | Valid indirect execution on simple cube mesh | Phase 2 |
+| Phase 4 | GPU vs CPU culling parity suite, feature fallback implementations | T2 Proof: bitwise matching visible sets; green tests with features disabled | Phase 3 |
+| Phase 5 | 10k/100k/1M benchmark profiles, baseline comparison, validated runs | T4 Proof: 1M instances beat M4; CPU submission time flat | Phase 4 |
+
 ### Deferred from testing review (must address during M5)
+- Fragile headless GPU skip (return code 77) — move hardware check to gpu_main.cpp
+- CPU tests link starforge_vulkan — split vulkan_capabilities/version into separate library
+- ${glm_SOURCE_DIR} unresolved include — use target link (already transitive via starforge_math)
+- Cross-compilation POST_BUILD command — gated behind CMAKE_CROSSCOMPILING (done)
+- Randomized oracle testing for cullInstances — needed for M5 GPU culling validation
+- Projection inconsistency in frustum tests — use engine's perspective functions
+- Plane normalization check omitted — assert unit-length normals
+- Silent failure on benchmark execution — needs real pipeline for validated run
+- Hardcoded relative file paths in baseline test — use CMAKE_CURRENT_BINARY_DIR
+- Validation layers disabled in baseline test — add validated run
+- Baseline invariant verification — assert competent draws fewer than naive
+- N vs 2N scaling test unimplemented — needs actual compute dispatch
+- Multi-frame query pool cycling untested — frame index 1 never exercised
+- Nested/concurrent scopes untested — parent/child timestamp scopes
+- No GPU-side BDA readback/dereference — test needs compute shader dispatch
+- Missing BDA alignment checks — assert addr % alignof(uint32_t) == 0
+- Single-dimensional dispatch only — need 2D/3D dispatch tests
+- Consecutive dispatches untested — command pool stability
+- Error/validation boundary paths omitted — test std::unexpected returns
+
+### Deferred from Vulkan API review (must address during M5)
+- Synchronous execution stalls in Uploader::copyBuffer and ComputePipeline::dispatchAndWait — need command buffer pooling and fence caching
+- Resource allocation thrashing — per-operation fence/cmd buffer creation; tie to frame lifecycle
+- Image layout tracking — Image lacks internal state; transitionTo* helpers assume fixed previous layout
+- ImageUsage bit-flags — mutually exclusive enum; M5 needs combined usage (sampled + color attachment)
+- Unmanaged VkImageView lifetime — createView returns raw handle; needs RAII view type
+- Descriptor set inefficiencies — vkUpdateDescriptorSets every dispatch; move to setup phase
+- Queue thread-safety — single graphics queue; needs external synchronization for background loaders
+- Winding order via projection Y-flip — remove Y-flip from projection, use negative viewport height instead
 - Fragile headless GPU skip (return code 77) — move hardware check to gpu_main.cpp
 - CPU tests link starforge_vulkan — split vulkan_capabilities/version into separate library
 - ${glm_SOURCE_DIR} unresolved include — use target link (already transitive via starforge_math)
