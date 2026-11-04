@@ -5,6 +5,7 @@ add_library(starforge_math STATIC
 target_include_directories(starforge_math
     PUBLIC
         ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/third_party/glm
 )
 
 target_link_libraries(starforge_math

@@ -14,6 +14,13 @@ namespace starforge::spatial
 // addresses) placed at a WorldPosition with a local rotation and scale.
 // The CPU composes a camera-relative Model matrix in double precision and
 // casts to float32 once before uploading via push constants.
+//
+// NOTE: RenderObject uses a single WorldPosition for the object centre.
+// For celestial bodies (radius ~6.4e6 m), this loses sub-millimetre precision
+// when the camera is near the surface (the relative vector is ~6.4e6 m, whose
+// float32 ULP is ~0.5 m). For planetary bodies, use LargeObjectSetup from
+// camera_relative.hpp instead, which maintains double-precision patch offsets
+// and composes in double before casting to float32 once.
 struct RenderObject
 {
     WorldPosition position;

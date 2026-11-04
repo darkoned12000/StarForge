@@ -252,7 +252,6 @@ TEST_CASE("GPU timestamps: N vs 2N scaling test")
 
         // Run with N iterations.
         {
-            const Buffer* bindings[] = {&(*outputBuf)};
             // We can't set push constants through ComputePipeline, so we'll
             // use a manual dispatch with timestamps.
             VkCommandPoolCreateInfo poolInfo{};

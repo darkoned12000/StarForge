@@ -30,6 +30,7 @@ add_executable(starforge_tests
     test_statistics.cpp
     test_benchmark_result.cpp
     test_benchmark_compare.cpp
+    test_benchmark_scene.cpp
     test_cpu_timer.cpp
 )
 
@@ -64,11 +65,13 @@ add_executable(starforge_gpu_tests
     test_naive_control.cpp
     test_gpu_timestamps.cpp
     test_vma_memory_snapshot.cpp
+    test_benchmark_baseline.cpp
 )
 
 target_link_libraries(starforge_gpu_tests
     PRIVATE
         starforge_core
+        starforge_bench
         starforge_math
         starforge_spatial
         starforge_vulkan

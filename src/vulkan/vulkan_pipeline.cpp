@@ -62,6 +62,16 @@ GraphicsPipeline::create(const GraphicsPipelineConfig& config)
     viewportState.scissorCount = 1;
     viewportState.pScissors = &scissor;
 
+    // Dynamic viewport and scissor (required for vkCmdSetViewport/Scissor).
+    const VkDynamicState dynamicStates[] = {
+        VK_DYNAMIC_STATE_VIEWPORT,
+        VK_DYNAMIC_STATE_SCISSOR,
+    };
+    VkPipelineDynamicStateCreateInfo dynamicStateInfo{};
+    dynamicStateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dynamicStateInfo.dynamicStateCount = 2;
+    dynamicStateInfo.pDynamicStates = dynamicStates;
+
     VkPipelineRasterizationStateCreateInfo rasterizer{};
     rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     rasterizer.depthClampEnable = VK_FALSE;
@@ -97,10 +107,11 @@ GraphicsPipeline::create(const GraphicsPipelineConfig& config)
 
     // Dynamic rendering: specify color and depth formats at pipeline creation.
     VkFormat colorFormats[] = {config.colorFormat};
+    bool hasColor = (config.colorFormat != VK_FORMAT_UNDEFINED);
     VkPipelineRenderingCreateInfo renderingInfo{};
     renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-    renderingInfo.colorAttachmentCount = 1;
-    renderingInfo.pColorAttachmentFormats = colorFormats;
+    renderingInfo.colorAttachmentCount = hasColor ? 1 : 0;
+    renderingInfo.pColorAttachmentFormats = hasColor ? colorFormats : nullptr;
     renderingInfo.depthAttachmentFormat = config.depthFormat;
 
     VkGraphicsPipelineCreateInfo pipelineInfo{};
@@ -115,6 +126,7 @@ GraphicsPipeline::create(const GraphicsPipelineConfig& config)
     pipelineInfo.pMultisampleState = &multisampling;
     pipelineInfo.pDepthStencilState = &depthStencil;
     pipelineInfo.pColorBlendState = &colorBlending;
+    pipelineInfo.pDynamicState = &dynamicStateInfo;
     pipelineInfo.layout = config.pipelineLayout;
     pipelineInfo.renderPass = VK_NULL_HANDLE; // dynamic rendering
     pipelineInfo.subpass = 0;
@@ -195,8 +207,8 @@ createPushConstantPipelineLayout(VkDevice device, std::uint32_t pushConstantSize
     layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     layoutInfo.setLayoutCount = 0;
     layoutInfo.pSetLayouts = nullptr;
-    layoutInfo.pushConstantRangeCount = 1;
-    layoutInfo.pPushConstantRanges = &pushRange;
+    layoutInfo.pushConstantRangeCount = (pushConstantSize > 0) ? 1 : 0;
+    layoutInfo.pPushConstantRanges = (pushConstantSize > 0) ? &pushRange : nullptr;
 
     VkPipelineLayout layout = VK_NULL_HANDLE;
     if (const VkResult result = vkCreatePipelineLayout(device, &layoutInfo, nullptr, &layout);

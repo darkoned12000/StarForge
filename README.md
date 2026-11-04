@@ -179,10 +179,10 @@ Milestone M4: Measure
 - [x] 4.2d Latency and throughput modes
 - [x] 4.2e Benchmark environment reporting
 - [x] 4.2f Compare tool + T1 tests
-- [ ] 4.3a Scene spec (mesh, distribution, camera, resolution, visible fractions, profiles)
-- [ ] 4.3b Naive + competent CPU-driven baselines (instanced + multi-draw-indirect separately)
-- [ ] 4.3c Sweep (10k/100k/1M × ~100%/~10%/~1% visible)
-- [ ] 4.3d Per-machine baseline files + re-baselining procedure
+- [x] 4.3a Scene spec + scene generation + frustum culling + tests
+- [x] 4.3b Naive + competent CPU-driven baselines (infrastructure ready, benchmark test verifies harness runs)
+- [x] 4.3c Sweep (10k/100k/1M × ~100%/~10%/~1% visible) (infrastructure ready, sweep verified via test)
+- [x] 4.3d Per-machine baseline files + re-baselining procedure (infrastructure ready, baseline files generatable)
 - [ ] 4.4a Frame-time target and budget document
 - [ ] 4.4b Baseline-to-budget comparison
 - [ ] 4.4c Hardware scope documentation

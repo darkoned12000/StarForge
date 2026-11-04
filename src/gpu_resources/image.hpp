@@ -3,6 +3,11 @@
 #include "gpu_resources/allocator.hpp"
 
 #include <vulkan/vulkan.h>
+// Suppress Clang nullability warnings from VMA's header.
+#define VMA_NULLABLE
+#define VMA_NOT_NULL
+#define VMA_NULLABLE_NON_DISPATCHABLE VMA_NULLABLE
+#define VMA_NOT_NULL_NON_DISPATCHABLE VMA_NOT_NULL
 #include <vk_mem_alloc.h>
 
 #include <cstdint>
@@ -78,6 +83,13 @@ public:
     // Convenience: transition to a layout using sensible defaults.
     static void transitionToColorAttachment(VkCommandBuffer cmd, VkImage image);
     static void transitionToDepthAttachment(VkCommandBuffer cmd, VkImage image, VkFormat format = VK_FORMAT_D32_SFLOAT);
+
+    // Non-static convenience: uses this image's format automatically.
+    void transitionToDepthAttachment(VkCommandBuffer cmd) const
+    {
+        transitionToDepthAttachment(cmd, image_, format_);
+    }
+
     static void transitionToTransferSrc(VkCommandBuffer cmd, VkImage image);
     static void transitionToTransferDst(VkCommandBuffer cmd, VkImage image);
     static void transitionToShaderReadOnly(VkCommandBuffer cmd, VkImage image);

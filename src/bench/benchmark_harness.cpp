@@ -17,11 +17,6 @@
 namespace starforge::bench
 {
 
-namespace
-{
-constexpr const char* kTag = "BENCH";
-}
-
 std::expected<void, std::string> BenchmarkHarness::checkPrerequisites(const HarnessConfig& config)
 {
     if (config.requireRelease)

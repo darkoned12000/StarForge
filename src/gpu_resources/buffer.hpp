@@ -3,6 +3,11 @@
 #include "gpu_resources/allocator.hpp"
 
 #include <vulkan/vulkan.h>
+// Suppress Clang nullability warnings from VMA's header.
+#define VMA_NULLABLE
+#define VMA_NOT_NULL
+#define VMA_NULLABLE_NON_DISPATCHABLE VMA_NULLABLE
+#define VMA_NOT_NULL_NON_DISPATCHABLE VMA_NOT_NULL
 #include <vk_mem_alloc.h>
 
 #include <cstddef>

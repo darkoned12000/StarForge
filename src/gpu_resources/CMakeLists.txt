@@ -28,3 +28,11 @@ target_link_libraries(starforge_gpu
 )
 
 starforge_set_warnings(starforge_gpu)
+
+# Suppress Clang nullability warnings from VMA's header (third-party code).
+# These must come after starforge_set_warnings to override -Wall/-Wextra.
+target_compile_options(starforge_gpu PRIVATE
+    -Wno-nullability-extension
+    -Wno-nullability-completeness
+    -Wno-unused-private-field
+)

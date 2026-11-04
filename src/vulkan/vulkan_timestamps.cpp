@@ -29,10 +29,6 @@ std::expected<GpuTimer, std::string> GpuTimer::create(const CreateInfo& info)
     timer.maxScopesPerFrame_ = std::max(1u, info.maxScopesPerFrame);
 
     // Query timestamp support.
-    VkQueueFamilyProperties2 queueProps{};
-    queueProps.sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_PROPERTIES_2;
-    VkQueueFamilyProperties& props = queueProps.queueFamilyProperties;
-
     std::uint32_t queueFamilyCount = 0;
     vkGetPhysicalDeviceQueueFamilyProperties2(info.physicalDevice, &queueFamilyCount, nullptr);
     std::vector<VkQueueFamilyProperties2> queueFamilies(queueFamilyCount);
