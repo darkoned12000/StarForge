@@ -209,6 +209,10 @@ Before implementation, resolve these design decisions and record them as ADRs:
 
 Exit: vision goal "accurate positioning across astronomical distances" proven end to end.
 
+Note: M3 delivers single-draw mesh rendering. Basic instanced drawing (vkCmdDrawIndexed with instanceCount > 1) is a small
+prerequisite for M4.3b and can be added as a minor M3 extension or as an early M4 task. Multi-draw indirect is introduced in
+M4.3b as part of the competent CPU-driven baseline.
+
 ## M4 – Measure
 
 ### 4.0 Decision notes (Review)
@@ -216,30 +220,63 @@ Exit: vision goal "accurate positioning across astronomical distances" proven en
 Before implementation, resolve these design decisions and record them as ADRs:
 - **Tracy:** Adopt or not. Decide using project profiling needs; do not add
   speculatively. Arch packages Tracy. Wrap in a project macro so it can be
-  compiled out entirely. Tracy's GPU zones use `VK_EXT_calibrated_timestamps`;
-  verify RADV supports it on the target driver.
-- **Benchmark methodology:** Offscreen (headless, no vsync/compositor interference),
-  GPU clocks (document pinning via amdgpu sysfs or record that clocks were
-  unpinned), CPU governor recorded, validation off, Release build only.
-- **Metrics:** GPU time (median, p95, p99, min, max, stddev), CPU submission
-  time (separate), VMA memory statistics. Report distributions, not just means.
-- **JSON schema:** versioned, with commit hash + dirty flag, GPU/driver/kernel/CPU
-  model, compiler/build flags, resolution, present mode, scene parameters + seed,
-  `STARFORGE_DISABLE_FEATURES` setting.
+  compiled out entirely. Tracy is a profiling tool; the benchmark infrastructure
+  is a measurement system — they complement each other, not depend on each
+  other. Benchmark with Tracy disabled unless specifically profiling.
+  Tracy's GPU zones use `VK_EXT_calibrated_timestamps`; verify RADV supports
+  it on the target driver. Native Vulkan timestamp collection (GPU duration
+  queries) is independent of Tracy and does not require calibrated timestamps.
+- **Benchmark methodology:** Offscreen (headless, no vsync/compositor interference).
+  Two modes: latency (individual workload completion) and throughput (sustained
+  work with multiple frames in flight). GPU clocks: record temperature, clock,
+  power state, CPU frequency/governor, and whether other GPU-intensive processes
+  are running. Support two modes: normal (record only) and controlled (optionally
+  pin clocks, documented). Validation off, Release build only. No console output
+  during measured section (collect in memory, write JSON after run).
+- **Tracy GPU zones:** Use `VK_EXT_debug_utils` labels for RenderDoc/Radeon
+  profiler identification (distinct from Tracy's GPU zones).
+- **Metrics:** Three independently measured quantities:
+  - CPU execution time (command recording, submission, frame preparation — separate)
+  - GPU execution time (timestamp-based, per-pass named scopes)
+  - Frame interval / throughput (end-to-end frame production rate)
+  These are not interchangeable; CPU and GPU work can overlap.
+  Also record: draw calls, instances submitted, instances visible, vertices/
+  indices processed, command buffers submitted, pipeline changes, VMA memory
+  allocated/used, allocation count, block count, heap usage.
+- **JSON schema:** versioned, with commit hash + dirty flag + diff hash for
+  experimental builds, GPU/driver/kernel/CPU model, compiler/build flags,
+  resolution, present mode (null for headless), scene parameters + seed,
+  `STARFORGE_DISABLE_FEATURES` setting. Raw per-frame samples retained alongside
+  summary statistics. Explicit null values for unavailable measurements.
 - **Noise policy:** Measure noise floor across several separate process launches
-  (not within one run); set the acceptance threshold from the data, not a guess.
-- **Budgets:** Set top-down from a frame-time target (e.g., 144 fps = 6.9 ms on
-  the 7900 XTX), split across subsystems. The baseline shows the gap to close,
-  not the target. State explicitly that single-GPU numbers don't transfer.
+  (not within one run). Each process: warm-up frames + fixed measured workload.
+  Compare variation across runs. Set acceptance threshold from measured data,
+  not a guess. Future: confidence intervals or bootstrap resampling.
+- **Budgets:** Set top-down from a frame-time target (e.g., 144 fps = 6.94 ms
+  on the 7900 XTX), split across subsystems (CPU preparation, CPU submission,
+  GPU rendering, sync/stall, headroom). The baseline shows the gap to close, not
+  the target. State explicitly: single-GPU numbers don't transfer to other
+  hardware. 144 fps is a development-machine target, not a universal requirement.
+- **Workload profiles:** At least two: submission-stress (simple geometry, many
+  objects, low screen coverage, high draw-call pressure) and geometry/raster-stress
+  (complex meshes, higher screen coverage, more triangles, more fragment work).
+- **Thermal/environmental state:** Record GPU temperature, clock, power state or
+  consumption where available. Record CPU frequency/governor. Note whether other
+  GPU-intensive processes are running.
+- **Memory reporting:** VMA memory snapshots (allocated/used bytes, allocation
+  count, block count, heap usage/budget) captured before and after benchmark,
+  not during timed rendering.
 
 ### 4.1 Timestamp and statistics infrastructure
 
 | Step | Deliverable | Verified by | Done when |
 |------|-------------|-------------|-----------|
-| 4.1a | Statistics library: percentile calculation (median, p95, p99, min, max, stddev) | T1 | Pure CPU unit tests pass; percentiles verified against known distributions |
-| 4.1b | JSON writer with versioned schema (commit, GPU, driver, build flags, scene params, metrics) | T1 | Serialization round-trips; schema validated |
-| 4.1c | GPU timestamps: per-frame query pools (one per frame in flight), `timestampValidBits`/`timestampPeriod` handling, `vkCmdWriteTimestamp2` with `synchronization2`, named scopes emitting `VK_EXT_debug_utils` labels | T2 | N vs 2N compute kernel shows ~2× timestamp ratio; timestamps non-zero and monotonic |
-| 4.1d | CPU frame timing (wall-clock per frame, no sleeps) and per-frame logging | T1/T2 | CPU time recorded separately from GPU time |
+| 4.1a | Statistics library: percentile calculation (median, p95, p99, min, max, stddev). Define percentile algorithm (interpolated). Handle empty, single, two, identical, outlier, large, and non-finite samples | T1 | Pure CPU unit tests pass; percentiles verified against known distributions |
+| 4.1b | JSON writer with versioned schema (commit, GPU, driver, build flags, scene params, metrics, raw samples). Schema file committed. Explicit units and null values | T1 | Serialization round-trips; schema validated |
+| 4.1c | GPU timestamps: per-frame query pools (one per frame in flight), `timestampValidBits`/`timestampPeriod` handling, wraparound support, `vkCmdWriteTimestamp2` with `synchronization2`, named scopes emitting `VK_EXT_debug_utils` labels. Async result retrieval (no per-frame GPU stall) | T2 | Timestamps available on selected queue; conversion correct; wraparound handled; repeated workloads produce stable non-zero durations; larger workloads produce correspondingly larger execution times; unsupported queues reported clearly |
+| 4.1d | CPU frame timing: wall-clock per frame, command recording duration, submission duration, frame preparation duration, frame interval. No sleeps during measured section | T1/T2 | CPU time recorded separately from GPU time |
+| 4.1e | VMA memory statistics: allocated/used bytes, allocation count, block count, heap usage/budget. Captured before/after benchmark, not during timed rendering | T1/T2 | Memory snapshots reported without affecting timed measurements |
+| 4.1f | Timestamp validation and availability: zero timestamp bits handled, wraparound supported, timestamp conversion verified, unsupported queues reported clearly | T2 | All timestamp edge cases covered by tests |
 
 Dependencies: 4.1a and 4.1b can start immediately (pure CPU). 4.1c needs a
 compute workload (available from M1.6).
@@ -248,29 +285,46 @@ compute workload (available from M1.6).
 
 | Step | Deliverable | Verified by | Done when |
 |------|-------------|-------------|-----------|
-| 4.2a | Headless harness: fixed frame count, seeded deterministic scene, system metadata collection, refuses non-Release/validation builds | T4 | Harness runs N frames offscreen with no vsync/compositor interference |
-| 4.2b | Noise-floor measurement across separate process launches; set acceptance threshold from data | T4 | Threshold documented and derived from measured noise |
-| 4.2c | Compare tool: takes two JSON baselines, reports per-metric ratios, flags differences exceeding noise threshold | T1 | Tool correctly identifies regressions above noise floor |
+| 4.2a | Headless harness: fixed frame count, seeded deterministic scene, system metadata collection, refuses non-Release/validation builds. No SDL window or swapchain | T4 | Harness runs N frames offscreen with no vsync/compositor interference |
+| 4.2b | Warm-up and benchmark phases: warm-up samples excluded; measured sample count fixed and recorded | T4 | Warm-up excluded; measured count recorded |
+| 4.2c | Noise-floor measurement across separate process launches; set acceptance threshold from data | T4 | Threshold documented and derived from measured noise |
+| 4.2d | Latency and throughput modes: latency measures individual workload completion; throughput measures sustained work with multiple frames in flight. Both produce independent results and metadata | T4 | Both modes produce independent results |
+| 4.2e | Benchmark environment reporting: GPU/CPU environmental data recorded where available; unavailable values explicitly reported as null | T4 | Environmental data recorded or explicitly null |
+| 4.2f | Compare tool: takes two JSON baselines, reports per-metric ratios, flags differences exceeding noise threshold. Refuses incompatible workloads; warns on GPU/driver/compiler differences; identifies missing metrics; returns non-zero exit code on regression | T1 | Tool correctly identifies regressions above noise floor; incompatible configs rejected |
 
-Dependencies: needs 4.1a–4.1d.
+Dependencies: needs 4.1a–4.1f.
 
 ### 4.3 CPU-driven baseline (T4)
 
 | Step | Deliverable | Verified by | Done when |
 |------|-------------|-------------|-----------|
-| 4.3a | Scene spec: mesh, distribution, camera path, resolution, visible fractions (documented, reviewed) | Review | Spec agreed and committed |
-| 4.3b | Naive CPU-driven baseline (no culling, 100k separate draws) and competent CPU-driven baseline (CPU frustum culling + instanced/multi-draw-indirect) | T4 | Both baselines recorded; competent baseline is the comparison target for M5 |
-| 4.3c | Sweep: 10k, 100k, 1M instances × ~100%, ~10%, ~1% visible fraction | T4 | Baseline curves recorded (including 1M even if CPU path is slow) |
-| 4.3d | Per-machine baseline files (`benchmarks/baselines/<gpu>-<driver>.json`) with full metadata; re-baselining procedure documented | T4 | Baseline files committed; compare tool works across files |
+| 4.3a | Scene spec: geometry complexity, mesh count, instance count, material count, triangle count, object size distribution, spatial distribution, camera path, visible fraction, screen coverage, overdraw, resolution, seed. Submission-stress and geometry/raster-stress profiles. (Documented, reviewed) | Review | Spec agreed and committed |
+| 4.3b | Naive CPU-driven baseline (no culling, one draw per object) and competent CPU-driven baseline (CPU frustum culling + instanced draws + multi-draw-indirect, recorded separately). Identical geometry, shaders, materials, camera, visible objects, resolution, depth config | T4 | Both baselines recorded; competent baseline is the comparison target for M5 |
+| 4.3c | Sweep: 10k, 100k, 1M instances × ~100%, ~10%, ~1% visible fraction. Naive: 10k and 100k separate draws. Competent: 10k, 100k, 1M. Optional 1M naive stress test (clearly labelled) | T4 | Baseline curves recorded (including 1M even if CPU path is slow) |
+| 4.3d | Per-machine baseline files (`benchmarks/baselines/<gpu>-<driver>/`) with full metadata; directory organised by GPU family and driver, JSON contains full hardware identity. Re-baselining procedure documented | T4 | Baseline files committed; compare tool works across files |
 
-Dependencies: needs M3 (instanced draws, depth, camera). 4.3a (scene spec) can
-start during M3.
+Dependencies: needs M3 (instanced draws, depth, camera). Note: M3 currently
+delivers triangle/cube rendering but not instanced draws. Add basic instanced
+drawing to M3 or as a small M4 prerequisite (4.3a can start during M3).
+4.3a (scene spec) can start during M3.
+
+### 4.4 Performance budgets (Review + T4)
+
+| Step | Deliverable | Verified by | Done when |
+|------|-------------|-------------|-----------|
+| 4.4a | Frame-time target and budget document: target frame interval, CPU preparation budget, CPU submission budget, GPU rendering budget, sync/stall budget, headroom. Committed as a document | Review | Budget document committed with explicit subsystem allocations |
+| 4.4b | Baseline-to-budget comparison: measured baseline compared against target budgets, gaps documented | T4 | Baseline vs. budget comparison committed |
+| 4.4c | Hardware scope: RX 7900 XTX development target clearly distinguished from future hardware-independent goals | Review | Hardware scope documented |
 
 ### Exit
 
-Budgets derived top-down from the frame-time target, with the baseline showing
-the gap to close. CPU and GPU time recorded separately. VMA memory statistics
-included.
+CPU, GPU, latency, and throughput measurements are independently available.
+Benchmark runs are reproducible and contain complete workload/system metadata.
+Measurement noise has been characterized across independent process launches.
+Naive and competent CPU-driven baselines are committed. Performance budgets
+are documented. VMA memory usage is reported separately from timed rendering
+measurements. The baseline comparison tool detects regressions beyond the
+established noise threshold.
 
 ## M5 – GPU-Driven Rendering (goal and proof)
 

@@ -165,18 +165,26 @@ Milestone M3: Geometry and Precision on the GPU
 
 Milestone M4: Measure
 
-- [ ] 4.0 Decision notes: Tracy, benchmark methodology
+- [ ] 4.0 Decision notes: Tracy, benchmark methodology, timing modes, noise policy, metrics, JSON schema, workload profiles, budgets
 - [ ] 4.1a Statistics library (percentiles) + T1 tests
 - [ ] 4.1b JSON writer with versioned schema + T1 tests
 - [ ] 4.1c GPU timestamps + named scopes + T2 tests
-- [ ] 4.1d CPU frame timing
-- [ ] 4.2a Headless harness
-- [ ] 4.2b Noise-floor measurement
-- [ ] 4.2c Compare tool + T1 tests
-- [ ] 4.3a Scene spec
-- [ ] 4.3b Naive + competent CPU-driven baselines
-- [ ] 4.3c Sweep (10k/100k/1M × visibility)
-- [ ] 4.3d Per-machine baseline files
+- [ ] 4.1d CPU frame timing (recording, submission, preparation, interval)
+- [ ] 4.1e VMA memory statistics
+- [ ] 4.1f Timestamp validation and availability
+- [ ] 4.2a Headless harness (latency + throughput modes)
+- [ ] 4.2b Warm-up and benchmark phases
+- [ ] 4.2c Noise-floor measurement
+- [ ] 4.2d Latency and throughput modes
+- [ ] 4.2e Benchmark environment reporting
+- [ ] 4.2f Compare tool + T1 tests
+- [ ] 4.3a Scene spec (mesh, distribution, camera, resolution, visible fractions, profiles)
+- [ ] 4.3b Naive + competent CPU-driven baselines (instanced + multi-draw-indirect separately)
+- [ ] 4.3c Sweep (10k/100k/1M × ~100%/~10%/~1% visible)
+- [ ] 4.3d Per-machine baseline files + re-baselining procedure
+- [ ] 4.4a Frame-time target and budget document
+- [ ] 4.4b Baseline-to-budget comparison
+- [ ] 4.4c Hardware scope documentation
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for details.
 

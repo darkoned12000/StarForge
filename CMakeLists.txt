@@ -64,14 +64,10 @@ find_package(SDL3 CONFIG REQUIRED)
 # GLM (math library) — FetchContent fallback if not installed system-wide.
 find_package(glm CONFIG QUIET)
 if(NOT glm_FOUND)
-    message(STATUS "glm not installed; fetching v1.0.1")
-    include(FetchContent)
-    FetchContent_Declare(glm
-        GIT_REPOSITORY https://github.com/g-truc/glm.git
-        GIT_TAG        1.0.1
-        GIT_SHALLOW    TRUE
-    )
-    FetchContent_MakeAvailable(glm)
+    message(STATUS "glm not found system-wide; using vendored copy in third_party/glm/")
+    add_library(glm INTERFACE)
+    target_include_directories(glm SYSTEM INTERFACE "${PROJECT_SOURCE_DIR}/third_party/glm")
+    add_library(glm::glm ALIAS glm)
 endif()
 
 # --------------------------------------------------
