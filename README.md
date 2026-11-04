@@ -173,12 +173,12 @@ Milestone M4: Measure
 - [x] 4.1d CPU frame timing (recording, submission, preparation, interval)
 - [x] 4.1e VMA memory statistics
 - [x] 4.1f Timestamp validation and availability
-- [ ] 4.2a Headless harness (latency + throughput modes)
-- [ ] 4.2b Warm-up and benchmark phases
-- [ ] 4.2c Noise-floor measurement
-- [ ] 4.2d Latency and throughput modes
-- [ ] 4.2e Benchmark environment reporting
-- [ ] 4.2f Compare tool + T1 tests
+- [x] 4.2a Headless harness (latency + throughput modes)
+- [x] 4.2b Warm-up and benchmark phases
+- [x] 4.2c Noise-floor measurement
+- [x] 4.2d Latency and throughput modes
+- [x] 4.2e Benchmark environment reporting
+- [x] 4.2f Compare tool + T1 tests
 - [ ] 4.3a Scene spec (mesh, distribution, camera, resolution, visible fractions, profiles)
 - [ ] 4.3b Naive + competent CPU-driven baselines (instanced + multi-draw-indirect separately)
 - [ ] 4.3c Sweep (10k/100k/1M × ~100%/~10%/~1% visible)

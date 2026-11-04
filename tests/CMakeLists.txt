@@ -29,6 +29,7 @@ add_executable(starforge_tests
     test_invariance_proof.cpp
     test_statistics.cpp
     test_benchmark_result.cpp
+    test_benchmark_compare.cpp
     test_cpu_timer.cpp
 )
 

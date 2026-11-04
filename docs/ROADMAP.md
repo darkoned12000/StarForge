@@ -285,12 +285,12 @@ compute workload (available from M1.6).
 
 | Step | Deliverable | Verified by | Done when |
 |------|-------------|-------------|-----------|
-| 4.2a | Headless harness: fixed frame count, seeded deterministic scene, system metadata collection, refuses non-Release/validation builds. No SDL window or swapchain | T4 | Harness runs N frames offscreen with no vsync/compositor interference |
-| 4.2b | Warm-up and benchmark phases: warm-up samples excluded; measured sample count fixed and recorded | T4 | Warm-up excluded; measured count recorded |
-| 4.2c | Noise-floor measurement across separate process launches; set acceptance threshold from data | T4 | Threshold documented and derived from measured noise |
-| 4.2d | Latency and throughput modes: latency measures individual workload completion; throughput measures sustained work with multiple frames in flight. Both produce independent results and metadata | T4 | Both modes produce independent results |
-| 4.2e | Benchmark environment reporting: GPU/CPU environmental data recorded where available; unavailable values explicitly reported as null | T4 | Environmental data recorded or explicitly null |
-| 4.2f | Compare tool: takes two JSON baselines, reports per-metric ratios, flags differences exceeding noise threshold. Refuses incompatible workloads; warns on GPU/driver/compiler differences; identifies missing metrics; returns non-zero exit code on regression | T1 | Tool correctly identifies regressions above noise floor; incompatible configs rejected |
+| 4.2a ✅ | Headless harness: fixed frame count, seeded deterministic scene, system metadata collection, refuses non-Release/validation builds. No SDL window or swapchain | T4 | Harness runs N frames offscreen with no vsync/compositor interference; system metadata collected |
+| 4.2b ✅ | Warm-up and benchmark phases: warm-up samples excluded; measured sample count fixed and recorded | T4 | Warm-up excluded; measured count recorded; CPU timer phases tracked |
+| 4.2c ✅ | Noise-floor measurement across separate process launches; set acceptance threshold from data | T4 | Threshold documented and derived from measured noise |
+| 4.2d ✅ | Latency and throughput modes: latency measures individual workload completion; throughput measures sustained work with multiple frames in flight. Both produce independent results and metadata | T4 | Both modes produce independent results and metadata |
+| 4.2e ✅ | Benchmark environment reporting: GPU/CPU environmental data recorded where available; unavailable values explicitly reported as null | T4 | Environmental data recorded or explicitly null |
+| 4.2f ✅ | Compare tool: takes two JSON baselines, reports per-metric ratios, flags differences exceeding noise threshold. Refuses incompatible workloads; warns on GPU/driver/compiler differences; identifies missing metrics; returns non-zero exit code on regression | T1 | Tool correctly identifies regressions above noise floor; incompatible configs rejected; 12 T1 tests pass |
 
 Dependencies: needs 4.1a–4.1f.
 

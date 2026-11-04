@@ -43,6 +43,52 @@ std::vector<double> filterFiniteFloat(std::span<const float> samples)
     return result;
 }
 
+// Compute statistics from already-sorted finite data.
+Statistics computeFromSorted(std::span<const double> sortedData)
+{
+    Statistics stats;
+    stats.count = 0;
+    stats.valid = false;
+
+    if (sortedData.empty())
+    {
+        return stats;
+    }
+
+    stats.count = sortedData.size();
+    stats.valid = true;
+    stats.min = sortedData.front();
+    stats.max = sortedData.back();
+
+    double sum = 0.0;
+    for (double v : sortedData)
+    {
+        sum += v;
+    }
+    stats.mean = sum / static_cast<double>(sortedData.size());
+
+    if (sortedData.size() >= 2)
+    {
+        double sqSum = 0.0;
+        for (double v : sortedData)
+        {
+            double diff = v - stats.mean;
+            sqSum += diff * diff;
+        }
+        stats.stddev = std::sqrt(sqSum / static_cast<double>(sortedData.size() - 1));
+    }
+    else
+    {
+        stats.stddev = 0.0;
+    }
+
+    stats.median = percentile(sortedData, 50.0);
+    stats.p95 = percentile(sortedData, 95.0);
+    stats.p99 = percentile(sortedData, 99.0);
+
+    return stats;
+}
+
 } // namespace
 
 double percentile(std::span<const double> sortedData, double p)
@@ -82,101 +128,16 @@ double percentile(std::span<const double> sortedData, double p)
 
 Statistics compute(std::span<const double> samples)
 {
-    Statistics stats;
-    stats.count = 0;
-    stats.valid = false;
-
     auto finite = filterFinite(samples);
-    if (finite.empty())
-    {
-        return stats;
-    }
-
     std::sort(finite.begin(), finite.end());
-
-    stats.count = finite.size();
-    stats.valid = true;
-    stats.min = finite.front();
-    stats.max = finite.back();
-
-    // Mean.
-    double sum = 0.0;
-    for (double v : finite)
-    {
-        sum += v;
-    }
-    stats.mean = sum / static_cast<double>(finite.size());
-
-    // Sample standard deviation (n-1 denominator).
-    if (finite.size() >= 2)
-    {
-        double sqSum = 0.0;
-        for (double v : finite)
-        {
-            double diff = v - stats.mean;
-            sqSum += diff * diff;
-        }
-        stats.stddev = std::sqrt(sqSum / static_cast<double>(finite.size() - 1));
-    }
-    else
-    {
-        stats.stddev = 0.0;
-    }
-
-    // Percentiles.
-    stats.median = percentile(finite, 50.0);
-    stats.p95 = percentile(finite, 95.0);
-    stats.p99 = percentile(finite, 99.0);
-
-    return stats;
+    return computeFromSorted(finite);
 }
 
 Statistics compute(std::span<const float> samples)
 {
     auto finite = filterFiniteFloat(samples);
     std::sort(finite.begin(), finite.end());
-
-    Statistics stats;
-    stats.count = 0;
-    stats.valid = false;
-
-    if (finite.empty())
-    {
-        return stats;
-    }
-
-    stats.count = finite.size();
-    stats.valid = true;
-    stats.min = finite.front();
-    stats.max = finite.back();
-
-    double sum = 0.0;
-    for (double v : finite)
-    {
-        sum += v;
-    }
-    stats.mean = sum / static_cast<double>(finite.size());
-
-    if (finite.size() >= 2)
-    {
-        double sqSum = 0.0;
-        for (double v : finite)
-        {
-            double diff = v - stats.mean;
-            sqSum += diff * diff;
-        }
-        stats.stddev = std::sqrt(sqSum / static_cast<double>(finite.size() - 1));
-    }
-    else
-    {
-        stats.stddev = 0.0;
-    }
-
-    stats.median = percentile(finite, 50.0);
-    stats.p95 = percentile(finite, 95.0);
-    stats.p99 = percentile(finite, 99.0);
-
-    return stats;
+    return computeFromSorted(finite);
 }
 
 } // namespace starforge::stats

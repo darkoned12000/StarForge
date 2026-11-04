@@ -291,20 +291,12 @@ bool GpuTimer::collectResults(std::uint32_t frameIndex)
         results.data(), 2 * sizeof(std::uint64_t),
         VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
 
-    if (availResult == VK_NOT_READY)
+    if (availResult != VK_SUCCESS)
     {
         return false;
     }
 
-    // Results are already in the even-indexed slots (stride = 16 bytes).
-    // Extract them into a compact array.
-    std::vector<std::uint64_t> compact(queryCount);
-    for (std::uint32_t i = 0; i < queryCount; ++i)
-    {
-        compact[i] = results[i * 2];
-    }
-    results = std::move(compact);
-
+    // Results are in the even-indexed slots (stride = 16 bytes: 8 for result + 8 for availability).
     // Handle timestamp wraparound using modular arithmetic. Mask both timestamps
     // to validBits, then compute (end - begin) & mask, which naturally handles
     // wraparound for both 64-bit and sub-64-bit clocks.
@@ -314,8 +306,8 @@ bool GpuTimer::collectResults(std::uint32_t frameIndex)
 
     for (auto& scope : frameScopes_[frameIndex])
     {
-        const std::uint64_t beginTs = results[scope.beginQuery] & mask;
-        const std::uint64_t endTs = results[scope.endQuery] & mask;
+        const std::uint64_t beginTs = results[scope.beginQuery * 2] & mask;
+        const std::uint64_t endTs = results[scope.endQuery * 2] & mask;
         const std::uint64_t delta = (endTs - beginTs) & mask;
 
         scope.durationNs = static_cast<double>(delta) * timestampPeriodNs_;
