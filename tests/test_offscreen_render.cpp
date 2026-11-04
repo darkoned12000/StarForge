@@ -182,7 +182,7 @@ TEST_CASE("Offscreen render target: color + depth clear and readback")
             // Read back and verify clear color.
             auto mapped = readback->map();
             REQUIRE(mapped.has_value());
-            readback->invalidate(0, byteSize);
+            (void)readback->invalidate(0, byteSize);
 
             const auto* bytes = static_cast<const std::uint8_t*>(*mapped);
             // RGBA8 UNORM: 0.1, 0.2, 0.3, 1.0 → 25, 51, 76, 255 (approx)

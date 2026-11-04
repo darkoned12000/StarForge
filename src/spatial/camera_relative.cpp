@@ -29,13 +29,13 @@ math::Mat4f composeCameraRelativeModelMatrix(
 {
     const math::Vec3d relTranslation = toCameraRelative(objectPos, cameraPos);
 
-    math::Mat4d model(1.0);
-    model[0] = math::Vec4d(localRotationScale[0], 0.0);
-    model[1] = math::Vec4d(localRotationScale[1], 0.0);
-    model[2] = math::Vec4d(localRotationScale[2], 0.0);
-    model[3] = math::Vec4d(relTranslation, 1.0);
+    math::Mat4f model(1.0f);
+    model[0] = math::Vec4f(math::Vec3f(localRotationScale[0]), 0.0f);
+    model[1] = math::Vec4f(math::Vec3f(localRotationScale[1]), 0.0f);
+    model[2] = math::Vec4f(math::Vec3f(localRotationScale[2]), 0.0f);
+    model[3] = math::Vec4f(toFloat32(relTranslation), 1.0f);
 
-    return toFloat32(model);
+    return model;
 }
 
 math::Mat4f composeCameraRelativeModelView(
@@ -46,19 +46,18 @@ math::Mat4f composeCameraRelativeModelView(
 {
     const math::Vec3d relTranslation = toCameraRelative(objectPos, cameraPos);
 
-    math::Mat4d model(1.0);
-    model[0] = math::Vec4d(localRotationScale[0], 0.0);
-    model[1] = math::Vec4d(localRotationScale[1], 0.0);
-    model[2] = math::Vec4d(localRotationScale[2], 0.0);
-    model[3] = math::Vec4d(relTranslation, 1.0);
+    // Affine composition: R_mv = R_view * R_model, t_mv = R_view * t_rel.
+    // Avoids full 4x4 matrix multiply (64 mul + 48 add -> 36 mul + 27 add).
+    math::Mat3d rotationModelView = viewRotation * localRotationScale;
+    math::Vec3d translationModelView = viewRotation * relTranslation;
 
-    math::Mat4d view(1.0);
-    view[0] = math::Vec4d(viewRotation[0], 0.0);
-    view[1] = math::Vec4d(viewRotation[1], 0.0);
-    view[2] = math::Vec4d(viewRotation[2], 0.0);
+    math::Mat4f modelView(1.0f);
+    modelView[0] = math::Vec4f(math::Vec3f(rotationModelView[0]), 0.0f);
+    modelView[1] = math::Vec4f(math::Vec3f(rotationModelView[1]), 0.0f);
+    modelView[2] = math::Vec4f(math::Vec3f(rotationModelView[2]), 0.0f);
+    modelView[3] = math::Vec4f(toFloat32(translationModelView), 1.0f);
 
-    const math::Mat4d modelView = view * model;
-    return toFloat32(modelView);
+    return modelView;
 }
 
 math::Vec3d composeModelViewTranslation(const WorldPosition& objectPos, const WorldPosition& cameraPos) noexcept

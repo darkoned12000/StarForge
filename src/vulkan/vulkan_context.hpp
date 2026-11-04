@@ -60,6 +60,10 @@ public:
     [[nodiscard]] std::uint64_t validationErrorCount() const noexcept { return validationErrorCount_.load(std::memory_order_relaxed); }
     [[nodiscard]] std::uint64_t validationWarningCount() const noexcept { return validationWarningCount_.load(std::memory_order_relaxed); }
 
+    // For debug messenger pUserData access.
+    [[nodiscard]] std::atomic<std::uint64_t>& errorCounter() noexcept { return validationErrorCount_; }
+    [[nodiscard]] std::atomic<std::uint64_t>& warningCounter() noexcept { return validationWarningCount_; }
+
 private:
     VulkanContext() = default;
     void destroy() noexcept;

@@ -44,7 +44,7 @@ Allocator::~Allocator()
 }
 
 Allocator::Allocator(Allocator&& other) noexcept
-    : allocator_(std::exchange(other.allocator_, VK_NULL_HANDLE))
+    : allocator_(std::exchange(other.allocator_, nullptr))
 {
 }
 
@@ -53,23 +53,29 @@ Allocator& Allocator::operator=(Allocator&& other) noexcept
     if (this != &other)
     {
         destroy();
-        allocator_ = std::exchange(other.allocator_, VK_NULL_HANDLE);
+        allocator_ = std::exchange(other.allocator_, nullptr);
     }
     return *this;
 }
 
 void Allocator::destroy() noexcept
 {
-    if (allocator_ != VK_NULL_HANDLE)
+    if (allocator_ != nullptr)
     {
+#ifndef NDEBUG
+        if (allocationCount() != 0)
+        {
+            // Leak: resources not destroyed before allocator.
+        }
+#endif
         vmaDestroyAllocator(allocator_);
-        allocator_ = VK_NULL_HANDLE;
+        allocator_ = nullptr;
     }
 }
 
 std::uint32_t Allocator::allocationCount() const noexcept
 {
-    if (allocator_ == VK_NULL_HANDLE)
+    if (allocator_ == nullptr)
     {
         return 0;
     }
@@ -81,7 +87,7 @@ std::uint32_t Allocator::allocationCount() const noexcept
 Allocator::MemorySnapshot Allocator::captureMemorySnapshot() const noexcept
 {
     MemorySnapshot snapshot{};
-    if (allocator_ == VK_NULL_HANDLE)
+    if (allocator_ == nullptr)
     {
         return snapshot;
     }
@@ -95,6 +101,25 @@ Allocator::MemorySnapshot Allocator::captureMemorySnapshot() const noexcept
     snapshot.usedBytes = stats.total.statistics.allocationBytes;
     snapshot.allocationCount = stats.total.statistics.allocationCount;
     snapshot.blockCount = stats.total.statistics.blockCount;
+
+    // Device-local heap usage and budget (VK_EXT_memory_budget).
+    const VkPhysicalDeviceMemoryProperties* memProps = nullptr;
+    vmaGetMemoryProperties(allocator_, &memProps);
+    std::uint32_t heapCount = memProps->memoryHeapCount;
+    if (heapCount > VK_MAX_MEMORY_HEAPS)
+    {
+        heapCount = VK_MAX_MEMORY_HEAPS;
+    }
+    VmaBudget budgets[VK_MAX_MEMORY_HEAPS]{};
+    vmaGetHeapBudgets(allocator_, budgets);
+    for (std::uint32_t i = 0; i < heapCount; ++i)
+    {
+        if (memProps->memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
+        {
+            snapshot.deviceLocalUsage += budgets[i].usage;
+            snapshot.deviceLocalBudget += budgets[i].budget;
+        }
+    }
 
     return snapshot;
 }

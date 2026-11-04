@@ -5,7 +5,6 @@
 #include "math/math.hpp"
 
 #include <cstdint>
-#include <vector>
 
 namespace starforge::spatial
 {

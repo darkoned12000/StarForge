@@ -47,6 +47,14 @@ means to that end, not the product.
 - A second GPU backend.
 - A full game engine (scene editor, audio, physics, scripting).
 
+STARFORGE itself remains a rendering library with the original non-goals:
+no physics, audio, full engine, or scripting. The long-term goal is to
+build games (Everspace 2 / Freelancer / Limit Theory style) on top of
+STARFORGE. Game systems will be developed as a separate layer consuming
+STARFORGE's public API once M9 is complete. See the Game Layer section
+in ROADMAP.md for the full milestone plan and recommended tech stack
+(Jolt Physics, miniaudio, Flecs/EnTT, Dear ImGui, FastNoise2, etc.).
+
 ## Initial Platform
 
 Linux / EndeavourOS.

@@ -3,7 +3,7 @@
 #include "gpu_resources/allocator.hpp"
 
 #include <vulkan/vulkan.h>
-// Suppress Clang nullability warnings from VMA's header.
+// VMA's intended configuration: disable Clang-specific nullability attributes.
 #define VMA_NULLABLE
 #define VMA_NOT_NULL
 #define VMA_NULLABLE_NON_DISPATCHABLE VMA_NULLABLE
@@ -13,7 +13,6 @@
 #include <cstdint>
 #include <expected>
 #include <string>
-#include <vector>
 
 namespace starforge::gpu_resources
 {
@@ -50,6 +49,7 @@ public:
         ImageUsage usage = ImageUsage::ColorAttachment;
         std::uint32_t mipLevels = 1;
         std::uint32_t arrayLayers = 1;
+        const char* name = nullptr;
     };
 
     Image() = default;
@@ -95,9 +95,9 @@ public:
     static void transitionToShaderReadOnly(VkCommandBuffer cmd, VkImage image);
 
 private:
-    Allocator* allocator_ = nullptr;
+    VmaAllocator allocator_ = nullptr;
     VkImage image_ = VK_NULL_HANDLE;
-    VmaAllocation allocation_ = VK_NULL_HANDLE;
+    VmaAllocation allocation_ = nullptr;
     VkFormat format_ = VK_FORMAT_R8G8B8A8_UNORM;
     std::uint32_t width_ = 0;
     std::uint32_t height_ = 0;

@@ -20,8 +20,7 @@ namespace
 constexpr const char* kTag = "VULKAN";
 constexpr const char* kValidationLayer = "VK_LAYER_KHRONOS_validation";
 
-std::atomic<std::uint64_t>* gValidationErrorCount = nullptr;
-std::atomic<std::uint64_t>* gValidationWarningCount = nullptr;
+// (global pointers removed — context passed via pUserData)
 
 bool hasInstanceLayer(const char* name)
 {
@@ -65,23 +64,25 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
     VkDebugUtilsMessageSeverityFlagBitsEXT severity,
     VkDebugUtilsMessageTypeFlagsEXT /*types*/,
     const VkDebugUtilsMessengerCallbackDataEXT* data,
-    void* /*userData*/)
+    void* userData)
 {
     const char* id = data->pMessageIdName ? data->pMessageIdName : "";
 
+    auto* context = static_cast<VulkanContext*>(userData);
+
     if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
     {
-        if (gValidationErrorCount)
+        if (context)
         {
-            gValidationErrorCount->fetch_add(1, std::memory_order_relaxed);
+            context->errorCounter().fetch_add(1, std::memory_order_relaxed);
         }
         core::logError("VALIDATION", "{}: {}", id, data->pMessage);
     }
     else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
     {
-        if (gValidationWarningCount)
+        if (context)
         {
-            gValidationWarningCount->fetch_add(1, std::memory_order_relaxed);
+            context->warningCounter().fetch_add(1, std::memory_order_relaxed);
         }
         core::logWarning("VALIDATION", "{}: {}", id, data->pMessage);
     }
@@ -97,7 +98,7 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
     return VK_FALSE; // never abort the call that triggered the message
 }
 
-VkDebugUtilsMessengerCreateInfoEXT makeMessengerInfo()
+VkDebugUtilsMessengerCreateInfoEXT makeMessengerInfo(void* userData)
 {
     VkDebugUtilsMessengerCreateInfoEXT info{};
     info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
@@ -109,6 +110,7 @@ VkDebugUtilsMessengerCreateInfoEXT makeMessengerInfo()
         VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
         VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
     info.pfnUserCallback = debugCallback;
+    info.pUserData = userData;
     return info;
 }
 
@@ -179,7 +181,7 @@ std::expected<VulkanContext, std::string> VulkanContext::create(const ContextCre
     applicationInfo.apiVersion = context.instanceApiVersion_;
 
     // Chained so messages emitted during vkCreate/DestroyInstance are captured.
-    VkDebugUtilsMessengerCreateInfoEXT messengerInfo = makeMessengerInfo();
+    VkDebugUtilsMessengerCreateInfoEXT messengerInfo = makeMessengerInfo(&context);
 
     VkInstanceCreateInfo instanceInfo{};
     instanceInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -215,8 +217,7 @@ std::expected<VulkanContext, std::string> VulkanContext::create(const ContextCre
         }
         else
         {
-            gValidationErrorCount = &context.validationErrorCount_;
-            gValidationWarningCount = &context.validationWarningCount_;
+            // Counters accessed via pUserData in debugCallback.
         }
     }
 
@@ -248,11 +249,7 @@ VulkanContext::VulkanContext(VulkanContext&& other) noexcept
       validationErrorCount_(other.validationErrorCount_.load(std::memory_order_relaxed)),
       validationWarningCount_(other.validationWarningCount_.load(std::memory_order_relaxed))
 {
-    if (messenger_ != VK_NULL_HANDLE)
-    {
-        gValidationErrorCount = &validationErrorCount_;
-        gValidationWarningCount = &validationWarningCount_;
-    }
+    // Counters accessed via pUserData; no global pointer update needed.
 }
 
 VulkanContext& VulkanContext::operator=(VulkanContext&& other) noexcept
@@ -267,11 +264,7 @@ VulkanContext& VulkanContext::operator=(VulkanContext&& other) noexcept
         instanceApiVersion_ = other.instanceApiVersion_;
         validationErrorCount_.store(other.validationErrorCount_.load(std::memory_order_relaxed), std::memory_order_relaxed);
         validationWarningCount_.store(other.validationWarningCount_.load(std::memory_order_relaxed), std::memory_order_relaxed);
-        if (messenger_ != VK_NULL_HANDLE)
-        {
-            gValidationErrorCount = &validationErrorCount_;
-            gValidationWarningCount = &validationWarningCount_;
-        }
+        // Counters accessed via pUserData; no global pointer update needed.
     }
     return *this;
 }
@@ -288,15 +281,6 @@ void VulkanContext::destroy() noexcept
             destroyMessenger(instance_, messenger_, nullptr);
         }
         messenger_ = VK_NULL_HANDLE;
-    }
-
-    if (gValidationErrorCount == &validationErrorCount_)
-    {
-        gValidationErrorCount = nullptr;
-    }
-    if (gValidationWarningCount == &validationWarningCount_)
-    {
-        gValidationWarningCount = nullptr;
     }
 
     if (instance_ != VK_NULL_HANDLE)

@@ -312,9 +312,9 @@ drawing to M3 or as a small M4 prerequisite (4.3a can start during M3).
 
 | Step | Deliverable | Verified by | Done when |
 |------|-------------|-------------|-----------|
-| 4.4a | Frame-time target and budget document: target frame interval, CPU preparation budget, CPU submission budget, GPU rendering budget, sync/stall budget, headroom. Committed as a document | Review | Budget document committed with explicit subsystem allocations |
-| 4.4b | Baseline-to-budget comparison: measured baseline compared against target budgets, gaps documented | T4 | Baseline vs. budget comparison committed |
-| 4.4c | Hardware scope: RX 7900 XTX development target clearly distinguished from future hardware-independent goals | Review | Hardware scope documented |
+| 4.4a | Budget document: target interval, resolution, reference scene, statistic (p95), headroom rule; CPU-side and GPU-side budgets against the same interval; memory budget; scaling expectations; reserved block for future subsystems with rebalancing rule. Committed before 4.3 results are reviewed | Review | Budget document committed with explicit subsystem allocations (docs/decisions/004-performance-budgets.md + benchmarks/budgets.json) |
+| 4.4b | Baseline vs. budget: one row per budget line with status (met / over / unknown), margin, and the milestone that addresses each gap | T4 | Baseline vs. budget comparison committed |
+| 4.4c | Hardware scope: numbers apply to this GPU, driver, CPU and resolution; only scaling behavior is claimed hardware-independent | Review | Hardware scope documented |
 
 ### Exit
 
@@ -326,13 +326,44 @@ are documented. VMA memory usage is reported separately from timed rendering
 measurements. The baseline comparison tool detects regressions beyond the
 established noise threshold.
 
-## M5 – GPU-Driven Rendering (goal and proof)
+## M5 – GPU-Driven Rendering
 
 - **Goal:** bindless resources and buffer device address; GPU culling
   produces indirect draws; scale to 1M instances.
 - **Proof:** compute culling output equals the CPU reference (T2);
   1M instances beat the M4 baseline (T4); runs correctly with
   `STARFORGE_DISABLE_FEATURES=drawIndirectCount,bindless` (fallbacks).
+
+### Deferred from testing review (must address during M5)
+- Fragile headless GPU skip (return code 77) — move hardware check to gpu_main.cpp
+- CPU tests link starforge_vulkan — split vulkan_capabilities/version into separate library
+- ${glm_SOURCE_DIR} unresolved include — use target link (already transitive via starforge_math)
+- Cross-compilation POST_BUILD command — gated behind CMAKE_CROSSCOMPILING (done)
+- Randomized oracle testing for cullInstances — needed for M5 GPU culling validation
+- Projection inconsistency in frustum tests — use engine's perspective functions
+- Plane normalization check omitted — assert unit-length normals
+- Silent failure on benchmark execution — replace if(result) with REQUIRE(result.has_value())
+- Hardcoded relative file paths in baseline test — use CMAKE_CURRENT_BINARY_DIR
+- Validation layers disabled in baseline test — add validated run
+- Baseline invariant verification — assert competent draws fewer than naive
+- N vs 2N scaling test unimplemented — needs actual compute dispatch
+- Multi-frame query pool cycling untested — frame index 1 never exercised
+- Nested/concurrent scopes untested — parent/child timestamp scopes
+- No GPU-side BDA readback/dereference — test needs compute shader dispatch
+- Missing BDA alignment checks — assert addr % alignof(uint32_t) == 0
+- Single-dimensional dispatch only — need 2D/3D dispatch tests
+- Consecutive dispatches untested — command pool stability
+- Error/validation boundary paths omitted — test std::unexpected returns
+
+### Deferred from Vulkan API review (must address during M5)
+- Synchronous execution stalls in Uploader::copyBuffer and ComputePipeline::dispatchAndWait — need command buffer pooling and fence caching
+- Resource allocation thrashing — per-operation fence/cmd buffer creation; tie to frame lifecycle
+- Image layout tracking — Image lacks internal state; transitionTo* helpers assume fixed previous layout
+- ImageUsage bit-flags — mutually exclusive enum; M5 needs combined usage (sampled + color attachment)
+- Unmanaged VkImageView lifetime — createView returns raw handle; needs RAII view type
+- Descriptor set inefficiencies — vkUpdateDescriptorSets every dispatch; move to setup phase
+- Queue thread-safety — single graphics queue; needs external synchronization for background loaders
+- Winding order via projection Y-flip — remove Y-flip from projection, use negative viewport height instead
 
 ## M6 – Deterministic Exploration (goal and proof)
 
@@ -366,3 +397,112 @@ established noise threshold.
 - **Goal:** developer-facing API shaped from the working slice.
 - **Proof:** the sandbox scene rebuilt using only `include/starforge/`,
   with no Vulkan types visible.
+
+## Game Layer (M10+)
+
+STARFORGE remains a rendering library. Game systems are developed as a
+separate layer consuming STARFORGE's public API. The following milestones
+describe the recommended order for building game systems on top of STARFORGE.
+
+Recommended tech stack for the game layer:
+- Physics: Jolt Physics
+- Audio: miniaudio
+- ECS: Flecs or EnTT
+- UI (dev tools): Dear ImGui
+- Noise/Procedural: Custom hash-based + FastNoise2
+- Serialization: nlohmann/json (debug) + custom binary or FlatBuffers
+- Profiling: Tracy
+- Assets: stb_* family + meshoptimizer
+
+### M10 – ECS and Scene Management
+
+- **Goal:** Entity-component system for game objects (ships, asteroids,
+  stations, projectiles). Spatial indexing via WorldPosition cell hashes.
+- **Proof:** 10k entities with transforms updated and rendered at 60 fps.
+- **Tech:** Flecs or EnTT.
+- **Depends on:** M9 (Public API).
+
+### M11 – Physics and Collision
+
+- **Goal:** Rigid body dynamics, continuous collision detection for fast
+  ships, raycasts, triggers. Jolt Physics integration.
+- **Proof:** Ship collision with asteroid field; no tunneling at 1 km/s.
+- **Tech:** Jolt Physics.
+- **Depends on:** M10 (ECS).
+
+### M12 – Audio
+
+- **Goal:** 3D positional audio, music, voice, UI sounds. miniaudio
+  integration.
+- **Proof:** Spatial audio attenuates with distance; Doppler effect on
+  flyby.
+- **Tech:** miniaudio.
+- **Depends on:** M9 (Public API).
+
+### M13 – Procedural Generation Layer
+
+- **Goal:** Content as pure function of position: `generate(seed, cell,
+  scale level)`. Star systems, asteroid fields, stations, resource nodes
+  keyed by cell hash. No loading screens. Multi-scale generation with
+  caching strategy (JSON metadata + binary caches).
+- **Proof:** Same cell generates bit-identical content across runs and
+  machines (T1); simulated long flight reaches generated content with
+  positions still precise (T1 + T3).
+- **Depends on:** M6 (Deterministic Exploration), M2 (WorldPosition).
+- **Priority:** Elevated — core to project vision; start as soon as M9
+  is complete, ahead of physics and audio.
+
+### M14 – AI and Behavior
+
+- **Goal:** Ship AI (combat, patrol, trading, docking), faction systems,
+  traffic management, pathfinding in open space.
+- **Proof:** 50 NPC ships with combat AI at 60 fps; traffic flows between
+  stations.
+- **Tech:** Custom (no recommended library; AI is game-specific).
+- **Depends on:** M10 (ECS), M11 (Physics).
+
+### M15 – Gameplay Systems
+
+- **Goal:** Inventory/cargo, trading/economy, missions/contracts, damage/
+  shields/subsystems, progression/unlocks, docking, stations, jumping.
+- **Proof:** Playable trading loop: buy, fly, dock, sell, repeat.
+- **Depends on:** M10 (ECS), M14 (AI).
+
+### M16 – UI and HUD
+
+- **Goal:** HUD, menus, maps, inventory screens, interaction prompts.
+- **Proof:** Full game loop playable with UI (no console commands needed).
+- **Tech:** Dear ImGui (dev tools) + custom or RmlUi (final UI).
+- **Depends on:** M10 (ECS), M15 (Gameplay).
+
+### M17 – Asset Pipeline
+
+- **Goal:** Mesh/material/audio loading (stb, tinygltf, meshoptimizer),
+  asset management, hot-reloading.
+- **Proof:** Load and render a glTF mesh with textures at 60 fps.
+- **Depends on:** M9 (Public API).
+
+### M18 – Persistence
+
+- **Goal:** Save/load player deltas keyed by cell and object ID. Fast
+  binary format (FlatBuffers or custom) + human-readable (nlohmann/json)
+  for debugging.
+- **Proof:** Save, quit, reload: world state restored exactly.
+- **Depends on:** M10 (ECS), M13 (Procedural Generation).
+
+### M19 – Vertical Slice
+
+- **Goal:** Playable vertical slice: one ship + procedural asteroid field +
+  basic combat effects + continuous flight with correct precision.
+- **Proof:** 5 minutes of gameplay with no loading screens, zero
+  validation errors, stable 60 fps.
+- **Depends on:** M10, M11, M13, M16, M17.
+
+### M13.5 – Asteroid Field Flythrough (intermediate checkpoint)
+
+- **Goal:** Fly through a procedural asteroid field with correct precision
+  and basic ship controls. Motivating checkpoint before the full vertical
+  slice.
+- **Proof:** 2 minutes of continuous flight through generated content with
+  stable 60 fps and zero validation errors.
+- **Depends on:** M9 (Public API), M13 (Procedural Generation).

@@ -64,7 +64,7 @@ TEST_CASE("GPU resources: 1 MiB staging upload, offset copy, readback, and alloc
                 auto mapped = staging->map();
                 REQUIRE(mapped.has_value());
                 std::memcpy(*mapped, data.data(), size);
-                staging->flush(0, size);
+                (void)staging->flush(0, size);
                 staging->unmap();
             }
 
@@ -99,7 +99,7 @@ TEST_CASE("GPU resources: 1 MiB staging upload, offset copy, readback, and alloc
             {
                 auto mapped = readback->map();
                 REQUIRE(mapped.has_value());
-                readback->invalidate(0, size);
+                (void)readback->invalidate(0, size);
                 CHECK(std::memcmp(*mapped, data.data(), size) == 0);
                 readback->unmap();
             }

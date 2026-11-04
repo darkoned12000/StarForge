@@ -69,7 +69,7 @@ std::expected<Image, std::string> Image::create(Allocator& allocator, const Crea
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
 
     Image image;
-    image.allocator_ = &allocator;
+    image.allocator_ = allocator.handle();
     image.format_ = info.format;
     image.width_ = info.width;
     image.height_ = info.height;
@@ -81,24 +81,30 @@ std::expected<Image, std::string> Image::create(Allocator& allocator, const Crea
     {
         return std::unexpected(starforge::vulkan::describeFailure("vmaCreateImage", result));
     }
+
+    if (info.name != nullptr)
+    {
+        vmaSetAllocationName(allocator.handle(), image.allocation_, info.name);
+    }
+
     return image;
 }
 
 Image::~Image()
 {
-    if (allocator_ && image_ != VK_NULL_HANDLE)
+    if (allocator_ != nullptr && image_ != VK_NULL_HANDLE)
     {
-        vmaDestroyImage(allocator_->handle(), image_, allocation_);
+        vmaDestroyImage(allocator_, image_, allocation_);
     }
     image_ = VK_NULL_HANDLE;
-    allocation_ = VK_NULL_HANDLE;
+    allocation_ = nullptr;
     allocator_ = nullptr;
 }
 
 Image::Image(Image&& other) noexcept
     : allocator_(std::exchange(other.allocator_, nullptr)),
       image_(std::exchange(other.image_, VK_NULL_HANDLE)),
-      allocation_(std::exchange(other.allocation_, VK_NULL_HANDLE)),
+      allocation_(std::exchange(other.allocation_, nullptr)),
       format_(other.format_),
       width_(other.width_),
       height_(other.height_),
@@ -110,13 +116,13 @@ Image& Image::operator=(Image&& other) noexcept
 {
     if (this != &other)
     {
-        if (allocator_ && image_ != VK_NULL_HANDLE)
+        if (allocator_ != nullptr && image_ != VK_NULL_HANDLE)
         {
-            vmaDestroyImage(allocator_->handle(), image_, allocation_);
+            vmaDestroyImage(allocator_, image_, allocation_);
         }
         allocator_ = std::exchange(other.allocator_, nullptr);
         image_ = std::exchange(other.image_, VK_NULL_HANDLE);
-        allocation_ = std::exchange(other.allocation_, VK_NULL_HANDLE);
+        allocation_ = std::exchange(other.allocation_, nullptr);
         format_ = other.format_;
         width_ = other.width_;
         height_ = other.height_;
@@ -197,11 +203,13 @@ void Image::transitionToColorAttachment(VkCommandBuffer cmd, VkImage image)
 void Image::transitionToDepthAttachment(VkCommandBuffer cmd, VkImage image, VkFormat format)
 {
     VkImageAspectFlags aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+    VkImageLayout newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
     if (hasStencilComponent(format))
     {
         aspect |= VK_IMAGE_ASPECT_STENCIL_BIT;
+        newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
     }
-    transitionLayout(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+    transitionLayout(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED, newLayout,
                      aspect,
                      VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0,
                      VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,

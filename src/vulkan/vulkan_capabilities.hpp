@@ -26,6 +26,8 @@ struct GpuCapabilities
     bool synchronization2 = false;
     bool bufferDeviceAddress = false;
     bool hasGraphicsQueue = false;
+    bool shaderInt64 = false;         // Required for BDA (uint64_t addresses in shaders)
+    bool shaderDrawParameters = false; // Vulkan 1.1 core feature
 
     // Optional; each needs a fallback before a system may depend on it.
     bool bindless = false;          // descriptor indexing, partially bound, runtime arrays

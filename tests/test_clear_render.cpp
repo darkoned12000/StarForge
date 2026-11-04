@@ -176,7 +176,7 @@ TEST_CASE("Dynamic rendering clear: offscreen color attachment clear and readbac
 
             auto mapped = readback->map();
             REQUIRE(mapped.has_value());
-            readback->invalidate(0, byteSize);
+            (void)readback->invalidate(0, byteSize);
 
             const auto* bytes = static_cast<const std::uint8_t*>(*mapped);
             bool allMatch = true;

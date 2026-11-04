@@ -27,6 +27,21 @@ namespace starforge::spatial
     const WorldPosition& cameraPos,
     const math::Mat3d& localRotationScale = math::Mat3d(1.0)) noexcept;
 
+// Compose a camera-relative patch model matrix for GPU vertex shaders.
+// Avoids CPU-side vertex transformation by providing a matrix the shader
+// can multiply patch-local vertices against.
+[[nodiscard]] inline math::Mat4f composePatchModelMatrix(
+    const math::Vec3d& cameraRelativeOrigin,
+    const math::Mat3d& patchRotation = math::Mat3d(1.0)) noexcept
+{
+    math::Mat4f model(1.0f);
+    model[0] = math::Vec4f(math::Vec3f(patchRotation[0]), 0.0f);
+    model[1] = math::Vec4f(math::Vec3f(patchRotation[1]), 0.0f);
+    model[2] = math::Vec4f(math::Vec3f(patchRotation[2]), 0.0f);
+    model[3] = math::Vec4f(toFloat32(cameraRelativeOrigin), 1.0f);
+    return model;
+}
+
 // Compose a full camera-relative Model-View matrix in double precision, then
 // cast to float32 once. `viewRotation` is the camera's world-to-view rotation
 // (no translation component, because the camera is at the origin of

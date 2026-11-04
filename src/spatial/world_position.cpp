@@ -1,5 +1,6 @@
 #include "spatial/world_position.hpp"
 
+#include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -35,10 +36,7 @@ bool normalizeAxisChecked(std::int64_t& cell, double& offset) noexcept
     // static_cast<double>(INT64_MAX) rounds up to +2^63 (9223372036854775808.0),
     // which is 1 greater than INT64_MAX. Require strictly less than +2^63 and
     // >= -2^63.
-    constexpr double kMinInt64AsDouble = -9223372036854775808.0; // -2^63 (exact in double)
-    constexpr double kMaxInt64BoundExclusive = 9223372036854775808.0; // +2^63 (exact in double)
-
-    if (cellDeltaFloor < kMinInt64AsDouble || cellDeltaFloor >= kMaxInt64BoundExclusive)
+    if (cellDeltaFloor < WorldPosition::kMinInt64AsDouble || cellDeltaFloor >= WorldPosition::kMaxInt64BoundExclusive)
     {
         return false;
     }
@@ -206,17 +204,16 @@ WorldPosition& WorldPosition::operator+=(const math::Vec3d& delta)
     {
         // Log the failure; caller should use translated() for explicit error handling.
         // In debug builds this is a programming error.
+#ifndef NDEBUG
+        assert(false && "WorldPosition translation overflow or invalid delta");
+#endif
     }
     return *this;
 }
 
 WorldPosition& WorldPosition::operator-=(const math::Vec3d& delta)
 {
-    if (auto moved = translated(math::Vec3d{-delta.x, -delta.y, -delta.z}))
-    {
-        *this = *moved;
-    }
-    return *this;
+    return *this += math::Vec3d{-delta.x, -delta.y, -delta.z};
 }
 
 WorldPosition WorldPosition::operator+(const math::Vec3d& delta) const
@@ -224,6 +221,11 @@ WorldPosition WorldPosition::operator+(const math::Vec3d& delta) const
     WorldPosition result = *this;
     result += delta;
     return result;
+}
+
+WorldPosition operator+(const math::Vec3d& delta, const WorldPosition& pos)
+{
+    return pos + delta;
 }
 
 WorldPosition WorldPosition::operator-(const math::Vec3d& delta) const
@@ -293,6 +295,55 @@ std::uint64_t WorldPosition::cellHash() const noexcept
     return hash;
 }
 
+std::expected<bool, std::string> WorldPosition::normalize() noexcept
+{
+    bool changed = false;
+    if (offsetX < 0.0 || offsetX >= kCellSize || !std::isfinite(offsetX))
+    {
+        std::int64_t newCell = cellX;
+        double newOffset = offsetX;
+        if (!normalizeAxisChecked(newCell, newOffset))
+        {
+            return std::unexpected("WorldPosition::normalize failed: non-finite or overflow");
+        }
+        cellX = newCell;
+        offsetX = newOffset;
+        changed = true;
+    }
+    if (offsetY < 0.0 || offsetY >= kCellSize || !std::isfinite(offsetY))
+    {
+        std::int64_t newCell = cellY;
+        double newOffset = offsetY;
+        if (!normalizeAxisChecked(newCell, newOffset))
+        {
+            return std::unexpected("WorldPosition::normalize failed: non-finite or overflow");
+        }
+        cellY = newCell;
+        offsetY = newOffset;
+        changed = true;
+    }
+    if (offsetZ < 0.0 || offsetZ >= kCellSize || !std::isfinite(offsetZ))
+    {
+        std::int64_t newCell = cellZ;
+        double newOffset = offsetZ;
+        if (!normalizeAxisChecked(newCell, newOffset))
+        {
+            return std::unexpected("WorldPosition::normalize failed: non-finite or overflow");
+        }
+        cellZ = newCell;
+        offsetZ = newOffset;
+        changed = true;
+    }
+    return changed;
+}
+
+bool WorldPosition::isNormalized() const noexcept
+{
+    return offsetX >= 0.0 && offsetX < kCellSize &&
+           offsetY >= 0.0 && offsetY < kCellSize &&
+           offsetZ >= 0.0 && offsetZ < kCellSize;
+}
+
 std::int64_t WorldPosition::coarseCellByBitsX(int shiftBits) const noexcept
 {
     return arithmeticShiftRight(cellX, shiftBits);
@@ -311,25 +362,22 @@ std::int64_t WorldPosition::coarseCellByBitsZ(int shiftBits) const noexcept
 std::int64_t WorldPosition::coarseCellX(int level) const noexcept
 {
     if (level <= 0) return cellX;
-    const int shift = level * kCellBits;
-    if (shift >= 63) return cellX < 0 ? -1 : 0;
-    return arithmeticShiftRight(cellX, shift);
+    if (level >= 4) return cellX < 0 ? -1 : 0;
+    return arithmeticShiftRight(cellX, level * kCellBits);
 }
 
 std::int64_t WorldPosition::coarseCellY(int level) const noexcept
 {
     if (level <= 0) return cellY;
-    const int shift = level * kCellBits;
-    if (shift >= 63) return cellY < 0 ? -1 : 0;
-    return arithmeticShiftRight(cellY, shift);
+    if (level >= 4) return cellY < 0 ? -1 : 0;
+    return arithmeticShiftRight(cellY, level * kCellBits);
 }
 
 std::int64_t WorldPosition::coarseCellZ(int level) const noexcept
 {
     if (level <= 0) return cellZ;
-    const int shift = level * kCellBits;
-    if (shift >= 63) return cellZ < 0 ? -1 : 0;
-    return arithmeticShiftRight(cellZ, shift);
+    if (level >= 4) return cellZ < 0 ? -1 : 0;
+    return arithmeticShiftRight(cellZ, level * kCellBits);
 }
 
 } // namespace starforge::spatial

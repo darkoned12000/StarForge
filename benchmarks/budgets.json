@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "target_frame_interval_ms": 6.94,
+  "statistic": "p95",
+  "additional_statistics": ["p99", "max"],
+  "resolution": {"width": 1920, "height": 1080},
+  "reference_scene": "submission_stress",
+  "reference_instance_count_total": 100000,
+  "reference_instance_count_visible": 10000,
+  "reference_visible_fraction": 0.1,
+  "headroom_percent": 20,
+  "allocation_cap_percent": 80,
+  "allocation_cap_ms": 5.55,
+  "hardware": {
+    "gpu": "AMD Radeon RX 7900 XTX",
+    "driver": "RADV (Mesa 26.x)",
+    "cpu": "AMD Ryzen 9 7950X",
+    "os": "Linux (EndeavourOS)",
+    "note": "Development target only. Numbers do not transfer to other hardware."
+  },
+  "benchmark_conditions": {
+    "present_mode": "offscreen",
+    "build_type": "Release",
+    "validation_layers": false,
+    "note": "Budgets apply to offscreen rendering only. On-screen results differ due to compositor overhead."
+  },
+  "cpu_budgets_ms": {
+    "frustum_culling": {
+      "budget": 0.30,
+      "applies_to": "total_instances",
+      "notes": "3 ns/instance at 100k assumes early-out, SoA layout. Revisit if naive."
+    },
+    "draw_submission": {
+      "budget": 0.80,
+      "applies_to": "visible_instances",
+      "notes": "Competent path (CPU culling). Naive path is baseline to beat at 2.00 ms."
+    },
+    "transform_composition": {
+      "budget": 0.20,
+      "applies_to": "visible_instances",
+      "notes": "Double-to-float cast for camera-relative positions."
+    },
+    "headroom": 1.39,
+    "allocated_total": 2.69,
+    "unallocated": 2.86,
+    "interval": 6.94
+  },
+  "gpu_budgets_ms": {
+    "gpu_culling": {
+      "budget": 0.50,
+      "applies_to": "total_instances",
+      "notes": "M5 compute shader. Placeholder until measured."
+    },
+    "depth_prepass": {
+      "budget": 0.30,
+      "applies_to": "visible_triangles",
+      "notes": "Optional."
+    },
+    "main_geometry_pass": {
+      "budget": 2.50,
+      "applies_to": "visible_triangles",
+      "notes": "Reverse-Z, D32_SFLOAT."
+    },
+    "reserved_future_subsystems": {
+      "budget": 0.86,
+      "applies_to": "placeholder",
+      "notes": "Single block for planets, atmosphere, environment, effects. Starting placeholder; will need to grow as M7-M8 land."
+    },
+    "headroom": 1.39,
+    "allocated_total": 5.55,
+    "unallocated": 0.0,
+    "interval": 6.94,
+    "note": "GPU allocated_total at 80% cap."
+  },
+  "memory_budgets": {
+    "vram_max_bytes": 4294967296,
+    "upload_bandwidth_max_bytes_per_sec": 104857600,
+    "upload_path": "visible_instances_only",
+    "upload_note": "At 100k total / 10k visible, camera-relative positions are 12 B each = 17 MB/s at 144 fps. Full upload would be 173 MB/s, exceeding budget. GPU-resident scene updates only moving objects."
+  },
+  "scaling_expectations": [
+    {"cost": "cpu_submission_naive", "scales_with": "total_instances", "notes": "One draw per object. Baseline to beat."},
+    {"cost": "cpu_submission_competent", "scales_with": "visible_instances", "notes": "Culling reduces draws."},
+    {"cost": "cpu_submission_gpu_driven", "scales_with": "constant", "notes": "M5: GPU generates draws."},
+    {"cost": "gpu_culling", "scales_with": "total_instances", "notes": "Compute shader per instance."},
+    {"cost": "gpu_main_pass", "scales_with": "visible_triangles", "notes": "Rasterization workload."},
+    {"cost": "gpu_depth", "scales_with": "visible_triangles", "notes": "Depth testing."}
+  ]
+}

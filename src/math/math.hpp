@@ -2,7 +2,13 @@
 
 // GLM is an implementation detail. Public STARFORGE headers must not include
 // GLM directly; only internal headers and .cpp files may.
-// GLM_FORCE_* macros are set via CMake compile definitions on starforge_math.
+// Ensure GLM invariants regardless of how this header is included.
+#ifndef GLM_FORCE_DEPTH_ZERO_TO_ONE
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#endif
+#ifndef GLM_FORCE_RADIANS
+#define GLM_FORCE_RADIANS
+#endif
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -27,7 +33,7 @@ using Mat4d = glm::dmat4;
 // World-space basis conventions: right-handed, Y-up, camera looks down -Z.
 inline constexpr Vec3f kRightX{1.0f, 0.0f, 0.0f};
 inline constexpr Vec3f kUpY{0.0f, 1.0f, 0.0f};
-inline constexpr Vec3f kForwardZ{0.0f, 0.0f, 1.0f};
+inline constexpr Vec3f kForwardZ{0.0f, 0.0f, -1.0f};
 
 // Vulkan clip-space perspective projection (right-handed view space looking
 // down -Z, Y-down in clip space, depth in [0, 1] with standard near -> 0, far -> 1).

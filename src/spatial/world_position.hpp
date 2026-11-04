@@ -2,6 +2,8 @@
 
 #include "math/math.hpp"
 
+#include <bit>
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <string>
@@ -26,6 +28,10 @@ struct WorldPosition
     // Note: static_cast<double>(INT64_MAX) rounds up to 2^63, so we use the
     // predecessor float64 value below 2^63 * 2^20.
     static constexpr double kMaxReach = 9.2233720368547748e18 * kCellSize;
+
+    // Bounds used by normalizeAxisChecked (avoid magic numbers).
+    static constexpr double kMinInt64AsDouble = -9223372036854775808.0;       // -2^63
+    static constexpr double kMaxInt64BoundExclusive = 9223372036854775808.0;  // +2^63
 
     std::int64_t cellX = 0;
     std::int64_t cellY = 0;
@@ -72,6 +78,9 @@ struct WorldPosition
     [[nodiscard]] WorldPosition operator+(const math::Vec3d& delta) const;
     [[nodiscard]] WorldPosition operator-(const math::Vec3d& delta) const;
 
+    // Commutative addition: Vec3d + WorldPosition
+    friend WorldPosition operator+(const math::Vec3d& delta, const WorldPosition& pos);
+
     // Relative vector between two positions (in metres), computed from cell
     // differences and offset differences directly.
     [[nodiscard]] math::Vec3d operator-(const WorldPosition& other) const noexcept;
@@ -83,6 +92,13 @@ struct WorldPosition
     // Stable 64-bit hash of the cell coordinates (FNV-1a, little-endian bytes).
     // Pure integer path — no floating-point values feed the hash.
     [[nodiscard]] std::uint64_t cellHash() const noexcept;
+
+    // Normalize the offset into [0, kCellSize) by adjusting cell coordinates.
+    // Returns true if normalization was needed, or an error on NaN/inf/overflow.
+    [[nodiscard]] std::expected<bool, std::string> normalize() noexcept;
+
+    // Check whether the offset is in [0, kCellSize).
+    [[nodiscard]] bool isNormalized() const noexcept;
 
     // Coarse cell index at a given scale level using pure integer arithmetic
     // (floor semantics via arithmetic right shift). Each level coarsens by
@@ -100,3 +116,28 @@ struct WorldPosition
 };
 
 } // namespace starforge::spatial
+
+// std::hash specialization for WorldPosition (hashes cell + quantized offset).
+namespace std
+{
+template <>
+struct hash<starforge::spatial::WorldPosition>
+{
+    [[nodiscard]] std::size_t operator()(const starforge::spatial::WorldPosition& pos) const noexcept
+    {
+        std::uint64_t h = pos.cellHash();
+        auto hashDouble = [&h](double v) {
+            std::uint64_t bits = std::bit_cast<std::uint64_t>(v);
+            // SplitMix64-style mixer for better avalanche on integer sequences.
+            bits += 0x9e3779b97f4a7c15ULL;
+            bits = (bits ^ (bits >> 30)) * 0xbf58476d1ce4e5b9ULL;
+            bits = (bits ^ (bits >> 27)) * 0x94d049bb133111b9ULL;
+            h ^= bits + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+        };
+        hashDouble(pos.offsetX);
+        hashDouble(pos.offsetY);
+        hashDouble(pos.offsetZ);
+        return static_cast<std::size_t>(h);
+    }
+};
+} // namespace std

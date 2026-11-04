@@ -27,12 +27,13 @@ bool approxEqualVec3(const Vec3f& a, const Vec3f& b, float eps = kEpsilon)
 
 TEST_CASE("Math conventions: right-handed coordinate system")
 {
-    // Cross product of right (X) and up (Y) gives forward (Z).
-    const Vec3f forward = glm::cross(kRightX, kUpY);
-    CHECK(approxEqualVec3(forward, kForwardZ));
+    // Cross product of right (X) and up (Y) gives +Z, which is backward
+    // (away from the viewer) in a camera-looking-down- -Z convention.
+    const Vec3f back = glm::cross(kRightX, kUpY);
+    CHECK(approxEqualVec3(back, -kForwardZ));
 
-    const Vec3f negForward = glm::cross(kUpY, kRightX);
-    CHECK(approxEqualVec3(negForward, -kForwardZ));
+    const Vec3f negBack = glm::cross(kUpY, kRightX);
+    CHECK(approxEqualVec3(negBack, kForwardZ));
 }
 
 TEST_CASE("Math conventions: Y-up axis")

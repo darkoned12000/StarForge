@@ -290,7 +290,7 @@ RenderResult renderDepthOrder(VkDevice device, VkPhysicalDevice physDevice,
     vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
 
     auto mapped = readback->map();
-    readback->invalidate(0, byteSize);
+    (void)readback->invalidate(0, byteSize);
     const auto* bytes = static_cast<const std::uint8_t*>(*mapped);
 
     // Check the center pixel color.

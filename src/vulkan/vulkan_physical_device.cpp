@@ -140,6 +140,9 @@ GpuCapabilities queryCapabilities(VkPhysicalDevice device)
     VkPhysicalDeviceMeshShaderFeaturesEXT meshFeatures{};
     meshFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
 
+    VkPhysicalDeviceVulkan11Features features11{};
+    features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+
     VkPhysicalDeviceVulkan12Features features12{};
     features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
     features12.pNext = meshExtension ? &meshFeatures : nullptr;
@@ -148,15 +151,19 @@ GpuCapabilities queryCapabilities(VkPhysicalDevice device)
     features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
     features13.pNext = &features12;
 
+    features11.pNext = &features13;
+
     VkPhysicalDeviceFeatures2 features2{};
     features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    features2.pNext = &features13;
+    features2.pNext = &features11;
 
     vkGetPhysicalDeviceFeatures2(device, &features2);
 
     caps.dynamicRendering = features13.dynamicRendering == VK_TRUE;
     caps.synchronization2 = features13.synchronization2 == VK_TRUE;
     caps.bufferDeviceAddress = features12.bufferDeviceAddress == VK_TRUE;
+    caps.shaderInt64 = features2.features.shaderInt64 == VK_TRUE;
+    caps.shaderDrawParameters = features11.shaderDrawParameters == VK_TRUE;
 
     caps.bindless =
         features12.runtimeDescriptorArray == VK_TRUE &&

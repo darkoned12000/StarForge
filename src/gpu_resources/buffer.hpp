@@ -3,7 +3,7 @@
 #include "gpu_resources/allocator.hpp"
 
 #include <vulkan/vulkan.h>
-// Suppress Clang nullability warnings from VMA's header.
+// VMA's intended configuration: disable Clang-specific nullability attributes.
 #define VMA_NULLABLE
 #define VMA_NOT_NULL
 #define VMA_NULLABLE_NON_DISPATCHABLE VMA_NULLABLE
@@ -12,9 +12,7 @@
 
 #include <cstddef>
 #include <expected>
-#include <span>
 #include <string>
-#include <vector>
 
 namespace starforge::gpu_resources
 {
@@ -46,6 +44,7 @@ public:
         VkDeviceSize size = 0;
         BufferUsage usage = BufferUsage::Storage;
         MemoryPlacement memory = MemoryPlacement::GpuPreferred;
+        const char* name = nullptr;
     };
 
     Buffer() = default;
@@ -65,13 +64,15 @@ public:
 
     [[nodiscard]] std::expected<void*, std::string> map();
     void unmap();
-    void flush(VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE);
-    void invalidate(VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE);
+    [[nodiscard]] std::expected<void, std::string> flush(VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE);
+    [[nodiscard]] std::expected<void, std::string> invalidate(VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE);
+
+    [[nodiscard]] VkDeviceAddress deviceAddress(VkDevice device) const noexcept;
 
 private:
-    Allocator* allocator_ = nullptr;
+    VmaAllocator allocator_ = nullptr;
     VkBuffer buffer_ = VK_NULL_HANDLE;
-    VmaAllocation allocation_ = VK_NULL_HANDLE;
+    VmaAllocation allocation_ = nullptr;
     VkDeviceSize size_ = 0;
     void* mapped_ = nullptr;
 };

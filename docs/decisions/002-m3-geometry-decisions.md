@@ -42,11 +42,29 @@ data and avoid descriptor pool management for M3.
 **Note:** BDA is chosen for geometry only. Descriptors may still be used for
 other resources later (textures, bindless tables in M5).
 
+**Push constant layout (C++ ↔ Slang):**
+```cpp
+struct PushConstants {
+    float model[16];       // 64 bytes, offset 0
+    uint32_t materialIndex; // 4 bytes, offset 64
+    // 4 bytes padding for 8-byte BDA alignment if vertex buffer address
+    // is appended (total 72 bytes). Currently 68 bytes (no BDA in push
+    // constants — BDA is in vertex/index buffers referenced by address).
+};
+```
+VkDeviceAddress (64-bit) requires 8-byte alignment if included in push
+constants. The current layout (68 bytes) needs 4 bytes padding to reach 72
+bytes for BDA alignment. If a vertex buffer address is added to push
+constants, pad accordingly.
+
 **Consequences:**
 - The `VkPipelineLayout` uses push constant ranges, not descriptor set layouts.
 - Vertex data is accessed via `bufferDeviceAddress` (already a hard requirement).
-- Camera-relative Model-View matrices are computed on the CPU and passed as
-  push constants.
+- Camera-relative Model matrices are computed on the CPU and passed as
+  push constants. View-Projection is provided via a separate per-frame
+  uniform buffer. The GPU combines Model * ViewProjection in the vertex
+  shader. This keeps push constants at 68 bytes (64 for Model + 4 for
+  material index), within Vulkan's 128-byte minimum.
 
 ### 1a. GPU coordinate system boundary (core design rule)
 
@@ -132,6 +150,16 @@ closer than that will still z-fight. This is a hardware limit, not a bug.
 **Decision:** Asymmetric test shapes with per-face colors on the cube. Winding
 order verified in tests. Y-flip handled via projection (negate Y scale in
 projection matrix), not via negative-height viewport.
+
+**Known issue (deferred to M5):** Negating Y in the projection matrix inverts
+the determinant, flipping screen-space winding order (CCW↔CW). The pipeline
+currently uses VK_FRONT_FACE_COUNTER_CLOCKWISE, which combined with the
+Y-flip means front faces are culled. This works for the test cube (which uses
+compensating winding) but will cause issues with standard asset imports.
+The correct Vulkan approach is to remove the Y-flip from the projection and
+use a negative viewport height (VkViewport::height < 0), which flips Y
+during NDC→framebuffer mapping without altering winding. This requires
+updating all viewport setup code and projection functions.
 
 ### 9. Frame recording
 

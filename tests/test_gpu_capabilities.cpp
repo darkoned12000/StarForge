@@ -17,6 +17,8 @@ GpuCapabilities capableDevice()
     caps.dynamicRendering = true;
     caps.synchronization2 = true;
     caps.bufferDeviceAddress = true;
+    caps.shaderInt64 = true;
+    caps.shaderDrawParameters = true;
     return caps;
 }
 
@@ -57,6 +59,18 @@ TEST_CASE("each missing hard requirement is reported")
     {
         auto caps = capableDevice();
         caps.bufferDeviceAddress = false;
+        CHECK_FALSE(missingRequirement(caps).empty());
+    }
+    SUBCASE("no shader int64")
+    {
+        auto caps = capableDevice();
+        caps.shaderInt64 = false;
+        CHECK_FALSE(missingRequirement(caps).empty());
+    }
+    SUBCASE("no shader draw parameters")
+    {
+        auto caps = capableDevice();
+        caps.shaderDrawParameters = false;
         CHECK_FALSE(missingRequirement(caps).empty());
     }
 }

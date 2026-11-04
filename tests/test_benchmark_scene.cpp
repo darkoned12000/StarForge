@@ -255,3 +255,44 @@ TEST_CASE("Workload: recordWorkloadFrame counts draw calls")
     CHECK(visible.size() <= scene.instances.size());
     CHECK(visible.size() > 0);
 }
+
+#include <random>
+
+TEST_CASE("Cull: randomized oracle against analytical plane half-space tester")
+{
+    std::mt19937_64 rng(1337);
+    std::uniform_real_distribution<double> posDist(-50.0, 50.0);
+    std::uniform_real_distribution<double> angleDist(-3.14159, 3.14159);
+
+    for (int trial = 0; trial < 20; ++trial)
+    {
+        Vec3d eye{posDist(rng), posDist(rng), posDist(rng)};
+        Vec3d target = eye + Vec3d{std::cos(angleDist(rng)), std::sin(angleDist(rng)), 0.5};
+        Mat4d view = glm::lookAt(eye, target, Vec3d(0, 1, 0));
+        Mat4d proj = perspectiveVulkanReverseZ(1.0f, 16.0f / 9.0f, 0.1f, 1000.0f);
+        Frustum frustum = buildFrustum(proj * view);
+
+        auto scene = generateScene(static_cast<std::uint64_t>(trial), 500, 40.0);
+        auto culledIndices = cullInstances(scene, frustum, 0.5);
+        std::set<std::uint32_t> culledSet(culledIndices.begin(), culledIndices.end());
+
+        for (std::size_t i = 0; i < scene.instances.size(); ++i)
+        {
+            const auto& inst = scene.instances[i];
+            bool oracleVisible = true;
+            for (int p = 0; p < 6; ++p)
+            {
+                double dist = frustum.planes[p][0] * inst.posX +
+                              frustum.planes[p][1] * inst.posY +
+                              frustum.planes[p][2] * inst.posZ +
+                              frustum.planes[p][3];
+                if (dist < -(0.5 * inst.scale))
+                {
+                    oracleVisible = false;
+                    break;
+                }
+            }
+            CHECK(culledSet.contains(static_cast<std::uint32_t>(i)) == oracleVisible);
+        }
+    }
+}

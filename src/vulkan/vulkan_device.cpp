@@ -148,8 +148,8 @@ std::expected<VulkanDevice, std::string> VulkanDevice::create(const VulkanContex
 
     VkPhysicalDeviceVulkan13Features features13{};
     features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
-    features13.dynamicRendering = VK_TRUE;
-    features13.synchronization2 = VK_TRUE;
+    features13.dynamicRendering = caps.dynamicRendering ? VK_TRUE : VK_FALSE;
+    features13.synchronization2 = caps.synchronization2 ? VK_TRUE : VK_FALSE;
 
     VkPhysicalDeviceVulkan12Features features12{};
     features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
@@ -160,7 +160,7 @@ std::expected<VulkanDevice, std::string> VulkanDevice::create(const VulkanContex
     VkPhysicalDeviceVulkan11Features features11{};
     features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
     features11.pNext = &features12;
-    features11.shaderDrawParameters = VK_TRUE;
+    features11.shaderDrawParameters = caps.shaderDrawParameters ? VK_TRUE : VK_FALSE;
 
     if (caps.bindless)
     {
@@ -185,7 +185,7 @@ std::expected<VulkanDevice, std::string> VulkanDevice::create(const VulkanContex
     {
         features2.features.shaderFloat64 = VK_TRUE;
     }
-    features2.features.shaderInt64 = VK_TRUE; // Required for BDA (uint64_t addresses in shaders)
+    features2.features.shaderInt64 = caps.shaderInt64 ? VK_TRUE : VK_FALSE; // Required for BDA (uint64_t addresses in shaders)
 
     std::vector<const char*> extensions = info.requiredExtensions;
     if (caps.meshShader && hasDeviceExtension(physicalDevice, VK_EXT_MESH_SHADER_EXTENSION_NAME))

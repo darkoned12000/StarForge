@@ -136,6 +136,14 @@ std::string missingRequirement(const GpuCapabilities& caps)
     {
         return "bufferDeviceAddress not supported";
     }
+    if (!caps.shaderInt64)
+    {
+        return "shaderInt64 not supported";
+    }
+    if (!caps.shaderDrawParameters)
+    {
+        return "shaderDrawParameters not supported";
+    }
     return {};
 }
 

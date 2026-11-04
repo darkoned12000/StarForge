@@ -72,29 +72,35 @@ std::expected<Buffer, std::string> Buffer::create(Allocator& allocator, const Cr
     allocInfo.flags = toVmaFlags(info.memory);
 
     Buffer buffer;
-    buffer.allocator_ = &allocator;
+    buffer.allocator_ = allocator.handle();
     buffer.size_ = info.size;
 
-    VkResult result = vmaCreateBuffer(allocator.handle(), &bufferInfo, &allocInfo, &buffer.buffer_, &buffer.allocation_, nullptr);
+    VkResult result = vmaCreateBuffer(buffer.allocator_, &bufferInfo, &allocInfo, &buffer.buffer_, &buffer.allocation_, nullptr);
     if (result != VK_SUCCESS)
     {
         return std::unexpected(starforge::vulkan::describeFailure("vmaCreateBuffer", result));
     }
+
+    if (info.name != nullptr)
+    {
+        vmaSetAllocationName(buffer.allocator_, buffer.allocation_, info.name);
+    }
+
     return buffer;
 }
 
 Buffer::~Buffer()
 {
-    if (allocator_ && buffer_ != VK_NULL_HANDLE)
+    if (allocator_ != nullptr && buffer_ != VK_NULL_HANDLE)
     {
         if (mapped_)
         {
-            vmaUnmapMemory(allocator_->handle(), allocation_);
+            vmaUnmapMemory(allocator_, allocation_);
         }
-        vmaDestroyBuffer(allocator_->handle(), buffer_, allocation_);
+        vmaDestroyBuffer(allocator_, buffer_, allocation_);
     }
     buffer_ = VK_NULL_HANDLE;
-    allocation_ = VK_NULL_HANDLE;
+    allocation_ = nullptr;
     mapped_ = nullptr;
     allocator_ = nullptr;
     size_ = 0;
@@ -103,7 +109,7 @@ Buffer::~Buffer()
 Buffer::Buffer(Buffer&& other) noexcept
     : allocator_(std::exchange(other.allocator_, nullptr)),
       buffer_(std::exchange(other.buffer_, VK_NULL_HANDLE)),
-      allocation_(std::exchange(other.allocation_, VK_NULL_HANDLE)),
+      allocation_(std::exchange(other.allocation_, nullptr)),
       size_(other.size_),
       mapped_(std::exchange(other.mapped_, nullptr))
 {
@@ -113,17 +119,17 @@ Buffer& Buffer::operator=(Buffer&& other) noexcept
 {
     if (this != &other)
     {
-        if (allocator_ && buffer_ != VK_NULL_HANDLE)
+        if (allocator_ != nullptr && buffer_ != VK_NULL_HANDLE)
         {
             if (mapped_)
             {
-                vmaUnmapMemory(allocator_->handle(), allocation_);
+                vmaUnmapMemory(allocator_, allocation_);
             }
-            vmaDestroyBuffer(allocator_->handle(), buffer_, allocation_);
+            vmaDestroyBuffer(allocator_, buffer_, allocation_);
         }
         allocator_ = std::exchange(other.allocator_, nullptr);
         buffer_ = std::exchange(other.buffer_, VK_NULL_HANDLE);
-        allocation_ = std::exchange(other.allocation_, VK_NULL_HANDLE);
+        allocation_ = std::exchange(other.allocation_, nullptr);
         size_ = other.size_;
         mapped_ = std::exchange(other.mapped_, nullptr);
     }
@@ -132,7 +138,7 @@ Buffer& Buffer::operator=(Buffer&& other) noexcept
 
 std::expected<void*, std::string> Buffer::map()
 {
-    if (!allocator_ || buffer_ == VK_NULL_HANDLE)
+    if (allocator_ == nullptr || buffer_ == VK_NULL_HANDLE)
     {
         return std::unexpected("Buffer not initialized");
     }
@@ -141,7 +147,7 @@ std::expected<void*, std::string> Buffer::map()
         return mapped_;
     }
     void* data = nullptr;
-    VkResult result = vmaMapMemory(allocator_->handle(), allocation_, &data);
+    VkResult result = vmaMapMemory(allocator_, allocation_, &data);
     if (result != VK_SUCCESS)
     {
         return std::unexpected(starforge::vulkan::describeFailure("vmaMapMemory", result));
@@ -152,27 +158,51 @@ std::expected<void*, std::string> Buffer::map()
 
 void Buffer::unmap()
 {
-    if (allocator_ && allocation_ != VK_NULL_HANDLE && mapped_)
+    if (allocator_ != nullptr && allocation_ != nullptr && mapped_)
     {
-        vmaUnmapMemory(allocator_->handle(), allocation_);
+        vmaUnmapMemory(allocator_, allocation_);
         mapped_ = nullptr;
     }
 }
 
-void Buffer::flush(VkDeviceSize offset, VkDeviceSize size)
+std::expected<void, std::string> Buffer::flush(VkDeviceSize offset, VkDeviceSize size)
 {
-    if (allocator_ && allocation_ != VK_NULL_HANDLE)
+    if (allocator_ == nullptr || allocation_ == nullptr)
     {
-        vmaFlushAllocation(allocator_->handle(), allocation_, offset, size);
+        return std::unexpected("Buffer not initialized");
     }
+    VkResult result = vmaFlushAllocation(allocator_, allocation_, offset, size);
+    if (result != VK_SUCCESS)
+    {
+        return std::unexpected(starforge::vulkan::describeFailure("vmaFlushAllocation", result));
+    }
+    return {};
 }
 
-void Buffer::invalidate(VkDeviceSize offset, VkDeviceSize size)
+std::expected<void, std::string> Buffer::invalidate(VkDeviceSize offset, VkDeviceSize size)
 {
-    if (allocator_ && allocation_ != VK_NULL_HANDLE)
+    if (allocator_ == nullptr || allocation_ == nullptr)
     {
-        vmaInvalidateAllocation(allocator_->handle(), allocation_, offset, size);
+        return std::unexpected("Buffer not initialized");
     }
+    VkResult result = vmaInvalidateAllocation(allocator_, allocation_, offset, size);
+    if (result != VK_SUCCESS)
+    {
+        return std::unexpected(starforge::vulkan::describeFailure("vmaInvalidateAllocation", result));
+    }
+    return {};
+}
+
+VkDeviceAddress Buffer::deviceAddress(VkDevice device) const noexcept
+{
+    if (allocator_ == nullptr || buffer_ == VK_NULL_HANDLE)
+    {
+        return 0;
+    }
+    VkBufferDeviceAddressInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    info.buffer = buffer_;
+    return vkGetBufferDeviceAddress(device, &info);
 }
 
 } // namespace starforge::gpu_resources

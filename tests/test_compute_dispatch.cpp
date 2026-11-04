@@ -101,7 +101,7 @@ TEST_CASE("Compute dispatch: Slang SPIR-V against CPU reference")
                 auto mapped = staging->map();
                 REQUIRE(mapped.has_value());
                 std::memcpy(*mapped, poisonHost.data(), size);
-                staging->flush(0, size);
+                (void)staging->flush(0, size);
                 staging->unmap();
             }
             REQUIRE(uploader->copyBuffer(*staging, *outputBuf, size).has_value());
@@ -111,7 +111,7 @@ TEST_CASE("Compute dispatch: Slang SPIR-V against CPU reference")
                 auto mapped = staging->map();
                 REQUIRE(mapped.has_value());
                 std::memcpy(*mapped, inputHost.data(), size);
-                staging->flush(0, size);
+                (void)staging->flush(0, size);
                 staging->unmap();
             }
             REQUIRE(uploader->copyBuffer(*staging, *inputBuf, size).has_value());
@@ -128,7 +128,7 @@ TEST_CASE("Compute dispatch: Slang SPIR-V against CPU reference")
             {
                 auto mapped = readback->map();
                 REQUIRE(mapped.has_value());
-                readback->invalidate(0, size);
+                (void)readback->invalidate(0, size);
                 CHECK(std::memcmp(*mapped, expectedHost.data(), size) == 0);
                 readback->unmap();
             }

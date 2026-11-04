@@ -130,7 +130,7 @@ TEST_CASE("Mesh render: cube with per-face colors and depth buffer")
                 auto mapped = vertexBuf->map();
                 REQUIRE(mapped.has_value());
                 std::memcpy(*mapped, vertices, vertexSize);
-                vertexBuf->flush(0, vertexSize);
+                (void)vertexBuf->flush(0, vertexSize);
                 vertexBuf->unmap();
             }
 
@@ -146,7 +146,7 @@ TEST_CASE("Mesh render: cube with per-face colors and depth buffer")
                 auto mapped = indexBuf->map();
                 REQUIRE(mapped.has_value());
                 std::memcpy(*mapped, indices, indexSize);
-                indexBuf->flush(0, indexSize);
+                (void)indexBuf->flush(0, indexSize);
                 indexBuf->unmap();
             }
 
@@ -388,7 +388,7 @@ TEST_CASE("Mesh render: cube with per-face colors and depth buffer")
             // Verify some non-zero pixels were rendered (cube is visible).
             auto mapped = readback->map();
             REQUIRE(mapped.has_value());
-            readback->invalidate(0, byteSize);
+            (void)readback->invalidate(0, byteSize);
 
             const auto* bytes = static_cast<const std::uint8_t*>(*mapped);
             bool hasNonZero = false;

@@ -35,12 +35,17 @@ submission path.
 
 Visibility fractions are controlled by placing instances in a sphere of radius R
 around the origin and positioning the camera at (0, 0, 5) looking down -Z.
-The sphere radius is computed as R = 5.0 / cbrt(visibleFraction), which
-approximates the desired visible fraction:
+The fully-enclosed radius (100% visibility) is:
+  R_max = D * (1 + sin(theta_half)) / sin(theta_half)
+where D = 5.0 m (camera distance) and theta_half = 30° (half of 60° FOV).
+R_max = 5.0 * (1 + 0.5) / 0.5 = 15.0 m.
 
-- ~100% visible: R ≈ 5.0 m (sphere fits within view frustum)
-- ~10% visible: R ≈ 10.77 m
-- ~1% visible: R ≈ 23.21 m
+For partial visibility, scale outward from R_max:
+  R = R_max / cbrt(visibleFraction)
+
+- ~100% visible: R ≈ 15.0 m (sphere fully enclosed in frustum)
+- ~10% visible: R ≈ 32.3 m
+- ~1% visible: R ≈ 70.2 m
 
 Both baselines (naive and competent) render the **same visible set**. The naive
 baseline submits all instances (GPU rejects off-screen via frustum/depth);
@@ -50,7 +55,8 @@ the competent baseline culls on CPU before submission.
 
 ### Naive baseline
 - No CPU culling.
-- One draw call per visible instance (vkCmdDraw, 36 vertices, no instancing).
+- One draw call per scene instance (total instance count N), without CPU culling
+  (vkCmdDraw, 36 vertices, no instancing).
 - Push constants: per-draw MVP matrix (camera-relative, composed in double).
 - No depth pre-pass.
 - Submits all instances in the scene (GPU handles visibility via frustum/depth).
@@ -73,7 +79,7 @@ Instances are generated deterministically from seed 42:
 - Rotation: random quaternion (uniform on SO(3))
 - Scale: uniform in [0.5, 2.0]
 
-Camera path: fixed at origin, looking down +Z. No animation.
+Camera: fixed at (0, 0, 5), looking down -Z. No animation.
 
 ## Metrics recorded
 - CPU command recording time (ms)

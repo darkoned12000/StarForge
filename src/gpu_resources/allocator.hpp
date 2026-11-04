@@ -1,7 +1,9 @@
 #pragma once
 
 #include <vulkan/vulkan.h>
-// Suppress Clang nullability warnings from VMA's header.
+// VMA's intended configuration: disable Clang-specific nullability attributes
+// that produce -Wnullability-extension warnings. This is configuration, not
+// suppression — VMA's header checks #ifndef VMA_NULLABLE before defining.
 #define VMA_NULLABLE
 #define VMA_NOT_NULL
 #define VMA_NULLABLE_NON_DISPATCHABLE VMA_NULLABLE
@@ -46,6 +48,8 @@ public:
         std::uint64_t usedBytes = 0;
         std::uint64_t allocationCount = 0;
         std::uint64_t blockCount = 0;
+        std::uint64_t deviceLocalUsage = 0;
+        std::uint64_t deviceLocalBudget = 0;
     };
     [[nodiscard]] MemorySnapshot captureMemorySnapshot() const noexcept;
 
@@ -53,7 +57,7 @@ private:
     Allocator() = default;
     void destroy() noexcept;
 
-    VmaAllocator allocator_ = VK_NULL_HANDLE;
+    VmaAllocator allocator_ = nullptr;
 };
 
 } // namespace starforge::gpu_resources

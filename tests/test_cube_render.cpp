@@ -276,7 +276,7 @@ TEST_CASE("Cube render: indexed cube with per-face colors and asymmetric triangl
 
                 auto mapped = readback->map();
                 REQUIRE(mapped.has_value());
-                readback->invalidate(0, byteSize);
+                (void)readback->invalidate(0, byteSize);
 
                 const auto* bytes = static_cast<const std::uint8_t*>(*mapped);
                 bool hasNonZero = false;

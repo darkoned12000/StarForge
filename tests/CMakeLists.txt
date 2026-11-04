@@ -87,8 +87,9 @@ target_compile_definitions(starforge_gpu_tests
 target_include_directories(starforge_gpu_tests SYSTEM
     PRIVATE
         ${PROJECT_SOURCE_DIR}/third_party/stb
-        ${glm_SOURCE_DIR}
 )
+
+# glm::glm linked via starforge_math (PUBLIC)
 
 target_include_directories(starforge_tests SYSTEM
     PRIVATE
@@ -107,10 +108,12 @@ set_tests_properties(starforge_gpu_tests PROPERTIES
     SKIP_RETURN_CODE 77
 )
 
-add_custom_command(TARGET starforge_tests POST_BUILD
-    COMMAND starforge_tests
-    COMMENT "Running CPU unit tests"
-)
+if(NOT CMAKE_CROSSCOMPILING)
+    add_custom_command(TARGET starforge_tests POST_BUILD
+        COMMAND starforge_tests
+        COMMENT "Running CPU unit tests"
+    )
+endif()
 
 add_custom_target(check
     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure

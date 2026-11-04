@@ -45,7 +45,7 @@ TEST_CASE("BDA: buffer device address can be queried and is non-zero")
             REQUIRE(mapped.has_value());
             std::memset(*mapped, 0, 256);
             static_cast<std::uint32_t*>(*mapped)[0] = 42;
-            buffer->flush(0, 256);
+            (void)buffer->flush(0, 256);
             buffer->unmap();
         }
 

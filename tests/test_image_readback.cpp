@@ -155,7 +155,7 @@ TEST_CASE("Image: allocate, transition, and read back a 4x4 RGBA8 image")
             // Read back and verify.
             auto mapped = readback->map();
             REQUIRE(mapped.has_value());
-            readback->invalidate(0, bufferSize);
+            (void)readback->invalidate(0, bufferSize);
 
             const auto* bytes = static_cast<const std::uint8_t*>(*mapped);
             // RGBA8 UNORM: 0.25, 0.5, 0.75, 1.0 → 64, 128, 191, 255
