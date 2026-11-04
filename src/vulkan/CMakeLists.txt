@@ -3,6 +3,7 @@ add_library(starforge_vulkan STATIC
     vulkan_context.cpp
     vulkan_device.cpp
     vulkan_physical_device.cpp
+    vulkan_pipeline.cpp
     vulkan_renderer.cpp
     vulkan_swapchain.cpp
 )

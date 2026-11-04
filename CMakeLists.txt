@@ -61,6 +61,19 @@ include(StarforgeShaders)
 find_package(Vulkan REQUIRED)
 find_package(SDL3 CONFIG REQUIRED)
 
+# GLM (math library) — FetchContent fallback if not installed system-wide.
+find_package(glm CONFIG QUIET)
+if(NOT glm_FOUND)
+    message(STATUS "glm not installed; fetching v1.0.1")
+    include(FetchContent)
+    FetchContent_Declare(glm
+        GIT_REPOSITORY https://github.com/g-truc/glm.git
+        GIT_TAG        1.0.1
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(glm)
+endif()
+
 # --------------------------------------------------
 # Libraries
 # --------------------------------------------------
@@ -78,6 +91,50 @@ starforge_add_shader(
     STAGE  compute
     ENTRY  computeMain
 )
+
+starforge_add_shader(
+    SOURCE "${PROJECT_SOURCE_DIR}/shaders/graphics/test_triangle.slang"
+    STAGE  vertex
+    ENTRY  vertexMain
+    OUTPUT_NAME test_triangle.vert
+)
+
+starforge_add_shader(
+    SOURCE "${PROJECT_SOURCE_DIR}/shaders/graphics/test_triangle.slang"
+    STAGE  fragment
+    ENTRY  fragmentMain
+    OUTPUT_NAME test_triangle.frag
+)
+
+starforge_add_shader(
+    SOURCE "${PROJECT_SOURCE_DIR}/shaders/graphics/test_cube.slang"
+    STAGE  vertex
+    ENTRY  vertexMain
+    OUTPUT_NAME test_cube.vert
+)
+
+starforge_add_shader(
+    SOURCE "${PROJECT_SOURCE_DIR}/shaders/graphics/test_cube.slang"
+    STAGE  fragment
+    ENTRY  fragmentMain
+    OUTPUT_NAME test_cube.frag
+)
+
+starforge_add_shader(
+    SOURCE "${PROJECT_SOURCE_DIR}/shaders/graphics/test_depth.slang"
+    STAGE  vertex
+    ENTRY  vertexMain
+    OUTPUT_NAME test_depth.vert
+)
+
+starforge_add_shader(
+    SOURCE "${PROJECT_SOURCE_DIR}/shaders/graphics/test_depth.slang"
+    STAGE  fragment
+    ENTRY  fragmentMain
+    OUTPUT_NAME test_depth.frag
+)
+
+# (test_bda.slang removed - BDA debugging complete)
 
 # --------------------------------------------------
 # Applications and tests

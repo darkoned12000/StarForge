@@ -251,6 +251,11 @@ std::expected<void, std::string> VulkanSwapchain::recreate(std::uint32_t width, 
         return std::unexpected("Swapchain not initialized");
     }
 
+    if (device_ == VK_NULL_HANDLE)
+    {
+        return std::unexpected("Swapchain not initialized");
+    }
+
     vkDeviceWaitIdle(device_);
 
     CreateInfo newInfo = info_;
@@ -263,7 +268,6 @@ std::expected<void, std::string> VulkanSwapchain::recreate(std::uint32_t width, 
         return std::unexpected(std::move(replacement.error()));
     }
 
-    destroy();
     *this = std::move(*replacement);
     return {};
 }

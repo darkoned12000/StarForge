@@ -27,6 +27,7 @@ See [docs/VISION.md](docs/VISION.md) for goals and non-goals.
 - C++26
 - Vulkan 1.3 minimum, 1.4 preferred
 - Vulkan Memory Allocator (VMA)
+- GLM (wrapped behind STARFORGE math aliases)
 - Slang shaders
 - SDL3
 - CMake
@@ -36,6 +37,13 @@ See [docs/VISION.md](docs/VISION.md) for goals and non-goals.
 ## Development Platform
 
 Linux / EndeavourOS initially.
+
+The engine uses SDL3 for windowing, which transparently supports both X11
+and Wayland. On Wayland compositors (e.g., Hyprland, Sway, GNOME on Wayland),
+SDL3 automatically selects the native Wayland backend — no XWayland required.
+All Vulkan surface creation, resize handling, and presentation go through
+SDL3's abstraction, so the same binary works on X11 and Wayland without
+recompilation.
 
 Cross-platform architecture is a design requirement.
 
@@ -83,6 +91,8 @@ cannot be disabled.
 
     include/starforge/   Public, developer-facing headers (Vulkan-free)
     src/core/            Logging, version, foundational utilities
+    src/math/            Vector, matrix, and Vulkan clip-space projection helpers
+    src/spatial/         WorldPosition (int64 cell + double offset) and camera-relative math
     src/platform/        SDL3 window, surface, and event handling
     src/vulkan/          Private Vulkan backend (instance, device, swapchain, frame loop)
     src/gpu_resources/   VMA allocator, buffers, staging upload, compute pipeline
@@ -127,7 +137,33 @@ Milestone M1: Present a Frame
 - [x] 1.7 VulkanSwapchain with resize recreation
 - [x] 1.8 Frame loop and cleared frame on screen
 
-Next up: Milestone M2 (Precision — CPU-side coordinate and camera-relative math). See [docs/ROADMAP.md](docs/ROADMAP.md) for M2 onward.
+Milestone M2: Precision and World Addressing (CPU only)
+
+- [x] 2.0 World scale requirements note (agreed)
+- [x] 2.1 Position representation characterization (float, double, int64 mm, cell+offset)
+- [x] 2.2 Math library (GLM behind STARFORGE aliases) + convention tests
+- [x] 2.3 WorldPosition (int64 cell + double offset, floor semantics, cell hash)
+- [x] 2.4 Camera-relative conversion (double compose, float cast, large-object jitter test)
+- [x] 2.5 Translation-invariance property tests (random, negative, boundaries, near-overflow)
+
+Milestone M3: Geometry and Precision on the GPU
+
+- [x] 3.0 Decision note (ADR-002)
+- [x] 3.1a Image RAII wrapper + readback test
+- [x] 3.1b Depth image + format fallback test
+- [x] 3.1c Offscreen render target (color + depth) test
+- [x] 3.2a Multi-stage shader CMake support
+- [x] 3.2b BDA geometry infrastructure
+- [x] 3.2c Graphics pipeline helper + triangle render test
+- [x] 3.2d Indexed cube with per-face colors
+- [x] 3.3a Reverse-Z projection math
+- [x] 3.3b Depth buffer integration + ordering test
+- [x] 3.4a Render-object submission
+- [x] 3.4b Invariance proof (T1 + T3)
+- [x] 3.4c Naive control error table
+- [x] 3.5 Sandbox integration
+
+See [docs/ROADMAP.md](docs/ROADMAP.md) for details.
 
 ## License
 

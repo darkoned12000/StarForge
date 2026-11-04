@@ -9,6 +9,7 @@
 #       SOURCE <file.slang>
 #       STAGE  <compute|vertex|fragment|...>
 #       ENTRY  <entry point name>
+#       [OUTPUT_NAME <name>]       # default: <source basename>
 #       [PROFILE <profile>]        # default: glsl_450
 #       [OUTPUT_DIR <dir>]         # default: <build>/shaders
 #   )
@@ -36,7 +37,7 @@ function(starforge_setup_slang)
 endfunction()
 
 function(starforge_add_shader)
-    cmake_parse_arguments(SF "" "SOURCE;STAGE;ENTRY;PROFILE;OUTPUT_DIR" "" ${ARGN})
+    cmake_parse_arguments(SF "" "SOURCE;STAGE;ENTRY;OUTPUT_NAME;PROFILE;OUTPUT_DIR" "" ${ARGN})
 
     if(NOT STARFORGE_ENABLE_SLANG OR NOT STARFORGE_SLANGC)
         return()
@@ -59,7 +60,11 @@ function(starforge_add_shader)
         set(SF_OUTPUT_DIR "${PROJECT_BINARY_DIR}/shaders")
     endif()
 
-    get_filename_component(shader_name "${SF_SOURCE}" NAME_WE)
+    if(NOT SF_OUTPUT_NAME)
+        get_filename_component(shader_name "${SF_SOURCE}" NAME_WE)
+    else()
+        set(shader_name "${SF_OUTPUT_NAME}")
+    endif()
     set(shader_output "${SF_OUTPUT_DIR}/${shader_name}.spv")
 
     add_custom_command(

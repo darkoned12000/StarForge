@@ -37,17 +37,25 @@ Rules that follow from this:
   exists.
 
 Accepted decisions and intentionally open questions are tracked in
-[`docs/decisions/`](decisions/README.md). In particular, the math library and
-world-position representation are not settled yet; the M2 work must evaluate
-them before spatial code depends on either choice.
+[`docs/decisions/`](decisions/README.md). M2 is complete: the math library
+(GLM behind STARFORGE aliases) and world-position representation (int64 cell
++ double offset) are settled. See ADR-0005 and ADR-0006.
 
-## Current implementation (M1 complete)
+## Current implementation (M1–M2 complete)
 
 The architecture below describes the intended subsystem boundaries and
 verification contracts. It is not a claim that every listed subsystem is
 implemented. The current build provides:
 
 - `starforge_core`: logging and version information.
+- `starforge_math`: vector/matrix aliases (`Vec3f`, `Vec3d`, `Mat4f`, `Mat4d`,
+  etc.) and Vulkan clip-space perspective helpers (Y-down, `[0, 1]` depth,
+  reverse-Z, and infinite far plane).
+- `starforge_spatial`: `WorldPosition` (`int64` cell + `double` offset,
+  shift-based coarse cell hierarchy, deterministic 64-bit FNV-1a cell hash)
+  and camera-relative position/transform composition (`toCameraRelative`,
+  `composeCameraRelativeModelMatrix`, `composeCameraRelativeModelView`, and
+  `LargeObjectSetup`).
 - `starforge_platform`: an RAII SDL3 window, event polling, framebuffer-size
   queries, Vulkan instance-extension discovery, and surface creation.
 - `starforge_vulkan`: Vulkan instance creation, validation setup with error and
@@ -64,8 +72,8 @@ implemented. The current build provides:
 - `starforge_tests` (T1 CPU tests) and `starforge_gpu_tests` (T2/T3 headless
   GPU tests, labeled `gpu` in CTest with `SKIP_RETURN_CODE 77`).
 
-The renderer, render-graph, spatial, and scene directories remain roadmap
-structure for M2+.
+The renderer, render-graph, and scene directories remain roadmap structure for
+M3+.
 
 ## Build Targets
 
@@ -79,8 +87,8 @@ structure for M2+.
 | `starforge_sandbox`  | `apps/sandbox/`    | present | Thin host for experiments                |
 | `starforge_tests`    | `tests/`           | present | T1 CPU doctest unit tests                |
 | `starforge_gpu_tests`| `tests/`           | present | T2/T3 headless GPU tests (`gpu` label)   |
-| `starforge_math`     | `src/math/`        | M2      | Vector/matrix types                      |
-| `starforge_spatial`  | `src/spatial/`     | M2      | World positions, camera-relative math    |
+| `starforge_math`     | `src/math/`        | present | Vector/matrix types (GLM behind aliases) |
+| `starforge_spatial`  | `src/spatial/`     | present | World positions, camera-relative math    |
 | `starforge_bench`    | `apps/bench/`      | M4      | Benchmark harness, JSON output           |
 
 New subsystems are static libraries following the same pattern.
@@ -114,6 +122,20 @@ New subsystems are static libraries following the same pattern.
 | T3   | Offscreen render, golden-image compare, zero validation errors | Same scene rendered at two origins    |
 | T4   | Benchmark, results saved as JSON                           | 100k instances, CPU-driven vs GPU-driven  |
 | T5   | Manual sandbox checklist                                   | Resize, minimize, shutdown                |
+
+### T5 Manual Checklist (Wayland / X11)
+
+The sandbox must be run and verified on both backends. Set `SDL_VIDEODRIVER=wayland`
+or `SDL_VIDEODRIVER=x11` to force a specific backend.
+
+- [ ] Window opens; SDL logs the selected video driver (`wayland` or `x11`).
+- [ ] Resize triggers swapchain recreation (logged, no validation errors).
+- [ ] Minimize / restore triggers swapchain recreation (logged, no validation errors).
+  - On Wayland, `SDL_WINDOW_HIDDEN` is treated as minimized.
+- [ ] HiDPI scaling produces correct framebuffer size (no blurry or oversized output).
+- [ ] Close window shuts down cleanly with zero validation errors.
+- [ ] (Wayland only) Window decorations are present (libdecor or server-side).
+- [ ] (Wayland only) Fractional scaling does not cause 0×0 swapchain extent.
 
 Notes:
 
@@ -162,7 +184,13 @@ is shaped by using the internals first.
 `src/platform/`
 
 - **Purpose:** SDL3 window, events, resize and minimize state,
-  required instance extensions.
+  required instance extensions, and Vulkan surface creation. SDL3
+  transparently supports both X11 and Wayland backends; the engine
+  logs which driver was selected at startup. Wayland-specific
+  considerations: `SDL_WINDOW_HIDDEN` is treated as minimized (Wayland
+  has no traditional minimize), `SDL_EVENT_WINDOW_RESIZED` and
+  `SDL_EVENT_WINDOW_RESTORED` trigger swapchain recreation, and SDL
+  hints prefer native Wayland + libdecor for consistent decorations.
 - **Depends on:** core.
 - **Verified by:** T5 (needs a display).
 
@@ -207,18 +235,14 @@ is shaped by using the internals first.
 - **Depends on:** core only. No Vulkan.
 - **Verified by:** T1, with the precision demo quantifying the error
   of the naive approach and the fix.
-- **Settled (M2):** 64-bit integer cell plus double offset for world
-  positions; GLM wrapped behind STARFORGE aliases for math types (see
-  [ADR-0005](decisions/0005-math-library.md)). A double has about 1e-4 m
-  spacing at 1e12 m but about 1e5 m at 1e21 m, so doubles suit a
-  solar system but not a galaxy; the hierarchy in M6 interacts with
-  this choice.
-  double positions rendered camera-relative. A double has about 1e-4 m
-  spacing at 1e12 m but about 1e5 m at 1e21 m, so doubles suit a
-  solar system but not a galaxy; the hierarchy in M6 interacts with
-  this choice.
+- **Settled (M2):** 64-bit integer cell (2^20 m) plus double offset for
+  world positions; GLM wrapped behind STARFORGE aliases for math types
+  (see [ADR-0005](decisions/0005-math-library.md) and
+  [ADR-0006](decisions/0006-world-position.md)). Sub-millimetre precision
+  at any distance up to ~9.7e24 m.
 - **Metric:** relative positions near the camera stay accurate to
-  better than 1 mm regardless of distance from the world origin.
+  better than 1 mm regardless of distance from the world origin. Floating-
+  origin rebase is deferred until a float-based simulation consumer exists.
 
 ## Renderer and Render Graph
 

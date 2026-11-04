@@ -53,6 +53,35 @@ space.
 | int64 millimetres | ~1e16 m | yes | Exact; ends near 1 ly; no scale hierarchy |
 | int64 cell (power of two, e.g. 2^20 m) + double offset | ~1e25 m | yes | Coarse cell index at any scale is a shift; one position resolves at every scale |
 
+## Characterization table (M2.1)
+
+Measured positional error (half the spacing between adjacent representable
+values) at various distances:
+
+| Distance (m) | float err (m) | double err (m) | int64 mm err (m) | cell+offset err (m) |
+|-------------|---------------|----------------|------------------|---------------------|
+| 1e6 | 3.12e-02 | 5.82e-11 | 0.0005 | 5.82e-11 |
+| 1e9 | 3.20e+01 | 5.96e-08 | 0.0005 | 5.82e-11 |
+| 1e12 | 3.28e+04 | 6.10e-05 | 0.0005 | 5.82e-11 |
+| 4.5e12 | 2.62e+05 | 4.88e-04 | 0.0005 | 5.82e-11 |
+| 1e13 | 5.24e+05 | 9.77e-04 | 0.0005 | 5.82e-11 |
+| 1e15 | 3.36e+07 | 6.25e-02 | 0.0005 | 5.82e-11 |
+| 1e16 | 5.37e+08 | 1.00 | out of range | 5.82e-11 |
+| 1e21 | 3.52e+13 | 6.55e+04 | out of range | 5.82e-11 |
+| 1e24 | 3.60e+16 | 6.71e+07 | out of range | 5.82e-11 |
+| 1e25 | 5.76e+17 | 1.07e+09 | out of range | out of range |
+
+**Key findings:**
+- **float** fails sub-mm precision beyond ~1e4 m. At 1e6 m, half-spacing
+  error is ~3.12 cm.
+- **double** achieves sub-mm to ~1e13 m, then degrades. At 1e15 m, error
+  is ~6.25 cm — fails the required extent.
+- **int64 millimetres** has constant 0.5 mm error, cannot represent finer
+  than 1 mm, and runs out of range above ~9.22e15 m.
+- **cell + offset** achieves worst-case ~0.058 nm half-spacing error at ALL
+  distances up to ~9.67e24 m, satisfying the sub-mm requirement across the
+  entire required extent and design reach.
+
 Leading candidate: **cell + offset**, because procedural exploration
 needs exact integer addresses and the same design supplies the scale
 hierarchy. Confirm with the step 2.1 table before implementing.

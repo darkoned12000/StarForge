@@ -76,6 +76,7 @@ private:
     std::vector<VkSemaphore> imageAvailableSemaphores_;
     std::vector<VkSemaphore> renderFinishedSemaphores_;
     std::vector<VkFence> inFlightFences_;
+    std::vector<VkFence> imagesInFlight_; // sized to swapchain image count
 };
 
 } // namespace starforge::vulkan

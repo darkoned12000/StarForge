@@ -1,5 +1,7 @@
 #include "platform/window.hpp"
 
+#include "core/log.hpp"
+
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 
@@ -11,6 +13,14 @@ namespace starforge::platform
 
 std::expected<Window, std::string> Window::create(const WindowDesc& desc)
 {
+    // Hint SDL to prefer native Wayland over XWayland when available.
+    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "wayland,x11");
+    // Allow libdecor for window decorations on Wayland compositors that
+    // don't support server-side decorations (e.g., GNOME).
+    SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_ALLOW_LIBDECOR, "1");
+    // Prefer libdecor when available for consistent window decorations.
+    SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_PREFER_LIBDECOR, "1");
+
     if (!SDL_InitSubSystem(SDL_INIT_VIDEO))
     {
         return std::unexpected(std::format("SDL video init failed: {}", SDL_GetError()));
@@ -37,6 +47,10 @@ std::expected<Window, std::string> Window::create(const WindowDesc& desc)
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
         return std::unexpected(std::move(error));
     }
+
+    // Log which video backend SDL selected (useful for Wayland vs. X11 diagnosis).
+    const char* videoDriver = SDL_GetCurrentVideoDriver();
+    core::logInfo("PLATFORM", "SDL video driver: {}", videoDriver ? videoDriver : "unknown");
 
     return Window(window);
 }
@@ -90,6 +104,11 @@ void Window::pollEvents()
             shouldClose_ = true;
             break;
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+        case SDL_EVENT_WINDOW_RESIZED:
+            resized_ = true;
+            break;
+        case SDL_EVENT_WINDOW_RESTORED:
+        case SDL_EVENT_WINDOW_SHOWN:
             resized_ = true;
             break;
         default:
@@ -117,7 +136,11 @@ Extent2D Window::framebufferSize() const
 
 bool Window::isMinimized() const
 {
-    return (SDL_GetWindowFlags(window_) & SDL_WINDOW_MINIMIZED) != 0;
+    const SDL_WindowFlags flags = SDL_GetWindowFlags(window_);
+    // On X11, minimized windows report SDL_WINDOW_MINIMIZED.
+    // On Wayland, compositors may report SDL_WINDOW_HIDDEN instead
+    // (there is no traditional minimize concept on Wayland).
+    return (flags & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN)) != 0;
 }
 
 std::expected<std::vector<const char*>, std::string> Window::vulkanInstanceExtensions() const

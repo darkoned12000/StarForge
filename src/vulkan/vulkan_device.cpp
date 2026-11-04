@@ -78,8 +78,7 @@ bool hasDeviceExtension(VkPhysicalDevice device, const char* name)
     }
 
     std::vector<VkExtensionProperties> extensions(count);
-    if (vkEnumerateDeviceExtensionProperties(device, nullptr, &count, extensions.data()) != VK_SUCCESS &&
-        count == 0)
+    if (vkEnumerateDeviceExtensionProperties(device, nullptr, &count, extensions.data()) != VK_SUCCESS)
     {
         return false;
     }
@@ -109,6 +108,11 @@ std::expected<VulkanDevice, std::string> VulkanDevice::create(const VulkanContex
     if (physicalDevice == VK_NULL_HANDLE)
     {
         return std::unexpected("VulkanContext has no selected physical device");
+    }
+
+    if (!context.capabilities().bufferDeviceAddress)
+    {
+        return std::unexpected("bufferDeviceAddress is required but not supported by the selected GPU");
     }
 
     for (const char* ext : info.requiredExtensions)
@@ -150,7 +154,14 @@ std::expected<VulkanDevice, std::string> VulkanDevice::create(const VulkanContex
     VkPhysicalDeviceVulkan12Features features12{};
     features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
     features12.pNext = &features13;
-    features12.bufferDeviceAddress = VK_TRUE;
+    features12.bufferDeviceAddress = context.capabilities().bufferDeviceAddress ? VK_TRUE : VK_FALSE;
+
+    // shaderDrawParameters is a Vulkan 1.1 core feature.
+    VkPhysicalDeviceVulkan11Features features11{};
+    features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+    features11.pNext = &features12;
+    features11.shaderDrawParameters = VK_TRUE;
+
     if (caps.bindless)
     {
         features12.runtimeDescriptorArray = VK_TRUE;
@@ -165,7 +176,7 @@ std::expected<VulkanDevice, std::string> VulkanDevice::create(const VulkanContex
 
     VkPhysicalDeviceFeatures2 features2{};
     features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    features2.pNext = &features12;
+    features2.pNext = &features11;
     if (caps.multiDrawIndirect)
     {
         features2.features.multiDrawIndirect = VK_TRUE;
@@ -174,6 +185,7 @@ std::expected<VulkanDevice, std::string> VulkanDevice::create(const VulkanContex
     {
         features2.features.shaderFloat64 = VK_TRUE;
     }
+    features2.features.shaderInt64 = VK_TRUE; // Required for BDA (uint64_t addresses in shaders)
 
     std::vector<const char*> extensions = info.requiredExtensions;
     if (caps.meshShader && hasDeviceExtension(physicalDevice, VK_EXT_MESH_SHADER_EXTENSION_NAME))

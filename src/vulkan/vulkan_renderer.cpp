@@ -179,6 +179,10 @@ std::expected<void, std::string> FrameRenderer::ensureSwapchainImageCount(std::u
         }
         renderFinishedSemaphores_.push_back(sem);
     }
+    if (imagesInFlight_.size() < imageCount)
+    {
+        imagesInFlight_.resize(imageCount, VK_NULL_HANDLE);
+    }
     return {};
 }
 
@@ -196,7 +200,8 @@ FrameRenderer::FrameRenderer(FrameRenderer&& other) noexcept
       commandBuffers_(std::move(other.commandBuffers_)),
       imageAvailableSemaphores_(std::move(other.imageAvailableSemaphores_)),
       renderFinishedSemaphores_(std::move(other.renderFinishedSemaphores_)),
-      inFlightFences_(std::move(other.inFlightFences_))
+      inFlightFences_(std::move(other.inFlightFences_)),
+      imagesInFlight_(std::move(other.imagesInFlight_))
 {
 }
 
@@ -214,6 +219,7 @@ FrameRenderer& FrameRenderer::operator=(FrameRenderer&& other) noexcept
         imageAvailableSemaphores_ = std::move(other.imageAvailableSemaphores_);
         renderFinishedSemaphores_ = std::move(other.renderFinishedSemaphores_);
         inFlightFences_ = std::move(other.inFlightFences_);
+        imagesInFlight_ = std::move(other.imagesInFlight_);
     }
     return *this;
 }
@@ -240,6 +246,7 @@ void FrameRenderer::destroy() noexcept
     imageAvailableSemaphores_.clear();
     renderFinishedSemaphores_.clear();
     inFlightFences_.clear();
+    imagesInFlight_.clear();
 }
 
 VkCommandBuffer FrameRenderer::currentCommandBuffer() const
@@ -305,6 +312,21 @@ FrameRenderer::renderClearedFrame(const VulkanSwapchain& swapchain, VkQueue queu
         return std::unexpected(starforge::vulkan::describeFailure("vkAcquireNextImageKHR", acquireResult));
     }
 
+    // If this swapchain image is still in use by a previous frame, wait on
+    // that frame's fence before reusing the image.
+    if (imageIndex < imagesInFlight_.size() && imagesInFlight_[imageIndex] != VK_NULL_HANDLE)
+    {
+        if (const VkResult result = vkWaitForFences(device_, 1, &imagesInFlight_[imageIndex], VK_TRUE, UINT64_MAX);
+            result != VK_SUCCESS)
+        {
+            return std::unexpected(starforge::vulkan::describeFailure("vkWaitForFences (image in flight)", result));
+        }
+    }
+    if (imageIndex < imagesInFlight_.size())
+    {
+        imagesInFlight_[imageIndex] = fence;
+    }
+
     if (const VkResult result = vkResetFences(device_, 1, &fence); result != VK_SUCCESS)
     {
         return std::unexpected(starforge::vulkan::describeFailure("vkResetFences", result));
@@ -353,7 +375,7 @@ FrameRenderer::renderClearedFrame(const VulkanSwapchain& swapchain, VkQueue queu
     VkSemaphoreSubmitInfo signalSemInfo{};
     signalSemInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
     signalSemInfo.semaphore = renderFinished;
-    signalSemInfo.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    signalSemInfo.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
 
     VkSubmitInfo2 submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;

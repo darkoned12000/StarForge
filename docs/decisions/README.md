@@ -14,6 +14,8 @@ is already implemented. Open questions remain open until a record is accepted.
 | [0003](0003-public-api-after-vertical-slice.md) | Shape the public API after a working slice | Accepted |
 | [0004](0004-vma-allocator.md) | Use VMA for GPU memory allocation | Accepted |
 | [0005](0005-math-library.md) | Math library choice (GLM wrapped behind STARFORGE aliases) | Accepted |
+| [0006](0006-world-position.md) | World position representation (int64 cell + double offset) | Accepted |
+| [002](002-m3-geometry-decisions.md) | M3 geometry and precision decisions (push constants + BDA, image format, golden policy, etc.) | Accepted |
 
 ## Open decisions
 
@@ -23,7 +25,6 @@ numbered ADR before dependent implementation begins.
 
 | Topic | Target milestone | Existing constraint |
 |-------|-----------------|---------------------|
-| World-position representation | M2.3 | Prove local precision at astronomical origins; account for the M6 scale hierarchy. |
 | Tracy adoption | M4.4 | Decide using project profiling needs; do not add it speculatively. |
 
 ## Related notes

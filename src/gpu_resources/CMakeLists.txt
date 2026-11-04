@@ -2,6 +2,7 @@ add_library(starforge_gpu STATIC
     allocator.cpp
     buffer.cpp
     compute_pipeline.cpp
+    image.cpp
     transfer.cpp
     ${PROJECT_SOURCE_DIR}/third_party/vma/vk_mem_alloc.cpp
 )

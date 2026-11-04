@@ -81,7 +81,8 @@ std::expected<void, std::string> Uploader::copyBuffer(const Buffer& src, Buffer&
     {
         return std::unexpected("copyBuffer size must be > 0");
     }
-    if (srcOffset + size > src.size() || dstOffset + size > dst.size())
+    if (srcOffset > src.size() || size > src.size() - srcOffset ||
+        dstOffset > dst.size() || size > dst.size() - dstOffset)
     {
         return std::unexpected("copyBuffer range exceeds buffer bounds");
     }
