@@ -39,7 +39,7 @@ TEST_CASE("Image: allocate, transition, and read back a 4x4 RGBA8 image")
                 .width = w,
                 .height = h,
                 .format = VK_FORMAT_R8G8B8A8_UNORM,
-                .usage = ImageUsage::ColorAttachment,
+                .usage = ImageUsageFlags::ColorAttachment,
             });
             REQUIRE(image.has_value());
             CHECK(image->width() == w);

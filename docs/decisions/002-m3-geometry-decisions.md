@@ -148,18 +148,10 @@ closer than that will still z-fight. This is a hardware limit, not a bug.
 ### 8. Orientation and winding
 
 **Decision:** Asymmetric test shapes with per-face colors on the cube. Winding
-order verified in tests. Y-flip handled via projection (negate Y scale in
-projection matrix), not via negative-height viewport.
-
-**Known issue (deferred to M5):** Negating Y in the projection matrix inverts
-the determinant, flipping screen-space winding order (CCW↔CW). The pipeline
-currently uses VK_FRONT_FACE_COUNTER_CLOCKWISE, which combined with the
-Y-flip means front faces are culled. This works for the test cube (which uses
-compensating winding) but will cause issues with standard asset imports.
-The correct Vulkan approach is to remove the Y-flip from the projection and
-use a negative viewport height (VkViewport::height < 0), which flips Y
-during NDC→framebuffer mapping without altering winding. This requires
-updating all viewport setup code and projection functions.
+order verified in tests. Y-flip handled via negative-height viewport
+(VkViewport::height < 0), not via projection matrix negation. This preserves
+triangle winding order (CCW stays CCW) and is the standard Vulkan 1.1+
+approach. Front face is VK_FRONT_FACE_COUNTER_CLOCKWISE.
 
 ### 9. Frame recording
 

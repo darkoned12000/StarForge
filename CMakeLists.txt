@@ -96,6 +96,27 @@ starforge_add_shader(
 )
 
 starforge_add_shader(
+    SOURCE "${PROJECT_SOURCE_DIR}/shaders/compute/cull.slang"
+    STAGE  compute
+    ENTRY  computeMain
+    OUTPUT_NAME cull
+)
+
+starforge_add_shader(
+    SOURCE "${PROJECT_SOURCE_DIR}/shaders/graphics/gpu_driven.vert.slang"
+    STAGE  vertex
+    ENTRY  vertexMain
+    OUTPUT_NAME gpu_driven.vert
+)
+
+starforge_add_shader(
+    SOURCE "${PROJECT_SOURCE_DIR}/shaders/graphics/gpu_driven.frag.slang"
+    STAGE  fragment
+    ENTRY  fragmentMain
+    OUTPUT_NAME gpu_driven.frag
+)
+
+starforge_add_shader(
     SOURCE "${PROJECT_SOURCE_DIR}/shaders/graphics/test_triangle.slang"
     STAGE  vertex
     ENTRY  vertexMain

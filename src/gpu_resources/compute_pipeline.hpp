@@ -24,6 +24,7 @@ public:
         std::span<const std::uint8_t> spirv;
         const char* entryPoint = "main";
         std::uint32_t storageBufferCount = 1;
+        std::uint32_t pushConstantSize = 0; // bytes of push constants (0 = none)
     };
 
     [[nodiscard]] static std::expected<ComputePipeline, std::string>
@@ -31,7 +32,8 @@ public:
 
     [[nodiscard]] static std::expected<ComputePipeline, std::string>
     createFromFile(const starforge::vulkan::VulkanDevice& device, const std::string& path,
-                   const char* entryPoint = "main", std::uint32_t storageBufferCount = 1);
+                   const char* entryPoint = "main", std::uint32_t storageBufferCount = 1,
+                   std::uint32_t pushConstantSize = 0);
 
     ~ComputePipeline();
     ComputePipeline(ComputePipeline&& other) noexcept;
@@ -46,6 +48,26 @@ public:
                     std::uint32_t groupCountX,
                     std::uint32_t groupCountY = 1,
                     std::uint32_t groupCountZ = 1);
+
+    // Same as dispatchAndWait but also pushes push constant data.
+    [[nodiscard]] std::expected<void, std::string>
+    dispatchAndWaitWithPushConstants(std::span<const Buffer* const> storageBuffers,
+                                    const void* pushData,
+                                    std::uint32_t pushSize,
+                                    std::uint32_t groupCountX,
+                                    std::uint32_t groupCountY = 1,
+                                    std::uint32_t groupCountZ = 1);
+
+    // Record a dispatch into an existing command buffer (no submit, no wait).
+    // Caller is responsible for barriers before/after.
+    [[nodiscard]] std::expected<void, std::string>
+    recordDispatch(VkCommandBuffer cmd,
+                  std::span<const Buffer* const> storageBuffers,
+                  const void* pushData,
+                  std::uint32_t pushSize,
+                  std::uint32_t groupCountX,
+                  std::uint32_t groupCountY = 1,
+                  std::uint32_t groupCountZ = 1);
 
 private:
     ComputePipeline() = default;

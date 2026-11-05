@@ -163,9 +163,7 @@ WorldPosition::translated(const math::Vec3d& delta) const
     // deltas into ~kCellSize offsets (which would lose sub-nanometre precision).
     auto splitAxis = [](double d, std::int64_t& cellDelta, double& rem) noexcept -> bool {
         const double q = std::trunc(d / kCellSize);
-        constexpr double kMinInt64AsDouble = -9223372036854775808.0;
-        constexpr double kMaxInt64BoundExclusive = 9223372036854775808.0;
-        if (q < kMinInt64AsDouble || q >= kMaxInt64BoundExclusive)
+        if (q < WorldPosition::kMinInt64AsDouble || q >= WorldPosition::kMaxInt64BoundExclusive)
         {
             return false;
         }
@@ -297,44 +295,47 @@ std::uint64_t WorldPosition::cellHash() const noexcept
 
 std::expected<bool, std::string> WorldPosition::normalize() noexcept
 {
-    bool changed = false;
-    if (offsetX < 0.0 || offsetX >= kCellSize || !std::isfinite(offsetX))
+    std::int64_t cx = cellX, cy = cellY, cz = cellZ;
+    double ox = offsetX, oy = offsetY, oz = offsetZ;
+
+    bool changedX = false, changedY = false, changedZ = false;
+
+    if (ox < 0.0 || ox >= kCellSize || !std::isfinite(ox) || (ox == 0.0 && std::signbit(ox)))
     {
-        std::int64_t newCell = cellX;
-        double newOffset = offsetX;
-        if (!normalizeAxisChecked(newCell, newOffset))
+        if (!normalizeAxisChecked(cx, ox))
         {
-            return std::unexpected("WorldPosition::normalize failed: non-finite or overflow");
+            return std::unexpected("WorldPosition::normalize failed on X");
         }
-        cellX = newCell;
-        offsetX = newOffset;
-        changed = true;
+        changedX = true;
     }
-    if (offsetY < 0.0 || offsetY >= kCellSize || !std::isfinite(offsetY))
+    if (oy < 0.0 || oy >= kCellSize || !std::isfinite(oy) || (oy == 0.0 && std::signbit(oy)))
     {
-        std::int64_t newCell = cellY;
-        double newOffset = offsetY;
-        if (!normalizeAxisChecked(newCell, newOffset))
+        if (!normalizeAxisChecked(cy, oy))
         {
-            return std::unexpected("WorldPosition::normalize failed: non-finite or overflow");
+            return std::unexpected("WorldPosition::normalize failed on Y");
         }
-        cellY = newCell;
-        offsetY = newOffset;
-        changed = true;
+        changedY = true;
     }
-    if (offsetZ < 0.0 || offsetZ >= kCellSize || !std::isfinite(offsetZ))
+    if (oz < 0.0 || oz >= kCellSize || !std::isfinite(oz) || (oz == 0.0 && std::signbit(oz)))
     {
-        std::int64_t newCell = cellZ;
-        double newOffset = offsetZ;
-        if (!normalizeAxisChecked(newCell, newOffset))
+        if (!normalizeAxisChecked(cz, oz))
         {
-            return std::unexpected("WorldPosition::normalize failed: non-finite or overflow");
+            return std::unexpected("WorldPosition::normalize failed on Z");
         }
-        cellZ = newCell;
-        offsetZ = newOffset;
-        changed = true;
+        changedZ = true;
     }
-    return changed;
+
+    if (changedX || changedY || changedZ)
+    {
+        cellX = cx;
+        cellY = cy;
+        cellZ = cz;
+        offsetX = ox;
+        offsetY = oy;
+        offsetZ = oz;
+        return true;
+    }
+    return false;
 }
 
 bool WorldPosition::isNormalized() const noexcept

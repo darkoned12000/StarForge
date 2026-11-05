@@ -63,9 +63,11 @@ void Allocator::destroy() noexcept
     if (allocator_ != nullptr)
     {
 #ifndef NDEBUG
-        if (allocationCount() != 0)
+        const std::uint32_t leaked = allocationCount();
+        if (leaked != 0)
         {
             // Leak: resources not destroyed before allocator.
+            (void)leaked;
         }
 #endif
         vmaDestroyAllocator(allocator_);

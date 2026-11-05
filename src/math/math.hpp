@@ -36,30 +36,29 @@ inline constexpr Vec3f kUpY{0.0f, 1.0f, 0.0f};
 inline constexpr Vec3f kForwardZ{0.0f, 0.0f, -1.0f};
 
 // Vulkan clip-space perspective projection (right-handed view space looking
-// down -Z, Y-down in clip space, depth in [0, 1] with standard near -> 0, far -> 1).
+// down -Z, Y-up in clip space, depth in [0, 1] with standard near -> 0, far -> 1).
+// Y-flip is handled via negative viewport height, not projection matrix.
 [[nodiscard]] inline Mat4f perspectiveVulkan(float fovYRadians, float aspect, float nearPlane, float farPlane)
 {
-    Mat4f proj = glm::perspectiveRH_ZO(fovYRadians, aspect, nearPlane, farPlane);
-    proj[1][1] *= -1.0f; // Vulkan clip space has Y pointing down.
-    return proj;
+    return glm::perspectiveRH_ZO(fovYRadians, aspect, nearPlane, farPlane);
 }
 
-// Vulkan reverse-Z perspective projection (near -> 1, far -> 0, Y-down clip space).
+// Vulkan reverse-Z perspective projection (near -> 1, far -> 0, Y-up clip space).
+// Y-flip is handled via negative viewport height, not projection matrix.
 [[nodiscard]] inline Mat4f perspectiveVulkanReverseZ(float fovYRadians, float aspect, float nearPlane, float farPlane)
 {
-    Mat4f proj = glm::perspectiveRH_ZO(fovYRadians, aspect, farPlane, nearPlane);
-    proj[1][1] *= -1.0f;
-    return proj;
+    return glm::perspectiveRH_ZO(fovYRadians, aspect, farPlane, nearPlane);
 }
 
 // Vulkan reverse-Z perspective projection with an infinite far plane
-// (z = -nearPlane maps to depth 1, z -> -infinity maps to depth 0, Y-down clip space).
+// (z = -nearPlane maps to depth 1, z -> -infinity maps to depth 0, Y-up clip space).
+// Y-flip is handled via negative viewport height, not projection matrix.
 [[nodiscard]] inline Mat4f perspectiveVulkanReverseZInfinite(float fovYRadians, float aspect, float nearPlane)
 {
     const float f = 1.0f / std::tan(fovYRadians * 0.5f);
     Mat4f proj(0.0f);
     proj[0][0] = f / aspect;
-    proj[1][1] = -f;        // Y-down for Vulkan clip space
+    proj[1][1] = f;         // Y-up for Vulkan clip space (flipped via viewport)
     proj[2][3] = -1.0f;     // w_clip = -z_view
     proj[3][2] = nearPlane; // z_clip = nearPlane -> z_ndc = nearPlane / -z_view
     return proj;

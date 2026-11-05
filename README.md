@@ -187,6 +187,79 @@ Milestone M4: Measure
 - [ ] 4.4b Baseline-to-budget comparison
 - [ ] 4.4c Hardware scope documentation
 
+Milestone M5.5: Job System & Multi-Threading Foundation
+
+- [ ] 5.5.1a Work-stealing thread pool (Chase-Lev deques, thread affinity)
+- [ ] 5.5.1b Task graph (counter-based dependencies, continuations)
+- [ ] 5.5.1c Thread-local scratch linear allocators
+- [ ] 5.5.1d CPU epoch/frame-based deferred deletion queue
+- [ ] 5.5.1e Profiler integration (Tracy/Superluminal)
+- [ ] 5.5.2a DeltaStore cell-partitioned concurrency
+- [ ] 5.5.2b VMA multi-threaded allocation validation
+- [ ] 5.5.2c WorldPosition and Math purity verification
+- [ ] 5.5.3a Per-thread, per-frame-in-flight command pools
+- [ ] 5.5.3b Secondary command buffers (Dynamic Rendering inheritance)
+- [ ] 5.5.3c GPU-timeline deferred resource retirement queue
+- [ ] 5.5.3d Asynchronous staging ring-buffer uploader
+- [ ] 5.5.4a Pure functional cell generation jobs
+- [ ] 5.5.4b Isolated runtime TLS RNG (non-deterministic only)
+- [ ] 5.5.4c Lock-free chunk collection buffer
+- [ ] 5.5.4d Multi-threaded long-flight simulation
+- [ ] 5.5.5a SIMD-accelerated parallel heightfield evaluation
+- [ ] 5.5.5b Parallel atmosphere LUT generation
+- [ ] 5.5.5c Parallel quadtree LOD traversal
+- [ ] 5.5.5d Parallel secondary command recording
+- [ ] 5.5.6a ThreadSanitizer build (with driver suppressions)
+- [ ] 5.5.6b Multi-core bit-exact determinism test
+- [ ] 5.5.6c Scaling benchmarks (1/2/4/8/16 threads)
+- [ ] 5.5.6d High-concurrency stress test
+
+Milestone M5: GPU-Driven Rendering (Partial)
+
+- [x] 5.1 Test Suite Decoupling & CMake Fixes (partial)
+- [x] 5.2 Frustum & Math Normalization Fixes (partial)
+- [x] 5.3 Winding Order & Viewport Correction
+- [x] 5.4 Vulkan RAII & Image Abstraction
+- [x] 5.5 Compute & Timestamp Test Hardening (partial)
+- [x] 5.6 Scene Data Layout & Double-Buffered Storage
+- [x] 5.7 Slang Culling Compute Shader
+- [x] 5.8 Render Pass Integration & Barriers
+- [x] 5.9 T2 Parity Test (Compute vs. CPU Reference)
+- [ ] 5.10 Feature Fallback Verification (partial)
+- [ ] 5.11 1M Instance Scaling & Baseline Comparison (partial)
+
+Milestone M6: Deterministic Exploration
+
+- [x] 6.1.1 Content Generation API
+- [x] 6.1.2 Integer Hash Functions
+- [x] 6.1.3 Scale Level Traversal
+- [x] 6.2.1 Star System Generation
+- [x] 6.2.2 Asteroid Field Generation
+- [x] 6.2.3 Station/Outpost Generation
+- [x] 6.3.1 Delta Storage API
+- [x] 6.3.2 Delta Application
+- [x] 6.4.1 Long Flight Simulation (correctness)
+- [x] 6.4.2 Translation-Invariance at Maximum Extent
+
+Milestone M7: Planets (Infrastructure)
+
+- [x] 7.1.1 Cubed-sphere mapping (linear gnomonic projection, right-handed bases)
+- [x] 7.1.2 Quadtree node hierarchy (6 root quadtrees, one per cube face)
+- [x] 7.1.3 Split/merge criteria with hysteresis (SSE + distance-based)
+- [x] 7.1.4 Adjacency invariant (2:1 balance rule)
+- [x] 7.2.1 Camera-relative patch placement via LargeObjectSetup
+- [x] 7.2.2 Shared patch mesh geometry (33x33 vertices) with BDA access
+- [x] 7.2.3 Terrain skirts for crack elimination
+- [x] 7.2.4 BDA precision validation
+- [x] 7.3.1 Procedural terrain displacement (fractal noise)
+- [x] 7.3.2 Seam-free normal reconstruction (central differencing)
+- [x] 7.3.3 Continuous descent path testing
+- [x] 7.3.4 Performance validation within planet budget
+- [x] 7.4.1 Scattering model (Rayleigh + Mie with spherical phase functions)
+- [x] 7.4.2 Precomputed LUTs (Transmittance, Multiple Scattering, SkyView)
+- [x] 7.4.3 Sky dome and aerial perspective integration
+- [x] 7.4.4 Sun direction and terminator handling
+
 See [docs/ROADMAP.md](docs/ROADMAP.md) for details.
 
 ## License

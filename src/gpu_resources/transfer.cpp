@@ -22,7 +22,7 @@ std::expected<Uploader, std::string> Uploader::create(const starforge::vulkan::V
     VkCommandPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     poolInfo.queueFamilyIndex = uploader.queueFamily_;
-    poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 
     if (const VkResult result = vkCreateCommandPool(uploader.device_, &poolInfo, nullptr, &uploader.commandPool_);
         result != VK_SUCCESS)
@@ -111,8 +111,8 @@ std::expected<void, std::string> Uploader::copyBuffer(const Buffer& src, Buffer&
 
     VkBufferMemoryBarrier2 preBarrier{};
     preBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
-    preBarrier.srcStageMask = VK_PIPELINE_STAGE_2_HOST_BIT | VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-    preBarrier.srcAccessMask = VK_ACCESS_2_HOST_WRITE_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+    preBarrier.srcStageMask = VK_PIPELINE_STAGE_2_HOST_BIT | VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    preBarrier.srcAccessMask = VK_ACCESS_2_HOST_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT;
     preBarrier.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
     preBarrier.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
     preBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -137,8 +137,8 @@ std::expected<void, std::string> Uploader::copyBuffer(const Buffer& src, Buffer&
     postBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
     postBarrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
     postBarrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-    postBarrier.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT | VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-    postBarrier.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT | VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+    postBarrier.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT | VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    postBarrier.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT | VK_ACCESS_2_TRANSFER_READ_BIT;
     postBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     postBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     postBarrier.buffer = dst.handle();

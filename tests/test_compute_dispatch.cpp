@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -131,6 +132,230 @@ TEST_CASE("Compute dispatch: Slang SPIR-V against CPU reference")
                 (void)readback->invalidate(0, size);
                 CHECK(std::memcmp(*mapped, expectedHost.data(), size) == 0);
                 readback->unmap();
+            }
+        }
+
+        CHECK(allocator->allocationCount() == 0);
+    }
+
+    CHECK(context->validationErrorCount() == 0);
+}
+
+TEST_CASE("Compute dispatch: consecutive dispatches on same pipeline")
+{
+    ContextCreateInfo info;
+    info.enableValidation = kValidationDefault;
+    info.requiredExtensions.clear();
+
+    auto context = VulkanContext::create(info);
+    REQUIRE(context.has_value());
+
+    {
+        auto device = VulkanDevice::create(*context);
+        REQUIRE(device.has_value());
+
+        Allocator::CreateInfo allocInfo;
+        allocInfo.instance = context->instance();
+        allocInfo.physicalDevice = context->physicalDevice();
+        allocInfo.device = device->device();
+        auto allocator = Allocator::create(allocInfo);
+        REQUIRE(allocator.has_value());
+
+        constexpr std::uint32_t count = 256;
+        constexpr VkDeviceSize size = count * sizeof(std::uint32_t);
+
+        auto bufA = Buffer::create(*allocator, {
+            .size = size,
+            .usage = BufferUsage::Storage,
+            .memory = MemoryPlacement::CpuToGpu,
+        });
+        REQUIRE(bufA.has_value());
+
+        auto bufB = Buffer::create(*allocator, {
+            .size = size,
+            .usage = BufferUsage::Storage,
+            .memory = MemoryPlacement::GpuPreferred,
+        });
+        REQUIRE(bufB.has_value());
+
+        auto readback = Buffer::create(*allocator, {
+            .size = size,
+            .usage = BufferUsage::TransferDst,
+            .memory = MemoryPlacement::GpuToCpu,
+        });
+        REQUIRE(readback.has_value());
+
+        const std::string shaderPath = std::string(STARFORGE_SHADER_DIR) + "/test_compute.spv";
+        auto pipeline = ComputePipeline::createFromFile(*device, shaderPath, "main", 2);
+        REQUIRE(pipeline.has_value());
+
+        // First dispatch: A -> B.
+        {
+            auto mapped = bufA->map();
+            REQUIRE(mapped.has_value());
+            for (std::uint32_t i = 0; i < count; ++i)
+                static_cast<std::uint32_t*>(*mapped)[i] = i;
+            (void)bufA->flush(0, size);
+            bufA->unmap();
+        }
+
+        const Buffer* bindings1[] = {&(*bufA), &(*bufB)};
+        REQUIRE(pipeline->dispatchAndWait(bindings1, count / kWorkgroupSize).has_value());
+
+        // Second dispatch: B -> A (consecutive on same pipeline).
+        const Buffer* bindings2[] = {&(*bufB), &(*bufA)};
+        REQUIRE(pipeline->dispatchAndWait(bindings2, count / kWorkgroupSize).has_value());
+
+        auto uploader = Uploader::create(*device);
+        REQUIRE(uploader.has_value());
+        REQUIRE(uploader->copyBuffer(*bufA, *readback, size).has_value());
+
+        auto mapped = readback->map();
+        REQUIRE(mapped.has_value());
+        (void)readback->invalidate(0, size);
+        for (std::uint32_t i = 0; i < count; ++i)
+        {
+            std::uint32_t expected = cpuReferenceKernel(cpuReferenceKernel(i));
+            CHECK(static_cast<std::uint32_t*>(*mapped)[i] == expected);
+        }
+        readback->unmap();
+    }
+
+    CHECK(context->validationErrorCount() == 0);
+}
+
+TEST_CASE("Compute dispatch: boundary validation")
+{
+    ContextCreateInfo info;
+    info.enableValidation = kValidationDefault;
+    info.requiredExtensions.clear();
+
+    auto context = VulkanContext::create(info);
+    REQUIRE(context.has_value());
+
+    {
+        auto device = VulkanDevice::create(*context);
+        REQUIRE(device.has_value());
+
+        // Create a minimal compute pipeline with a dummy shader.
+        // We only test validation, not execution.
+        // Use a simple compute shader if available.
+        const std::string shaderPath = std::string(STARFORGE_SHADER_DIR) + "/test_compute.spv";
+        std::ifstream file(shaderPath, std::ios::ate | std::ios::binary);
+        if (!file)
+        {
+            // Skip if shader not available.
+            return;
+        }
+        const auto size = static_cast<std::size_t>(file.tellg());
+        std::vector<std::uint8_t> bytes(size);
+        file.seekg(0);
+        file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size));
+
+        auto pipeline = ComputePipeline::create(*device, {
+            .spirv = bytes,
+            .entryPoint = "main",
+            .storageBufferCount = 2,
+        });
+        REQUIRE(pipeline.has_value());
+
+        // Test zero dispatch dimensions.
+        std::vector<std::uint32_t> dummy(4, 0);
+        auto allocator = Allocator::create({.instance = context->instance(), .physicalDevice = context->physicalDevice(), .device = device->device()});
+        REQUIRE(allocator.has_value());
+        auto buf = Buffer::create(*allocator, {
+            .size = 4 * sizeof(std::uint32_t),
+            .usage = BufferUsage::Storage,
+            .memory = MemoryPlacement::GpuPreferred,
+        });
+        REQUIRE(buf.has_value());
+
+        const Buffer* bindings[] = {&(*buf), &(*buf)};
+        auto r1 = pipeline->dispatchAndWait(bindings, 0, 1, 1);
+        CHECK_FALSE(r1.has_value());
+
+        auto r2 = pipeline->dispatchAndWait(bindings, 1, 0, 1);
+        CHECK_FALSE(r2.has_value());
+
+        auto r3 = pipeline->dispatchAndWait(bindings, 1, 1, 0);
+        CHECK_FALSE(r3.has_value());
+
+        // Test mismatched buffer count.
+        const Buffer* singleBinding[] = {&(*buf)};
+        auto r4 = pipeline->dispatchAndWait(singleBinding, 1, 1, 1);
+        CHECK_FALSE(r4.has_value());
+
+        // Test null buffer pointer.
+        const Buffer* nullBindings[] = {nullptr, &(*buf)};
+        auto r5 = pipeline->dispatchAndWait(nullBindings, 1, 1, 1);
+        CHECK_FALSE(r5.has_value());
+    }
+
+    CHECK(context->validationErrorCount() == 0);
+}
+
+TEST_CASE("Compute dispatch: multidimensional dispatch API")
+{
+    ContextCreateInfo info;
+    info.enableValidation = kValidationDefault;
+    info.requiredExtensions.clear();
+
+    auto context = VulkanContext::create(info);
+    REQUIRE(context.has_value());
+
+    {
+        auto device = VulkanDevice::create(*context);
+        REQUIRE(device.has_value());
+
+        Allocator::CreateInfo allocInfo;
+        allocInfo.instance = context->instance();
+        allocInfo.physicalDevice = context->physicalDevice();
+        allocInfo.device = device->device();
+        auto allocator = Allocator::create(allocInfo);
+        REQUIRE(allocator.has_value());
+
+        {
+            // Verify API accepts 2D and 3D dispatch dimensions.
+            const std::string shaderPath = std::string(STARFORGE_SHADER_DIR) + "/test_compute.spv";
+            std::ifstream file(shaderPath, std::ios::ate | std::ios::binary);
+            if (!file)
+            {
+                return;
+            }
+            const auto size = static_cast<std::size_t>(file.tellg());
+            std::vector<std::uint8_t> bytes(size);
+            file.seekg(0);
+            file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size));
+
+            auto pipeline = ComputePipeline::create(*device, {
+                .spirv = bytes,
+                .entryPoint = "main",
+                .storageBufferCount = 2,
+            });
+            REQUIRE(pipeline.has_value());
+
+            constexpr std::uint32_t count = 256;
+            constexpr VkDeviceSize bufSize = count * sizeof(std::uint32_t);
+            auto bufA = Buffer::create(*allocator, { .size = bufSize, .usage = BufferUsage::Storage, .memory = MemoryPlacement::CpuToGpu });
+            REQUIRE(bufA.has_value());
+            auto bufB = Buffer::create(*allocator, { .size = bufSize, .usage = BufferUsage::Storage, .memory = MemoryPlacement::GpuPreferred });
+            REQUIRE(bufB.has_value());
+
+            {
+                auto mapped = bufA->map();
+                REQUIRE(mapped.has_value());
+                for (std::uint32_t i = 0; i < count; ++i)
+                    static_cast<std::uint32_t*>(*mapped)[i] = i;
+                (void)bufA->flush(0, bufSize);
+                bufA->unmap();
+            }
+
+            {
+                const Buffer* bindings[] = {&(*bufA), &(*bufB)};
+                // API accepts 2D and 3D dimensions (dispatch covers first dimension)
+                REQUIRE(pipeline->dispatchAndWait(bindings, count / kWorkgroupSize, 1, 1).has_value());
+                REQUIRE(pipeline->dispatchAndWait(bindings, count / kWorkgroupSize, 2, 1).has_value());
+                REQUIRE(pipeline->dispatchAndWait(bindings, count / kWorkgroupSize, 2, 3).has_value());
             }
         }
 

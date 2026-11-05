@@ -40,7 +40,7 @@ TEST_CASE("Depth format: findDepthFormat returns a supported format")
                 .width = 64,
                 .height = 64,
                 .format = depthFormat,
-                .usage = ImageUsage::DepthAttachment,
+                .usage = ImageUsageFlags::DepthAttachment,
             });
             REQUIRE(depthImage.has_value());
             CHECK(depthImage->format() == depthFormat);

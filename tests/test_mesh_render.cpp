@@ -171,7 +171,7 @@ TEST_CASE("Mesh render: cube with per-face colors and depth buffer")
                 .width = w,
                 .height = h,
                 .format = VK_FORMAT_R8G8B8A8_UNORM,
-                .usage = ImageUsage::ColorAttachment,
+                .usage = ImageUsageFlags::ColorAttachment,
             });
             REQUIRE(colorImage.has_value());
 
@@ -186,7 +186,7 @@ TEST_CASE("Mesh render: cube with per-face colors and depth buffer")
                 .width = w,
                 .height = h,
                 .format = depthFormat,
-                .usage = ImageUsage::DepthAttachment,
+                .usage = ImageUsageFlags::DepthAttachment,
             });
             REQUIRE(depthImage.has_value());
 
@@ -290,9 +290,9 @@ TEST_CASE("Mesh render: cube with per-face colors and depth buffer")
             // Set viewport and scissor.
             VkViewport viewport{};
             viewport.x = 0.0f;
-            viewport.y = 0.0f;
+            viewport.y = static_cast<float>(h);
             viewport.width = static_cast<float>(w);
-            viewport.height = static_cast<float>(h);
+            viewport.height = -static_cast<float>(h);
             viewport.minDepth = 0.0f;
             viewport.maxDepth = 1.0f;
             vkCmdSetViewport(cmd, 0, 1, &viewport);

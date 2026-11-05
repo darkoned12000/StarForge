@@ -103,7 +103,8 @@ struct WorldPosition
     // Coarse cell index at a given scale level using pure integer arithmetic
     // (floor semantics via arithmetic right shift). Each level coarsens by
     // kCellBits (20 bits): level 0 = cell, level 1 = cell >> 20,
-    // level 2 = cell >> 40, level >= 3 = cell >> 60 (or sign extension).
+    // level 2 = cell >> 40, level 3 = cell >> 60. Levels >= 4 collapse to
+    // the single summary cell 0 (positive) or -1 (negative).
     [[nodiscard]] std::int64_t coarseCellX(int level) const noexcept;
     [[nodiscard]] std::int64_t coarseCellY(int level) const noexcept;
     [[nodiscard]] std::int64_t coarseCellZ(int level) const noexcept;

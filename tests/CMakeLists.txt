@@ -32,12 +32,17 @@ add_executable(starforge_tests
     test_benchmark_compare.cpp
     test_benchmark_scene.cpp
     test_cpu_timer.cpp
+    test_content_generation.cpp
+    test_content_integration.cpp
+    test_planets.cpp
 )
 
 target_link_libraries(starforge_tests
     PRIVATE
         starforge_core
         starforge_bench
+        starforge_content
+        starforge_planets
         starforge_math
         starforge_spatial
         starforge_stats
@@ -61,6 +66,8 @@ add_executable(starforge_gpu_tests
     test_mesh_render.cpp
     test_bda_simple.cpp
     test_cube_render.cpp
+    test_gpu_cull_parity.cpp
+    test_gpu_driven_benchmark.cpp
     test_depth_ordering.cpp
     test_naive_control.cpp
     test_gpu_timestamps.cpp
@@ -82,6 +89,7 @@ target_link_libraries(starforge_gpu_tests
 target_compile_definitions(starforge_gpu_tests
     PRIVATE
         STARFORGE_SHADER_DIR="${PROJECT_BINARY_DIR}/shaders"
+        STARFORGE_BASELINE_DIR="${PROJECT_BINARY_DIR}/benchmarks/baselines"
 )
 
 target_include_directories(starforge_gpu_tests SYSTEM

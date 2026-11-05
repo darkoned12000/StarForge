@@ -593,6 +593,136 @@ against M4 baselines.
 - Queue thread-safety — single graphics queue; needs external synchronization for background loaders
 - Winding order via projection Y-flip — remove Y-flip from projection, use negative viewport height instead
 
+## M5.5 – Job System & Multi-Threading Foundation
+
+- **Goal:** Introduce a job system (task graph + worker thread pool) that all
+  subsequent subsystems use for parallel work. Retrofit existing single-threaded
+  code to use it. No subsystem should be left single-threaded where parallelism
+  provides a measurable benefit.
+- **Proof:** Content generation 4x+ faster with 4 threads (T1+T4); terrain
+  height evaluation 4x+ faster (T1+T4); zero data races under ThreadSanitizer;
+  deterministic output preserved under parallel execution (T1).
+- **Strategy:** Build the job system first, then retrofit each subsystem.
+  Every retrofit must pass existing tests unchanged (determinism preserved).
+- **Scheduler:** Use a work-stealing scheduler (Chase-Lev deque per worker) with
+  task batching. Avoid centralized mutex-protected task queues. Consider
+  enkiTS or Taskflow as lightweight alternatives if building from scratch
+  proves too time-consuming. Decision recorded in ADR.
+
+### 5.5.0 Decision Notes (Review)
+
+Before implementation, resolve these design decisions and record them as ADRs:
+
+- **Job system model:** Work-stealing scheduler with per-worker Chase-Lev
+  deques. Tasks declare dependencies via counters; the scheduler topologically
+  sorts and dispatches ready tasks. Task batching for coarse-grained work
+  (chunk generation) and fine-grained work (height evaluation). Work-stealing
+  avoids centralized lock contention.
+- **Thread count:** Default to hardware_concurrency() - 1 (leave one core for
+  the main/render thread). Configurable at startup. Minimum 1 (single-threaded
+  fallback for debugging/profiling). Pin worker threads to physical cores;
+  avoid scheduling high-throughput jobs on efficiency cores on hybrid CPUs.
+- **Determinism under parallelism:** Content generation must remain bit-identical
+  regardless of thread execution order. Each task creates its own
+  DeterministicRng on the stack, seeded from contentSeed(worldSeed, cx, cy, cz, level).
+  No persistent thread-local RNG state for content generation. Task results are
+  collected in deterministic order (sorted by cell key). No shared mutable state
+  between tasks.
+- **Thread-local RNG (isolated):** Thread-local RNG is reserved for
+  non-deterministic runtime systems only (audio pitch variations, particle
+  jitter, visual sparks). It must never be used for content generation.
+- **Thread safety:** All shared data structures must be thread-safe or
+  documented as thread-affine with per-thread instances.
+- **Vulkan threading:** Command pools cannot be used concurrently across threads.
+  Pool count = WorkerThreads x framesInFlight. Pools reset per frame via
+  vkResetCommandPool (not alloc/free). Secondary command buffers use
+  VkCommandBufferInheritanceRenderingInfo for Vulkan 1.3 dynamic rendering.
+  vkQueueSubmit and vkQueuePresentKHR require external synchronization —
+  funnel submissions to the main render thread or a dedicated submission thread.
+- **Memory ordering:** Use std::atomic for counters, std::mutex/shared_mutex
+  for complex state. Prefer lock-free data structures (MPSC queues) for task
+  submission.
+- **Thread-local scratch allocators:** Each worker thread gets a linear bump
+  allocator (reset after each task) for intermediate allocations. This avoids
+  global heap contention (malloc/operator new) which is the biggest bottleneck
+  in multi-threaded procedural generation.
+- **Profiling:** Tracy/Superluminal zones per task; per-thread CPU time tracking;
+  fiber and thread zones for work-stealing visualization.
+
+### 5.5.1 Core Job System
+
+| Step | Deliverable | Verified by | Done when |
+|------|-------------|-------------|-----------|
+| 5.5.1a | Work-stealing thread pool: per-worker Chase-Lev deques, thread affinity/priority, graceful shutdown | T1 | Pool starts/stops cleanly; tasks execute on worker threads; work-stealing balances load; no thread leaks |
+| 5.5.1b | Task graph: tasks with counter-based dependencies and continuations; topological sort; parallel dispatch of ready tasks | T1 | Tasks execute in dependency order; independent tasks run concurrently; cycle detection |
+| 5.5.1c | Thread-local scratch linear allocators: per-worker bump allocator, reset after each task | T1 | No global heap contention; intermediate allocations are O(1); memory reused across tasks |
+| 5.5.1d | CPU epoch/frame-based deferred deletion queue: retire memory, task nodes, data buffers after epoch boundary | T1 | Safe memory reclamation without reference counting; no use-after-free |
+| 5.5.1e | Profiler integration: Tracy/Superluminal fiber and thread zones per task | T1 | Profiler shows task execution across threads; CPU time attributed per thread |
+
+### 5.5.2 Shared State & Synchronization
+
+| Step | Deliverable | Verified by | Done when |
+|------|-------------|-------------|-----------|
+| 5.5.2a | DeltaStore cell-partitioned concurrency: partition storage by CellKey hash buckets; reads (deltasForCell) and writes (apply) for distant cells never contend; shared_mutex per bucket | T1 | Concurrent apply/deltasForCell for different cells are lock-free; same-cell operations serialized; existing tests pass |
+| 5.5.2b | VMA multi-threaded allocation validation: VMA is thread-safe by default; validate concurrent allocations; configure custom VMA memory pools per thread if bottlenecks arise | T2 | Concurrent allocations succeed; no corruption; performance acceptable |
+| 5.5.2c | Verification of WorldPosition and Math functional purity: all operations are value types with no shared state; audit -ffp-contract compliance across all math code | T1 | ThreadSanitizer clean; property tests pass under concurrent access |
+
+### 5.5.3 Multi-Threaded Vulkan Backend
+
+| Step | Deliverable | Verified by | Done when |
+|------|-------------|-------------|-----------|
+| 5.5.3a | Per-thread, per-frame-in-flight command pool allocator: pool count = WorkerThreads x framesInFlight; reset per frame via vkResetCommandPool | T2 | Command buffers allocated on worker threads; no pool contention; no alloc/free per frame |
+| 5.5.3b | Secondary command buffer recording with Dynamic Rendering inheritance: VkCommandBufferInheritanceRenderingInfo with matching color/depth formats and sample counts | T3 | Parallel command recording produces correct output; zero validation errors |
+| 5.5.3c | GPU-timeline deferred resource retirement queue: resources retired only when GPU completes the frame (fence/timeline semaphore); frees VkBuffer, VkImage, descriptor sets | T2 | No use-after-free; clean shutdown; resources freed at correct time |
+| 5.5.3d | Asynchronous staging ring-buffer uploader: lock-free staging ring buffer with atomic slice reservation (fetch_add); workers record transfer commands into thread-local command buffers or write to mapped memory; single batch flush/submit at phase boundaries | T2 | Concurrent uploads succeed; no CPU blocking on GPU fences; no corruption |
+
+### 5.5.4 Procedural Content Parallelization
+
+| Step | Deliverable | Verified by | Done when |
+|------|-------------|-------------|-----------|
+| 5.5.4a | Pure functional cell generation jobs: each cell generates its own DeterministicRng on the stack from contentSeed(); no shared mutable state; results collected in deterministic order (sorted by cell key) | T1 | Bit-identical output between sequential and parallel execution; 4x+ faster with 4 threads |
+| 5.5.4b | Isolated runtime TLS RNG: thread-local RNG for non-deterministic runtime systems only (audio pitch, particle jitter, visual sparks); never used for content generation | T1 | TLS RNG produces different values per thread; content generation remains deterministic |
+| 5.5.4c | Lock-free / pre-allocated chunk collection buffer: pre-allocated result buffer sized to expected cell count; workers write to assigned slots; no mutex on collection | T1 | No allocation churn during generation; results in deterministic order |
+| 5.5.4d | Multi-threaded long-flight spatial coordinate simulation: parallel cell generation across 1000+ cells; positions precise; no frame drops | T1+T4 | 1000+ cells generated in parallel; bit-identical to sequential; performance documented |
+
+### 5.5.5 Planet & Terrain Parallelization
+
+| Step | Deliverable | Verified by | Done when |
+|------|-------------|-------------|-----------|
+| 5.5.5a | SIMD-accelerated parallel heightfield evaluation: per-vertex noise evaluation in parallel with SIMD (AVX2/NEON); 4x+ faster height map generation; identical output | T1+T4 | Height maps bit-identical to single-threaded; 4x+ speedup on 4 cores |
+| 5.5.5b | Parallel atmosphere LUT generation: precompute transmittance/scattering LUTs in parallel (CPU with SIMD, or delegate to ComputePipeline on GPU) | T1+T4 | LUT values identical to single-threaded; generation 4x+ faster |
+| 5.5.5c | Parallel quadtree node LOD traversal and split/merge scheduling: evaluate split criteria across nodes in parallel; measure improvement; revert if < 5% gain | T1+T4 | Measured improvement documented; no regression |
+| 5.5.5d | Parallel secondary command recording for terrain mesh chunks: record draw commands for patch batches on worker threads | T3 | Parallel recording produces correct output; zero validation errors |
+
+### 5.5.6 Verification & Profiling
+
+| Step | Deliverable | Verified by | Done when |
+|------|-------------|-------------|-----------|
+| 5.5.6a | ThreadSanitizer build configuration with driver suppression rules: tsan_suppressions.txt for Vulkan ICD internals; compile with -fsanitize=thread | T1/T2 | TSan runs clean on all tests; no false positives from driver internals |
+| 5.5.6b | Multi-core vs single-core bit-exact determinism test: run same cell generation sequence under 1, 4, 16 threads with random synthetic task sleep intervals; hash output chunks; assert bit-identical | T1 | All thread counts produce identical output hashes |
+| 5.5.6c | Scaling benchmarks: measure 1, 2, 4, 8, 16 threads; document scaling curve; no regression on single-core | T4 | Scaling curve committed; linear scaling for embarrassingly parallel work |
+| 5.5.6d | High-concurrency stress test under synthetic task delays: 1000 concurrent tasks with random sleeps; verify no deadlock or starvation | T1 | Completes within 10 seconds; all tasks execute; no deadlock |
+
+### M5.5 Exit Criteria
+- Job system operational with work-stealing scheduler and configurable thread count.
+- Content generation parallelized with bit-identical output.
+- Terrain height evaluation parallelized with SIMD.
+- Atmosphere LUT computation parallelized.
+- DeltaStore thread-safe with cell-partitioned concurrency.
+- Zero data races under ThreadSanitizer (with driver suppressions).
+- Determinism preserved under parallel execution (bit-exact across thread counts).
+- Performance scaling documented (4x+ on 4 cores for embarrassingly parallel work).
+- Thread-local scratch allocators eliminate global heap contention.
+
+### Deferred from M5.5 review
+- GPU command recording multi-threading (secondary command buffers) deferred to
+  M7.2 GPU patch pipeline integration — owner: M7 (Planets).
+- Physics multi-threading (Jolt) deferred to M11 (Physics) — owner: M11.
+- Audio multi-threading (miniaudio) deferred to M12 (Audio) — owner: M12.
+- ECS multi-threaded system scheduling deferred to M10 (ECS) — owner: M10.
+- Work-stealing scheduler may be replaced with enkiTS or Taskflow if
+  implementation time exceeds budget — owner: M5.5.
+
 ## M6 – Deterministic Exploration (goal and proof)
 
 - **Goal:** content is a pure function of position:

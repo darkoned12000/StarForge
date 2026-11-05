@@ -44,9 +44,9 @@ GraphicsPipeline::create(const GraphicsPipelineConfig& config)
 
     VkViewport viewport{};
     viewport.x = 0.0f;
-    viewport.y = 0.0f;
+    viewport.y = config.viewportHeight > 0.0f ? config.viewportHeight : 1.0f;
     viewport.width = config.viewportWidth > 0.0f ? config.viewportWidth : 1.0f;
-    viewport.height = config.viewportHeight > 0.0f ? config.viewportHeight : 1.0f;
+    viewport.height = config.viewportHeight > 0.0f ? -config.viewportHeight : -1.0f;
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
 

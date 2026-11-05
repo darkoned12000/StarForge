@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <set>
+#include <random>
 
 using namespace starforge::bench;
 using namespace starforge::math;
@@ -111,7 +112,7 @@ TEST_CASE("Frustum: build from reverse-Z view-proj")
 {
     // Camera at (0,0,5) looking down -Z, reverse-Z projection.
     Mat4d view = glm::lookAt(Vec3d(0, 0, 5), Vec3d(0, 0, 0), Vec3d(0, 1, 0));
-    Mat4d proj = glm::perspective(1.0, 16.0 / 9.0, 100.0, 0.1); // swapped for reverse-Z
+    Mat4d proj = Mat4d(perspectiveVulkanReverseZ(1.0f, 16.0f / 9.0f, 0.1f, 100.0f)); // reverse-Z
     Mat4d vp = proj * view;
     Frustum f = buildFrustum(vp);
     for (int i = 0; i < 6; ++i)
@@ -120,6 +121,10 @@ TEST_CASE("Frustum: build from reverse-Z view-proj")
         {
             CHECK(std::isfinite(f.planes[i][j]));
         }
+        double len = std::sqrt(f.planes[i][0] * f.planes[i][0] +
+                               f.planes[i][1] * f.planes[i][1] +
+                               f.planes[i][2] * f.planes[i][2]);
+        CHECK(std::abs(len - 1.0) < 1e-6);
     }
 }
 
@@ -127,7 +132,7 @@ TEST_CASE("Frustum: reverse-Z plane extraction and culling")
 {
     // Camera at (0,0,5) looking down -Z. Near=0.5, far=50.0, reverse-Z.
     Mat4d view = glm::lookAt(Vec3d(0, 0, 5), Vec3d(0, 0, 0), Vec3d(0, 1, 0));
-    Mat4d proj = glm::perspective(1.0, 1.0, 50.0, 0.5); // swapped for reverse-Z
+    Mat4d proj = Mat4d(perspectiveVulkanReverseZ(1.0f, 1.0f, 0.5f, 50.0f)); // reverse-Z
     Mat4d vp = proj * view;
     Frustum f = buildFrustum(vp);
 
@@ -256,7 +261,6 @@ TEST_CASE("Workload: recordWorkloadFrame counts draw calls")
     CHECK(visible.size() > 0);
 }
 
-#include <random>
 
 TEST_CASE("Cull: randomized oracle against analytical plane half-space tester")
 {

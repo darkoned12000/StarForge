@@ -55,18 +55,18 @@ TEST_CASE("Math conventions: column-major storage")
     CHECK(approxEqual(data[15], 1.0f));
 }
 
-TEST_CASE("Math conventions: Vulkan clip space Y-down")
+TEST_CASE("Math conventions: Vulkan clip space Y-up (flipped via viewport)")
 {
     const float fov = glm::radians(60.0f);
     const float aspect = 16.0f / 9.0f;
     const Mat4f proj = perspectiveVulkanReverseZ(fov, aspect, 0.1f, 100.0f);
 
     // Point above the origin (positive Y) in front of the camera (-Z) maps to
-    // negative clip Y in Vulkan's Y-down clip space.
+    // positive clip Y in Y-up clip space. Y-flip occurs at viewport stage.
     const Vec4f pointAbove{0.0f, 1.0f, -5.0f, 1.0f};
     const Vec4f clip = proj * pointAbove;
     CHECK(clip.w > 0.0f);
-    CHECK((clip.y / clip.w) < 0.0f);
+    CHECK((clip.y / clip.w) > 0.0f);
 }
 
 TEST_CASE("Math conventions: depth range 0..1 (Vulkan)")

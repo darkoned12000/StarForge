@@ -42,7 +42,7 @@ TEST_CASE("Offscreen render target: color + depth clear and readback")
                 .width = w,
                 .height = h,
                 .format = VK_FORMAT_R8G8B8A8_UNORM,
-                .usage = ImageUsage::ColorAttachment,
+                .usage = ImageUsageFlags::ColorAttachment,
             });
             REQUIRE(colorImage.has_value());
 
@@ -57,7 +57,7 @@ TEST_CASE("Offscreen render target: color + depth clear and readback")
                 .width = w,
                 .height = h,
                 .format = depthFormat,
-                .usage = ImageUsage::DepthAttachment,
+                .usage = ImageUsageFlags::DepthAttachment,
             });
             REQUIRE(depthImage.has_value());
 

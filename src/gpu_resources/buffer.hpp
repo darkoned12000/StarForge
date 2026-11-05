@@ -27,6 +27,7 @@ enum class BufferUsage
     Uniform,
     Storage,
     Indirect,
+    StorageIndirect, // Storage + Indirect
 };
 
 enum class MemoryPlacement

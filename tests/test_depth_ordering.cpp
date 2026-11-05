@@ -77,7 +77,7 @@ RenderResult renderDepthOrder(VkDevice device, VkPhysicalDevice physDevice,
     auto colorImage = Image::create(allocator, {
         .width = w, .height = h,
         .format = VK_FORMAT_R8G8B8A8_UNORM,
-        .usage = ImageUsage::ColorAttachment,
+        .usage = ImageUsageFlags::ColorAttachment,
     });
 
     auto colorView = colorImage->createView(device);
@@ -87,7 +87,7 @@ RenderResult renderDepthOrder(VkDevice device, VkPhysicalDevice physDevice,
     auto depthImage = Image::create(allocator, {
         .width = w, .height = h,
         .format = depthFormat,
-        .usage = ImageUsage::DepthAttachment,
+        .usage = ImageUsageFlags::DepthAttachment,
     });
     auto depthView = depthImage->createView(device, VK_IMAGE_ASPECT_DEPTH_BIT);
 
@@ -179,9 +179,9 @@ RenderResult renderDepthOrder(VkDevice device, VkPhysicalDevice physDevice,
 
     VkViewport viewport{};
     viewport.x = 0.0f;
-    viewport.y = 0.0f;
+    viewport.y = static_cast<float>(h);
     viewport.width = static_cast<float>(w);
-    viewport.height = static_cast<float>(h);
+    viewport.height = -static_cast<float>(h);
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
     vkCmdSetViewport(cmd, 0, 1, &viewport);

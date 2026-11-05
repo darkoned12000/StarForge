@@ -17,17 +17,25 @@ bool hasStencilComponent(VkFormat format)
            format == VK_FORMAT_D16_UNORM_S8_UINT;
 }
 
-VkImageUsageFlags toVulkanUsage(ImageUsage usage)
+VkImageUsageFlags toVulkanUsage(ImageUsageFlags usage)
 {
-    switch (usage)
+    VkImageUsageFlags flags = static_cast<VkImageUsageFlags>(usage);
+
+    // Add implicit transfer support for attachments.
+    if (hasFlag(usage, ImageUsageFlags::ColorAttachment))
     {
-    case ImageUsage::ColorAttachment:  return VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    case ImageUsage::DepthAttachment:   return VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-    case ImageUsage::TransferSrc:       return VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-    case ImageUsage::TransferDst:       return VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    case ImageUsage::Sampled:          return VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        flags |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     }
-    return VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    if (hasFlag(usage, ImageUsageFlags::DepthAttachment))
+    {
+        flags |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    }
+    if (hasFlag(usage, ImageUsageFlags::Sampled))
+    {
+        flags |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    }
+
+    return flags;
 }
 
 VkImageAspectFlags toAspectMask(VkFormat format)
@@ -74,6 +82,7 @@ std::expected<Image, std::string> Image::create(Allocator& allocator, const Crea
     image.width_ = info.width;
     image.height_ = info.height;
     image.aspectMask_ = toAspectMask(info.format);
+    image.layout_ = VK_IMAGE_LAYOUT_UNDEFINED;
 
     VkResult result = vmaCreateImage(allocator.handle(), &imageInfo, &allocInfo,
                                      &image.image_, &image.allocation_, nullptr);
@@ -99,6 +108,7 @@ Image::~Image()
     image_ = VK_NULL_HANDLE;
     allocation_ = nullptr;
     allocator_ = nullptr;
+    layout_ = VK_IMAGE_LAYOUT_UNDEFINED;
 }
 
 Image::Image(Image&& other) noexcept
@@ -108,8 +118,14 @@ Image::Image(Image&& other) noexcept
       format_(other.format_),
       width_(other.width_),
       height_(other.height_),
-      aspectMask_(other.aspectMask_)
+      aspectMask_(other.aspectMask_),
+      layout_(other.layout_)
 {
+    other.format_ = VK_FORMAT_UNDEFINED;
+    other.width_ = 0;
+    other.height_ = 0;
+    other.aspectMask_ = VK_IMAGE_ASPECT_COLOR_BIT;
+    other.layout_ = VK_IMAGE_LAYOUT_UNDEFINED;
 }
 
 Image& Image::operator=(Image&& other) noexcept
@@ -127,8 +143,49 @@ Image& Image::operator=(Image&& other) noexcept
         width_ = other.width_;
         height_ = other.height_;
         aspectMask_ = other.aspectMask_;
+        layout_ = other.layout_;
     }
     return *this;
+}
+
+Image::ImageView::~ImageView()
+{
+    if (view_ != VK_NULL_HANDLE && device_ != VK_NULL_HANDLE)
+    {
+        vkDestroyImageView(device_, view_, nullptr);
+    }
+    view_ = VK_NULL_HANDLE;
+    device_ = VK_NULL_HANDLE;
+}
+
+Image::ImageView::ImageView(ImageView&& other) noexcept
+    : device_(std::exchange(other.device_, VK_NULL_HANDLE)),
+      view_(std::exchange(other.view_, VK_NULL_HANDLE))
+{
+}
+
+Image::ImageView& Image::ImageView::operator=(ImageView&& other) noexcept
+{
+    if (this != &other)
+    {
+        if (view_ != VK_NULL_HANDLE && device_ != VK_NULL_HANDLE)
+        {
+            vkDestroyImageView(device_, view_, nullptr);
+        }
+        device_ = std::exchange(other.device_, VK_NULL_HANDLE);
+        view_ = std::exchange(other.view_, VK_NULL_HANDLE);
+    }
+    return *this;
+}
+
+std::expected<Image::ImageView, std::string> Image::createImageView(VkDevice device, VkImageAspectFlags aspect) const
+{
+    auto viewResult = createView(device, aspect);
+    if (!viewResult)
+    {
+        return std::unexpected(viewResult.error());
+    }
+    return ImageView(device, *viewResult);
 }
 
 std::expected<VkImageView, std::string> Image::createView(VkDevice device, VkImageAspectFlags aspect) const
