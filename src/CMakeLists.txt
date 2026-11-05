@@ -10,6 +10,7 @@
 
 add_subdirectory(core)
 add_subdirectory(content)
+add_subdirectory(jobs)
 add_subdirectory(planets)
 add_subdirectory(bench)
 add_subdirectory(math)
@@ -27,6 +28,7 @@ target_link_libraries(starforge
     INTERFACE
         starforge_core
         starforge_content
+        starforge_jobs
         starforge_planets
         starforge_bench
         starforge_math

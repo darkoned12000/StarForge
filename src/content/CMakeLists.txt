@@ -12,6 +12,7 @@ target_include_directories(starforge_content
 target_link_libraries(starforge_content
     PUBLIC
         starforge_core
+        starforge_jobs
         starforge_math
         starforge_spatial
 )

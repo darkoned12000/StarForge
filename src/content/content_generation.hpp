@@ -4,6 +4,7 @@
 #include "spatial/world_position.hpp"
 
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace starforge::content
@@ -89,5 +90,22 @@ struct ContentChunk
     std::uint64_t seed,
     const starforge::spatial::WorldPosition& pos,
     int level);
+
+// Generate content for multiple cells in parallel using the job system.
+// Results are returned in the same order as the input cells.
+// Pure function: same inputs → identical output regardless of thread count.
+[[nodiscard]] std::vector<ContentChunk> generateContentParallel(
+    std::uint64_t seed,
+    std::span<const CellCoord> cells);
+
+// Typed accessors for ContentObject subtypes.
+enum class NebulaSubtype : std::uint32_t { Emission = 0, Dark, Reflection };
+
+inline StarSubtype starSubtype(const ContentObject& o) noexcept { return static_cast<StarSubtype>(o.subtype); }
+inline PlanetSubtype planetSubtype(const ContentObject& o) noexcept { return static_cast<PlanetSubtype>(o.subtype); }
+inline StationSubtype stationSubtype(const ContentObject& o) noexcept { return static_cast<StationSubtype>(o.subtype); }
+inline AsteroidSubtype asteroidSubtype(const ContentObject& o) noexcept { return static_cast<AsteroidSubtype>(o.subtype); }
+inline ResourceSubtype resourceSubtype(const ContentObject& o) noexcept { return static_cast<ResourceSubtype>(o.subtype); }
+inline NebulaSubtype nebulaSubtype(const ContentObject& o) noexcept { return static_cast<NebulaSubtype>(o.subtype); }
 
 } // namespace starforge::content

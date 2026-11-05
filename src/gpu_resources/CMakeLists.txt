@@ -4,6 +4,7 @@ add_library(starforge_gpu STATIC
     compute_pipeline.cpp
     gpu_culling.cpp
     image.cpp
+    staging_ring_buffer.cpp
     transfer.cpp
     ${PROJECT_SOURCE_DIR}/third_party/vma/vk_mem_alloc.cpp
 )

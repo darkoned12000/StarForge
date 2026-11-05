@@ -17,6 +17,7 @@ add_library(starforge_vulkan STATIC
     vulkan_physical_device.cpp
     vulkan_pipeline.cpp
     vulkan_renderer.cpp
+    threaded_command_pools.cpp
     vulkan_swapchain.cpp
     vulkan_timestamps.cpp
 )

@@ -233,13 +233,13 @@ TEST_CASE("PlayerDelta: getDelta")
     d.scale = 2.0f;
     store.apply(d);
 
-    const PlayerDelta* found = store.getDelta(0, 0, 0, 0, 5);
-    CHECK(found != nullptr);
+    auto found = store.getDelta(0, 0, 0, 0, 5);
+    CHECK(found.has_value());
     CHECK(found->type == DeltaType::Modified);
     CHECK(found->scale == 2.0f);
 
-    const PlayerDelta* notFound = store.getDelta(0, 0, 0, 0, 99);
-    CHECK(notFound == nullptr);
+    auto notFound = store.getDelta(0, 0, 0, 0, 99);
+    CHECK(!notFound.has_value());
 }
 
 TEST_CASE("PlayerDelta: serialize/deserialize round-trip")
@@ -265,7 +265,7 @@ TEST_CASE("PlayerDelta: serialize/deserialize round-trip")
     CHECK(loaded == 2);
     CHECK(store2.size() == 2);
     CHECK(store2.isRemoved(1, 2, 3, 1, 42));
-    CHECK(store2.getDelta(4, 5, 6, 0, 99) != nullptr);
+    CHECK(store2.getDelta(4, 5, 6, 0, 99).has_value());
 }
 
 TEST_CASE("applyDeltas: removed objects filtered")
@@ -524,8 +524,8 @@ TEST_CASE("PlayerDelta: malformed records are skipped without desynchronizing")
         CHECK(loadedStore.deserialize(data) == 1);
         CHECK(loadedStore.size() == 1);
 
-        const bool foundA = loadedStore.getDelta(1, 2, 3, 0, 10) != nullptr;
-        const bool foundB = loadedStore.getDelta(4, 5, 6, 1, 20) != nullptr;
+        const bool foundA = loadedStore.getDelta(1, 2, 3, 0, 10).has_value();
+        const bool foundB = loadedStore.getDelta(4, 5, 6, 1, 20).has_value();
         CHECK(foundA != foundB); // exactly the second (valid) record survived
     }
 
@@ -539,8 +539,8 @@ TEST_CASE("PlayerDelta: malformed records are skipped without desynchronizing")
         CHECK(loadedStore.deserialize(data) == 1);
         CHECK(loadedStore.size() == 1);
 
-        const bool foundA = loadedStore.getDelta(1, 2, 3, 0, 10) != nullptr;
-        const bool foundB = loadedStore.getDelta(4, 5, 6, 1, 20) != nullptr;
+        const bool foundA = loadedStore.getDelta(1, 2, 3, 0, 10).has_value();
+        const bool foundB = loadedStore.getDelta(4, 5, 6, 1, 20).has_value();
         CHECK(foundA != foundB);
     }
 }

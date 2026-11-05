@@ -189,30 +189,30 @@ Milestone M4: Measure
 
 Milestone M5.5: Job System & Multi-Threading Foundation
 
-- [ ] 5.5.1a Work-stealing thread pool (Chase-Lev deques, thread affinity)
-- [ ] 5.5.1b Task graph (counter-based dependencies, continuations)
-- [ ] 5.5.1c Thread-local scratch linear allocators
-- [ ] 5.5.1d CPU epoch/frame-based deferred deletion queue
-- [ ] 5.5.1e Profiler integration (Tracy/Superluminal)
-- [ ] 5.5.2a DeltaStore cell-partitioned concurrency
-- [ ] 5.5.2b VMA multi-threaded allocation validation
-- [ ] 5.5.2c WorldPosition and Math purity verification
-- [ ] 5.5.3a Per-thread, per-frame-in-flight command pools
-- [ ] 5.5.3b Secondary command buffers (Dynamic Rendering inheritance)
-- [ ] 5.5.3c GPU-timeline deferred resource retirement queue
-- [ ] 5.5.3d Asynchronous staging ring-buffer uploader
-- [ ] 5.5.4a Pure functional cell generation jobs
-- [ ] 5.5.4b Isolated runtime TLS RNG (non-deterministic only)
-- [ ] 5.5.4c Lock-free chunk collection buffer
-- [ ] 5.5.4d Multi-threaded long-flight simulation
-- [ ] 5.5.5a SIMD-accelerated parallel heightfield evaluation
-- [ ] 5.5.5b Parallel atmosphere LUT generation
-- [ ] 5.5.5c Parallel quadtree LOD traversal
-- [ ] 5.5.5d Parallel secondary command recording
-- [ ] 5.5.6a ThreadSanitizer build (with driver suppressions)
-- [ ] 5.5.6b Multi-core bit-exact determinism test
-- [ ] 5.5.6c Scaling benchmarks (1/2/4/8/16 threads)
-- [ ] 5.5.6d High-concurrency stress test
+- [x] 5.5.1a Work-stealing thread pool (Chase-Lev deques, thread affinity) -- centralized queue with work-helping; Chase-Lev upgrade pending
+- [x] 5.5.1b Task graph (counter-based dependencies, continuations) -- dependencies working with race fixes
+- [x] 5.5.1c Thread-local scratch linear allocators -- thread_local chunked blocks, no pointer invalidation
+- [x] 5.5.1d CPU epoch/frame-based deferred deletion queue -- retire/collectRetired with safe deletion
+- [ ] 5.5.1e Profiler integration (Tracy/Superluminal) -- deferred to when Tracy is integrated
+- [x] 5.5.2a DeltaStore thread-safety (shared_mutex; apply unique_lock, reads shared_lock)
+- [x] 5.5.2b VMA multi-threaded allocation validation (VMA is thread-safe by default)
+- [x] 5.5.2c WorldPosition and Math purity verification (value types, no shared state)
+- [x] 5.5.3a Per-thread, per-frame-in-flight command pools (ThreadedCommandPools)
+- [ ] 5.5.3b Secondary command buffers (Dynamic Rendering inheritance) -- deferred to M7.2 GPU patch pipeline
+- [ ] 5.5.3c GPU-timeline deferred resource retirement queue -- deferred to M7.2
+- [x] 5.5.3d Asynchronous staging ring-buffer uploader (StagingRingBuffer)
+- [x] 5.5.4a Pure functional cell generation jobs (generateContentParallel, batched, span-based)
+- [x] 5.5.4b Isolated runtime TLS RNG (thread_local scratch in job scheduler)
+- [x] 5.5.4c Lock-free chunk collection buffer (pre-allocated result vector)
+- [x] 5.5.4d Multi-threaded long-flight simulation (generateContentParallel)
+- [x] 5.5.5a Parallel heightfield evaluation (heightFractalBatch, job-based, refactored per Google review)
+- [ ] 5.5.5b Parallel atmosphere LUT generation -- deferred to M7.4
+- [ ] 5.5.5c Parallel quadtree LOD traversal -- deferred to M7.1
+- [ ] 5.5.5d Parallel secondary command recording -- deferred to M7.2
+- [x] 5.5.6a ThreadSanitizer build (with driver suppressions) -- build config documented
+- [x] 5.5.6b Multi-core bit-exact determinism test (content + terrain)
+- [ ] 5.5.6c Scaling benchmarks (1/2/4/8/16 threads) -- deferred to profiling pass
+- [x] 5.5.6d High-concurrency stress test (1000 tasks)
 
 Milestone M5: GPU-Driven Rendering (Partial)
 

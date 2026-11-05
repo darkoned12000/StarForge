@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <bit>
 #include <cstdint>
+#include <shared_mutex>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -113,6 +114,7 @@ std::uint64_t PlayerDelta::key() const noexcept
 
 void DeltaStore::apply(const PlayerDelta& delta)
 {
+    std::unique_lock lock(mutex_);
     const DeltaKey k{delta.cellX, delta.cellY, delta.cellZ, delta.level, delta.objectId};
     const CellKey ck{delta.cellX, delta.cellY, delta.cellZ, delta.level};
 
@@ -127,6 +129,7 @@ void DeltaStore::apply(const PlayerDelta& delta)
 std::vector<PlayerDelta> DeltaStore::deltasForCell(
     std::int64_t cx, std::int64_t cy, std::int64_t cz, int level) const
 {
+    std::shared_lock lock(mutex_);
     std::vector<PlayerDelta> result;
     const CellKey ck{cx, cy, cz, level};
     auto it = cellIndex_.find(ck);
@@ -145,24 +148,27 @@ bool DeltaStore::isRemoved(
     std::int64_t cx, std::int64_t cy, std::int64_t cz, int level,
     std::uint64_t objectId) const
 {
+    std::shared_lock lock(mutex_);
     const DeltaKey k{cx, cy, cz, level, objectId};
     auto it = deltas_.find(k);
     if (it == deltas_.end()) return false;
     return it->second.type == DeltaType::Removed;
 }
 
-const PlayerDelta* DeltaStore::getDelta(
+std::optional<PlayerDelta> DeltaStore::getDelta(
     std::int64_t cx, std::int64_t cy, std::int64_t cz, int level,
     std::uint64_t objectId) const
 {
+    std::shared_lock lock(mutex_);
     const DeltaKey k{cx, cy, cz, level, objectId};
     auto it = deltas_.find(k);
-    if (it == deltas_.end()) return nullptr;
-    return &it->second;
+    if (it == deltas_.end()) return std::nullopt;
+    return it->second;
 }
 
 std::vector<std::uint8_t> DeltaStore::serialize() const
 {
+    std::shared_lock lock(mutex_);
     // Canonical order: sort by full key so save bytes do not depend on hash-map
     // iteration order (and therefore on insertion order or stdlib version).
     std::vector<DeltaKey> keys;
@@ -180,9 +186,7 @@ std::vector<std::uint8_t> DeltaStore::serialize() const
     std::uint8_t* p = data.data();
     *p++ = 'S'; *p++ = 'F'; *p++ = 'D'; *p++ = 'L';
     putU32LE(p, 1);
-    p += 4;
     putU64LE(p, static_cast<std::uint64_t>(keys.size()));
-    p += 8;
 
     for (const DeltaKey& k : keys)
     {
@@ -216,7 +220,9 @@ std::vector<std::uint8_t> DeltaStore::serialize() const
 
 std::size_t DeltaStore::deserialize(const std::vector<std::uint8_t>& data)
 {
-    clear();
+    std::unique_lock lock(mutex_);
+    deltas_.clear();
+    cellIndex_.clear();
     if (data.size() < kHeaderSize) return 0;
 
     const std::uint8_t* const begin = data.data();
@@ -282,7 +288,14 @@ std::size_t DeltaStore::deserialize(const std::vector<std::uint8_t>& data)
         delta.localY = localY;
         delta.localZ = localZ;
 
-        apply(delta);
+        // Direct insert (already holding mutex_)
+        const DeltaKey k{delta.cellX, delta.cellY, delta.cellZ, delta.level, delta.objectId};
+        const CellKey ck{delta.cellX, delta.cellY, delta.cellZ, delta.level};
+        if (deltas_.find(k) == deltas_.end())
+        {
+            cellIndex_[ck].push_back(k);
+        }
+        deltas_[k] = delta;
         ++loaded;
     }
 

@@ -13,8 +13,7 @@ add_library(starforge_planets STATIC
 
 target_include_directories(starforge_planets
     PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
-        $<INSTALL_INTERFACE:include>
+        ${PROJECT_SOURCE_DIR}/src
 )
 
 target_link_libraries(starforge_planets
@@ -23,12 +22,19 @@ target_link_libraries(starforge_planets
         starforge_math
         starforge_spatial
 )
+target_link_libraries(starforge_planets PRIVATE starforge_jobs)
 
 target_compile_features(starforge_planets PUBLIC cxx_std_20)
 
 starforge_set_warnings(starforge_planets)
 
 # Determinism: do not let the compiler contract a*b+c into an FMA.
-if(NOT MSVC)
+if(MSVC)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        target_compile_options(starforge_planets PRIVATE -ffp-contract=off)
+    else()
+        target_compile_options(starforge_planets PRIVATE /fp:contract-)
+    endif()
+else()
     target_compile_options(starforge_planets PRIVATE -ffp-contract=off)
 endif()

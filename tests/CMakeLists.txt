@@ -35,6 +35,8 @@ add_executable(starforge_tests
     test_content_generation.cpp
     test_content_integration.cpp
     test_planets.cpp
+    test_job_scheduler.cpp
+    test_job_determinism.cpp
 )
 
 target_link_libraries(starforge_tests
@@ -42,6 +44,7 @@ target_link_libraries(starforge_tests
         starforge_core
         starforge_bench
         starforge_content
+        starforge_jobs
         starforge_planets
         starforge_math
         starforge_spatial

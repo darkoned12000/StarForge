@@ -4,6 +4,9 @@
 #include "content/hash.hpp"
 
 #include <cstdint>
+#include <mutex>
+#include <optional>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -61,7 +64,7 @@ struct CellKey
 
 struct CellKeyHash
 {
-    std::uint64_t operator()(const CellKey& k) const noexcept
+    std::size_t operator()(const CellKey& k) const noexcept
     {
         // splitMix64-style mixing on the full coordinate set.
         std::uint64_t h = static_cast<std::uint64_t>(k.x) ^ 0x9e3779b97f4a7c15ULL;
@@ -88,7 +91,7 @@ struct DeltaKey
 
 struct DeltaKeyHash
 {
-    std::uint64_t operator()(const DeltaKey& k) const noexcept
+    std::size_t operator()(const DeltaKey& k) const noexcept
     {
         std::uint64_t h = hashCell(k.cellX, k.cellY, k.cellZ);
         h ^= static_cast<std::uint64_t>(k.level) * 0x9e3779b97f4a7c15ULL;
@@ -118,16 +121,21 @@ public:
         std::uint64_t objectId) const;
 
     // Get a specific delta (if exists).
-    [[nodiscard]] const PlayerDelta* getDelta(
+    [[nodiscard]] std::optional<PlayerDelta> getDelta(
         std::int64_t cx, std::int64_t cy, std::int64_t cz, int level,
         std::uint64_t objectId) const;
 
     // Number of stored deltas.
-    [[nodiscard]] std::size_t size() const noexcept { return deltas_.size(); }
+    [[nodiscard]] std::size_t size() const
+    {
+        std::shared_lock lock(mutex_);
+        return deltas_.size();
+    }
 
     // Clear all deltas.
     void clear() noexcept
     {
+        std::unique_lock lock(mutex_);
         deltas_.clear();
         cellIndex_.clear();
     }
@@ -140,6 +148,9 @@ public:
     [[nodiscard]] std::size_t deserialize(const std::vector<std::uint8_t>& data);
 
 private:
+    // Thread safety: shared mutex for concurrent reads, exclusive for writes.
+    mutable std::shared_mutex mutex_;
+
     // Primary store: keyed by collision-free (cell, objectId).
     std::unordered_map<DeltaKey, PlayerDelta, DeltaKeyHash> deltas_;
     // Per-cell index for fast deltasForCell.

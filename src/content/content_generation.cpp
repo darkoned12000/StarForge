@@ -1,6 +1,7 @@
 #include "content/content_generation.hpp"
 #include "content/cell_traversal.hpp"
 #include "content/hash.hpp"
+#include "jobs/job_scheduler.hpp"
 
 #include "spatial/world_position.hpp"
 
@@ -79,7 +80,7 @@ ContentObject generateObject(
             std::uint32_t services = static_cast<std::uint32_t>(rng.nextInt(1, 15)); // bitmask of services
             std::uint32_t docking = static_cast<std::uint32_t>(rng.nextInt(1, 8));
             obj.properties = faction | (services << 4) | (docking << 8);
-            obj.scale = 1.0f + rng.nextFloat() * 4.0f; // stations are large
+            obj.scale = 0.01f + rng.nextFloat() * 0.04f; // stations (small) are large
         }
         break;
 
@@ -117,14 +118,18 @@ void generateForLevel(DeterministicRng& rng, ContentChunk& chunk, int level)
     bool hasNebula = false;
     if (level >= 4)
     {
-        // Galaxy level: stars + occasional nebulae.
+        // Cluster / summary level.
         starCount = rng.nextInt(1, 3);
-        // Roll nebula probability upfront (deterministic count).
         hasNebula = rng.nextFloat() < 0.2f;
     }
-    else if (level >= 2)
+    else if (level >= 3)
     {
-        // System level: stars + planets + stations.
+        // Galaxy sector level.
+        starCount = rng.nextInt(1, 3);
+    }
+    else if (level >= 1)
+    {
+        // System scale (Levels 1 and 2).
         starCount = rng.nextInt(0, 1);
         planetCount = rng.nextInt(0, 5);
         stationCount = (rng.nextFloat() < 0.3f) ? 1 : 0;
@@ -132,11 +137,15 @@ void generateForLevel(DeterministicRng& rng, ContentChunk& chunk, int level)
     }
     else
     {
-        // Local level: asteroids, resources, stations.
+        // Local scale (Level 0).
         asteroidCount = rng.nextInt(5, 50);
         resourceCount = rng.nextInt(0, 5);
         stationCount = (rng.nextFloat() < 0.1f) ? 1 : 0;
     }
+
+    const std::size_t totalObjects = static_cast<std::size_t>(
+        starCount + planetCount + asteroidCount + stationCount + resourceCount + (hasNebula ? 1 : 0));
+    chunk.objects.reserve(totalObjects);
 
     for (int i = 0; i < starCount; ++i)
     {
@@ -198,6 +207,62 @@ ContentChunk generateContent(
     // worldToCell owns level clamping and the coarse-cell hierarchy semantics.
     auto cell = worldToCell(pos, level);
     return generateContent(seed, cell.x, cell.y, cell.z, cell.level);
+}
+
+std::vector<ContentChunk> generateContentParallel(
+    std::uint64_t seed,
+    std::span<const CellCoord> cells)
+{
+    if (cells.empty())
+    {
+        return {};
+    }
+
+    std::vector<ContentChunk> results(cells.size());
+
+    constexpr std::size_t kBatchSize = 16;
+    const std::size_t batchCount = (cells.size() + kBatchSize - 1) / kBatchSize;
+
+    struct BatchContext
+    {
+        std::uint64_t seed;
+        std::span<const CellCoord> cells;
+        ContentChunk* outputBase;
+    };
+
+    std::vector<BatchContext> batches(batchCount);
+    std::vector<starforge::jobs::TaskHandle> handles;
+    handles.reserve(batchCount);
+
+    for (std::size_t b = 0; b < batchCount; ++b)
+    {
+        const std::size_t startIdx = b * kBatchSize;
+        const std::size_t count = std::min(kBatchSize, cells.size() - startIdx);
+
+        batches[b] = BatchContext{
+            .seed = seed,
+            .cells = cells.subspan(startIdx, count),
+            .outputBase = &results[startIdx],
+        };
+
+        auto batchFn = [](void* p) {
+            auto* ctx = static_cast<BatchContext*>(p);
+            for (std::size_t i = 0; i < ctx->cells.size(); ++i)
+            {
+                const auto& coord = ctx->cells[i];
+                ctx->outputBase[i] = generateContent(ctx->seed, coord.x, coord.y, coord.z, coord.level);
+            }
+        };
+
+        handles.push_back(starforge::jobs::submit(batchFn, &batches[b]));
+    }
+
+    for (const auto& handle : handles)
+    {
+        starforge::jobs::globalScheduler().wait(handle);
+    }
+
+    return results;
 }
 
 } // namespace starforge::content
