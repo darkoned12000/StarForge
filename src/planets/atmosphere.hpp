@@ -1,31 +1,51 @@
 #pragma once
 
-#include "math/math.hpp"
-
-#include <vector>
+#include "gpu_resources/buffer.hpp"
+#include <cstdint>
 
 namespace starforge::planets
 {
 
-struct AtmosphereParameters
+// Atmosphere rendering parameters
+struct AtmosphereParams
 {
-    double planetRadius = 6371000.0;
-    double atmosphereRadius = 6471000.0;
-    double rayleighScaleHeight = 8000.0;
-    double mieScaleHeight = 1200.0;
-    double mieAsymmetry = 0.8;
-    math::Vec3d rayleighScattering{5.8e-6, 13.5e-6, 33.1e-6};
-    math::Vec3d mieScattering{2.0e-5, 2.0e-5, 2.0e-5};
-    math::Vec3d mieAbsorption{4.4e-6, 4.4e-6, 4.4e-6};
-    math::Vec3d ozoneAbsorption{0.65e-6, 1.88e-6, 0.085e-6};
-    double sunIntensity = 20.0;
+    // Planet radius (meters)
+    float planetRadius;
+    
+    // Atmospheric radius (meters) 
+    float atmosphereRadius;
+    
+    // Rayleigh scattering coefficients (RGB)
+    float rayleighScatter[3];
+    
+    // Mie scattering coefficient
+    float mieScatter;
+    
+    // Mie phase function asymmetry parameter
+    float mieG;
+    
+    // Sun direction (normalized)
+    float sunDirection[3];
+    
+    // Sun irradiance (W/m²)  
+    float sunIrradiance;
 };
 
-// Compute single scattering for atmospheric rendering.
-math::Vec3d computeSingleScattering(
-    const AtmosphereParameters& params,
-    const math::Vec3d& rayOrigin,
-    const math::Vec3d& rayDir,
-    const math::Vec3d& sunDir);
+// Atmosphere rendering system 
+class AtmosphereRenderer
+{
+public:
+    explicit AtmosphereRenderer();
+    
+    // Initialize atmosphere with parameters
+    bool initialize(const AtmosphereParams& params);
+    
+    // Render atmosphere as a post-process effect
+    void render() const;
+
+private:
+    AtmosphereParams params_;
+    bool initialized_ = false;
+};
 
 } // namespace starforge::planets

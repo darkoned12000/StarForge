@@ -1,39 +1,34 @@
 #pragma once
 
-#include "math/math.hpp"
-
-#include <array>
 #include <cstdint>
+#include <vector>
 
 namespace starforge::planets
 {
 
-// Cube face indices for a cubed-sphere.
+// Cube face identifiers for cubed sphere projection
 enum class CubeFace : std::uint8_t
 {
-    PosX = 0,
-    NegX = 1,
-    PosY = 2,
-    NegY = 3,
-    PosZ = 4,
-    NegZ = 5,
+    PositiveX = 0,
+    NegativeX = 1, 
+    PositiveY = 2,
+    NegativeY = 3,
+    PositiveZ = 4,
+    NegativeZ = 5
 };
 
-// Convert a point on the unit cube face to a point on the unit sphere.
-// Uses linear gnomonic projection onto the unit sphere for reduced distortion.
-[[nodiscard]] math::Vec3d cubeToSphere(CubeFace face, double u, double v) noexcept;
-
-// Convert a unit sphere direction to (face, u, v) on the cubed-sphere.
-// u,v are in [-1, 1].
-[[nodiscard]] bool sphereToCube(const math::Vec3d& dir, CubeFace& face, double& u, double& v) noexcept;
-
-// Get the tangent-space basis for a cube face.
-struct CubeFaceBasis
+// Cubed sphere projection utilities for planetary rendering
+class CubedSphere
 {
-    math::Vec3d right;
-    math::Vec3d up;
-    math::Vec3d normal;
+public:
+    // Convert cube face coordinates to world position on a unit sphere
+    static void faceToSphere(int32_t face, float u, float v, float* outPosition);
+    
+    // Convert world position back to cube face coordinates and UV
+    static bool sphereToFace(const float* position, CubeFace* outFace, float* outU, float* outV);
+    
+    // Get the 6 faces of the cubed sphere  
+    static constexpr int32_t getFaceCount() { return 6; }
 };
-[[nodiscard]] CubeFaceBasis getCubeFaceBasis(CubeFace face) noexcept;
 
 } // namespace starforge::planets

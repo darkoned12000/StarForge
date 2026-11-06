@@ -1,28 +1,49 @@
 #pragma once
 
+#include "gpu_resources/buffer.hpp"
 #include "math/math.hpp"
 
-#include <vector>
 #include <cstdint>
+#include <vector>
 
 namespace starforge::planets
 {
 
-struct PlanetPatchVertex
+// Represents a single patch of planetary surface geometry
+struct PlanetPatch
 {
-    float x, y, z;
+    // Patch coordinates in the quadtree (x, y) and level 
+    int32_t x;
+    int32_t y;
+    uint32_t level;
+
+    // Bounding sphere for frustum culling
+    float center[3];
+    float radius;
+
+    // Material index for this patch
+    std::uint32_t materialIndex;
+    
+    // Patch data offset in the vertex buffer (for GPU access)
+    std::uint32_t vertexOffset;
 };
 
-// Generate a grid mesh for a planet patch (33x33 vertices by default).
-// Returns vertices in local patch space.
-std::vector<PlanetPatchVertex> generatePatchGrid(int resolution = 33);
+// Planet quadtree structure for LOD management
+class PlanetQuadtree
+{
+public:
+    explicit PlanetQuadtree(float radius, float maxError);
+    
+    // Generate patches at a specific level of detail
+    std::vector<PlanetPatch> generatePatches(int32_t x, int32_t y, uint32_t level) const;
+    
+    // Get the maximum level of detail for this planet
+    uint32_t getMaxLevel() const;
 
-// Generate patch mesh with terrain skirts for crack elimination.
-// Skirts extrude boundary vertices downward (negative Z) in local tangent space.
-std::vector<PlanetPatchVertex> generatePatchGridWithSkirts(int resolution = 33, float skirtDepth = 0.1f);
-
-// Generate index buffer for a patch grid.
-// Produces triangle indices for internal quads and skirt strips.
-std::vector<std::uint32_t> generatePatchIndices(int resolution, bool withSkirts = true);
+private:
+    float radius_;
+    float maxError_;
+    uint32_t maxLevel_;
+};
 
 } // namespace starforge::planets

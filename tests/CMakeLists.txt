@@ -35,8 +35,11 @@ add_executable(starforge_tests
     test_content_generation.cpp
     test_content_integration.cpp
     test_planets.cpp
+    test_planets_new.cpp
     test_job_scheduler.cpp
     test_job_determinism.cpp
+    test_instance_data.cpp
+    test_instance_data_update.cpp
 )
 
 target_link_libraries(starforge_tests

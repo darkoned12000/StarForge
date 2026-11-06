@@ -1,127 +1,111 @@
 #include "planets/cubed_sphere.hpp"
-
-#include <algorithm>
-#include <cmath>
+#include "math/math.hpp"
 
 namespace starforge::planets
 {
 
-CubeFaceBasis getCubeFaceBasis(CubeFace face) noexcept
+void CubedSphere::faceToSphere(int32_t face, float u, float v, float* outPosition)
 {
-    CubeFaceBasis b;
-    switch (face)
+    switch (static_cast<CubeFace>(face))
     {
-    case CubeFace::PosX:
-        b.right = math::Vec3d{0.0, 0.0, -1.0};
-        b.up = math::Vec3d{0.0, 1.0, 0.0};
-        b.normal = math::Vec3d{1.0, 0.0, 0.0};
-        break;
-    case CubeFace::NegX:
-        b.right = math::Vec3d{0.0, 0.0, 1.0};
-        b.up = math::Vec3d{0.0, 1.0, 0.0};
-        b.normal = math::Vec3d{-1.0, 0.0, 0.0};
-        break;
-    case CubeFace::PosY:
-        b.right = math::Vec3d{1.0, 0.0, 0.0};
-        b.up = math::Vec3d{0.0, 0.0, -1.0};
-        b.normal = math::Vec3d{0.0, 1.0, 0.0};
-        break;
-    case CubeFace::NegY:
-        b.right = math::Vec3d{1.0, 0.0, 0.0};
-        b.up = math::Vec3d{0.0, 0.0, 1.0};
-        b.normal = math::Vec3d{0.0, -1.0, 0.0};
-        break;
-    case CubeFace::PosZ:
-        b.right = math::Vec3d{1.0, 0.0, 0.0};
-        b.up = math::Vec3d{0.0, 1.0, 0.0};
-        b.normal = math::Vec3d{0.0, 0.0, 1.0};
-        break;
-    case CubeFace::NegZ:
-        b.right = math::Vec3d{-1.0, 0.0, 0.0};
-        b.up = math::Vec3d{0.0, 1.0, 0.0};
-        b.normal = math::Vec3d{0.0, 0.0, -1.0};
-        break;
+        case CubeFace::PositiveX:
+            outPosition[0] = 1.0f;
+            outPosition[1] = -v;
+            outPosition[2] = -u;
+            break;
+        case CubeFace::NegativeX:
+            outPosition[0] = -1.0f;
+            outPosition[1] = -v;
+            outPosition[2] = u;
+            break;
+        case CubeFace::PositiveY:
+            outPosition[0] = u;
+            outPosition[1] = 1.0f;
+            outPosition[2] = v;
+            break;
+        case CubeFace::NegativeY:
+            outPosition[0] = u;
+            outPosition[1] = -1.0f;
+            outPosition[2] = -v;
+            break;
+        case CubeFace::PositiveZ:
+            outPosition[0] = u;
+            outPosition[1] = -v;
+            outPosition[2] = 1.0f;
+            break;
+        case CubeFace::NegativeZ:
+            outPosition[0] = -u;
+            outPosition[1] = -v;
+            outPosition[2] = -1.0f;
+            break;
     }
-    return b;
-}
-
-// Tangent-space cubed-sphere mapping (Arvo's method variant)
-// Maps (u,v) in [-1,1] on cube face to unit sphere
-math::Vec3d cubeToSphere(CubeFace face, double u, double v) noexcept
-{
-    auto b = getCubeFaceBasis(face);
-    // Point on unit cube face
-    math::Vec3d p = b.normal + u * b.right + v * b.up;
-    // Normalize to get point on unit sphere
-    double len = std::sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
-    if (len > 0.0)
-    {
-        p.x /= len;
-        p.y /= len;
-        p.z /= len;
-    }
-    return p;
-}
-
-bool sphereToCube(const math::Vec3d& dir, CubeFace& face, double& u, double& v) noexcept
-{
-    double x = dir.x;
-    double y = dir.y;
-    double z = dir.z;
-    double ax = std::abs(x);
-    double ay = std::abs(y);
-    double az = std::abs(z);
     
-    if (ax < 1e-12 && ay < 1e-12 && az < 1e-12)
+    // Normalize to unit sphere
+    float length = math::length(outPosition);
+    if (length > 0.0f)
     {
-        return false;
+        outPosition[0] /= length;
+        outPosition[1] /= length; 
+        outPosition[2] /= length;
     }
+}
 
-    if (ax >= ay && ax >= az)
+bool CubedSphere::sphereToFace(const float* position, CubeFace* outFace, float* outU, float* outV)
+{
+    // Find the face with maximum absolute coordinate
+    float absX = std::abs(position[0]);
+    float absY = std::abs(position[1]); 
+    float absZ = std::abs(position[2]);
+    
+    if (absX >= absY && absX >= absZ)
     {
-        if (x > 0.0)
+        // X face
+        if (position[0] > 0)
         {
-            face = CubeFace::PosX;
-            u = -z / x;
-            v = y / x;
+            *outFace = CubeFace::PositiveX;
+            *outU = -position[2];
+            *outV = -position[1];
         }
         else
         {
-            face = CubeFace::NegX;
-            u = -z / x;
-            v = -y / x;
+            *outFace = CubeFace::NegativeX;
+            *outU = position[2];
+            *outV = -position[1];
         }
     }
-    else if (ay >= ax && ay >= az)
+    else if (absY >= absZ)
     {
-        if (y > 0.0)
+        // Y face  
+        if (position[1] > 0)
         {
-            face = CubeFace::PosY;
-            u = x / y;
-            v = -z / y;
+            *outFace = CubeFace::PositiveY;
+            *outU = position[0];
+            *outV = position[2];
         }
         else
         {
-            face = CubeFace::NegY;
-            u = -x / y;
-            v = -z / y;
+            *outFace = CubeFace::NegativeY;
+            *outU = position[0];
+            *outV = -position[2];
         }
     }
     else
     {
-        if (z > 0.0)
+        // Z face
+        if (position[2] > 0)
         {
-            face = CubeFace::PosZ;
-            u = x / z;
-            v = y / z;
+            *outFace = CubeFace::PositiveZ;
+            *outU = position[0];
+            *outV = -position[1];
         }
         else
         {
-            face = CubeFace::NegZ;
-            u = x / z;
-            v = -y / z;
+            *outFace = CubeFace::NegativeZ;
+            *outU = -position[0];
+            *outV = -position[1];
         }
     }
+    
     return true;
 }
 
