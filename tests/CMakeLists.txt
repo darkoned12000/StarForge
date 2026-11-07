@@ -80,6 +80,7 @@ add_executable(starforge_gpu_tests
     test_gpu_driven_benchmark.cpp
     test_depth_ordering.cpp
     test_starfield_render.cpp
+    test_planet_patch_render.cpp
     test_naive_control.cpp
     test_gpu_timestamps.cpp
     test_vma_memory_snapshot.cpp
@@ -91,6 +92,7 @@ target_link_libraries(starforge_gpu_tests
         starforge_core
         starforge_bench
         starforge_math
+        starforge_planets
         starforge_spatial
         starforge_vulkan
         starforge_gpu

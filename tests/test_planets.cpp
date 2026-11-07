@@ -5,6 +5,7 @@
 #include "planets/planet_patch.hpp"
 #include "planets/planet_quadtree.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -24,7 +25,7 @@ TEST_CASE("Cubed sphere: mapping round trip")
                 // Should be on unit sphere
                 double len = std::sqrt(p.x*p.x + p.y*p.y + p.z*p.z);
                 CHECK(std::abs(len - 1.0) < 1e-10);
-                
+
                 CubeFace f2;
                 double u2, v2;
                 CHECK(sphereToCube(p, f2, u2, v2));
@@ -36,18 +37,71 @@ TEST_CASE("Cubed sphere: mapping round trip")
     }
 }
 
-TEST_CASE("Cubed sphere: reduced distortion")
+TEST_CASE("Cubed sphere: boundary round trip (world coincidence)")
 {
-    // Check that corners don't get overly stretched
+    // Edges and corners are where face assignment is ambiguous; require
+    // the round-tripped point to coincide in world space within 1e-9
+    // even when f2 differs from f on a shared boundary.
+    const double boundary[] = {-1.0, -0.5, 0.0, 0.5, 1.0};
     for (int face = 0; face < 6; ++face)
     {
-        CubeFace f = static_cast<CubeFace>(face);
-        Vec3d center = cubeToSphere(f, 0.0, 0.0);
-        Vec3d corner = cubeToSphere(f, 1.0, 1.0);
-        double lenCenter = std::sqrt(center.x*center.x + center.y*center.y + center.z*center.z);
-        double lenCorner = std::sqrt(corner.x*corner.x + corner.y*corner.y + corner.z*corner.z);
-        CHECK(std::abs(lenCenter - 1.0) < 1e-10);
-        CHECK(std::abs(lenCorner - 1.0) < 1e-10);
+        const CubeFace f = static_cast<CubeFace>(face);
+        for (double u : boundary)
+        {
+            for (double v : boundary)
+            {
+                const Vec3d p = cubeToSphere(f, u, v);
+                CubeFace f2;
+                double u2 = 0.0, v2 = 0.0;
+                CHECK(sphereToCube(p, f2, u2, v2));
+                const Vec3d p2 = cubeToSphere(f2, u2, v2);
+                const double dx = p.x - p2.x;
+                const double dy = p.y - p2.y;
+                const double dz = p.z - p2.z;
+                CHECK(std::sqrt(dx * dx + dy * dy + dz * dz) < 1e-9);
+            }
+        }
+    }
+}
+
+TEST_CASE("Cubed sphere: reduced distortion (Jacobian area ratio)")
+{
+    // True distortion check: the area scaling (Jacobian determinant of
+    // the (u,v) -> unit-sphere map) must stay within the gnomonic cube
+    // map bound 3*sqrt(3) ~= 5.196 across the whole face.
+    const auto jacobianDet = [](CubeFace face, double u, double v) {
+        const double h = 1e-4;
+        const Vec3d pu1 = cubeToSphere(face, u + h, v);
+        const Vec3d pu0 = cubeToSphere(face, u - h, v);
+        const Vec3d pv1 = cubeToSphere(face, u, v + h);
+        const Vec3d pv0 = cubeToSphere(face, u, v - h);
+        const Vec3d du{pu1.x - pu0.x, pu1.y - pu0.y, pu1.z - pu0.z};
+        const Vec3d dv{pv1.x - pv0.x, pv1.y - pv0.y, pv1.z - pv0.z};
+        // det = |du x dv| / (2h)^2 (central differences).
+        const Vec3d cross{
+            du.y * dv.z - du.z * dv.y,
+            du.z * dv.x - du.x * dv.z,
+            du.x * dv.y - du.y * dv.x,
+        };
+        return std::sqrt(cross.x * cross.x + cross.y * cross.y + cross.z * cross.z) / (4.0 * h * h);
+    };
+
+    for (int face = 0; face < 6; ++face)
+    {
+        const CubeFace f = static_cast<CubeFace>(face);
+        double minDet = 1e30;
+        double maxDet = 0.0;
+        for (double u = -0.9; u <= 0.9; u += 0.3)
+        {
+            for (double v = -0.9; v <= 0.9; v += 0.3)
+            {
+                const double det = jacobianDet(f, u, v);
+                minDet = std::min(minDet, det);
+                maxDet = std::max(maxDet, det);
+            }
+        }
+        CHECK(minDet > 0.0);
+        CHECK(maxDet / minDet < 5.196 + 0.1);
     }
 }
 
@@ -63,6 +117,38 @@ TEST_CASE("Planet quadtree: hierarchy construction")
 TEST_CASE("Planet quadtree: adjacency invariant")
 {
     PlanetQuadtree qt(CubeFace::PositiveX);
+    CHECK(qt.checkAdjacencyInvariant());
+}
+
+TEST_CASE("Planet quadtree: deep subdivision keeps neighbor LOD balanced")
+{
+    PlanetQuadtree qt(CubeFace::PositiveX);
+    Vec3d planetCenter{0.0, 0.0, 0.0};
+    // Camera off-axis (Z direction) at 10x radius: the root patch center
+    // sits outside the horizon-cull cone, so SSE-driven splits occur.
+    Vec3d cameraPos{0.0, 0.0, 6371000.0 * 10.0};
+    double planetRadius = 6371000.0;
+
+    // Repeated updates so balancing can propagate (maxLevelDelta per call).
+    for (int i = 0; i < 4; ++i)
+    {
+        auto leaves = qt.update(planetCenter, cameraPos, planetRadius, 0.001, 0.0005);
+        CHECK(leaves.size() > 1);
+    }
+
+    auto leaves = qt.getLeaves();
+    CHECK(leaves.size() > 4); // Deep subdivision happened
+    int minLevel = 100;
+    int maxLevel = 0;
+    for (const auto* leaf : leaves)
+    {
+        minLevel = std::min(minLevel, leaf->level);
+        maxLevel = std::max(maxLevel, leaf->level);
+    }
+    // Deepest leaves should be levels below the root, and the spread
+    // must stay bounded (gradual LOD, not a cliff).
+    CHECK(maxLevel >= 3);
+    CHECK(maxLevel - minLevel <= 3);
     CHECK(qt.checkAdjacencyInvariant());
 }
 
@@ -165,4 +251,50 @@ TEST_CASE("Planet patch mesh: structure and bounds")
     auto empty = generatePatchMesh(root, 0, radius);
     CHECK(empty.positions.empty());
     CHECK(empty.indices.empty());
+}
+
+TEST_CASE("Planet patch mesh: adjacent faces share coincident edge vertices (7.2c)")
+{
+    const double radius = 6371000.0;
+    PlanetPatchGenerator gen(radius, 1.0);
+
+    // Full-face meshes on two adjacent faces. The +X face's u=+1 edge
+    // must coincide with the -Z face's u=-1 edge in world space.
+    auto faceX = gen.createRootPatch(CubeFace::PositiveX);
+    auto faceNZ = gen.createRootPatch(CubeFace::NegativeZ);
+
+    auto meshX = generatePatchMesh(faceX, 4, radius);
+    auto meshNZ = generatePatchMesh(faceNZ, 4, radius);
+
+    const auto toWorld = [](const PlanetPatch& patch, const Vec3f& off) {
+        return Vec3d{
+            patch.center.x + static_cast<double>(off.x),
+            patch.center.y + static_cast<double>(off.y),
+            patch.center.z + static_cast<double>(off.z),
+        };
+    };
+
+    // Collect the shared edge: +X right column (i == n) vs -Z left column (i == 0).
+    auto edgeOf = [&](const PlanetPatch& patch, const PlanetPatchMesh& mesh, bool rightColumn) {
+        std::vector<Vec3d> pts;
+        const std::uint32_t n = 4;
+        const std::uint32_t side = n + 1;
+        for (std::uint32_t j = 0; j < side; ++j)
+        {
+            const std::uint32_t i = rightColumn ? n : 0;
+            pts.push_back(toWorld(patch, mesh.positions[j * side + i]));
+        }
+        return pts;
+    };
+
+    auto edgeX = edgeOf(faceX, meshX, true);
+    auto edgeNZ = edgeOf(faceNZ, meshNZ, false);
+    CHECK(edgeX.size() == edgeNZ.size());
+    for (std::size_t i = 0; i < edgeX.size(); ++i)
+    {
+        const double dx = edgeX[i].x - edgeNZ[i].x;
+        const double dy = edgeX[i].y - edgeNZ[i].y;
+        const double dz = edgeX[i].z - edgeNZ[i].z;
+        CHECK(std::sqrt(dx * dx + dy * dy + dz * dz) < 1.0);
+    }
 }

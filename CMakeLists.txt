@@ -161,6 +161,20 @@ starforge_add_shader(
 # Environment shaders for space effects
 
 starforge_add_shader(
+    SOURCE "${PROJECT_SOURCE_DIR}/shaders/graphics/planet_patch.slang"
+    STAGE  vertex
+    ENTRY  vertexMain
+    OUTPUT_NAME planet_patch.vert
+)
+
+starforge_add_shader(
+    SOURCE "${PROJECT_SOURCE_DIR}/shaders/graphics/planet_patch.slang"
+    STAGE  fragment
+    ENTRY  fragmentMain
+    OUTPUT_NAME planet_patch.frag
+)
+
+starforge_add_shader(
     SOURCE "${PROJECT_SOURCE_DIR}/shaders/graphics/starfield.slang"
     STAGE  vertex
     ENTRY  vertexMain

@@ -129,7 +129,10 @@ bool shouldSplit(
         {
             double cosAngle = (toPatch.x * toCenter.x + toPatch.y * toCenter.y + toPatch.z * toCenter.z) / (toPatchLen * camDist);
             double horizonCos = std::sqrt(1.0 - (planetRadius / camDist) * (planetRadius / camDist));
-            if (cosAngle > horizonCos)
+            // Far side: patch center points away from the camera, so its
+            // angle to the center direction exceeds the horizon cone.
+            // (Previously inverted: this culled the visible hemisphere.)
+            if (cosAngle < -horizonCos)
             {
                 return false;
             }
