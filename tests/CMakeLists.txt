@@ -40,6 +40,7 @@ add_executable(starforge_tests
     test_job_determinism.cpp
     test_instance_data.cpp
     test_instance_data_update.cpp
+    test_public_application.cpp
 )
 
 target_link_libraries(starforge_tests
@@ -55,6 +56,7 @@ target_link_libraries(starforge_tests
         starforge_vulkan
         starforge_gpu
         starforge_environment
+        starforge_public_api
         doctest::doctest
 )
 
