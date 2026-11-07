@@ -21,6 +21,8 @@ namespace starforge::math
 
 // STARFORGE-owned type aliases. Consumers use these names; GLM types never
 // leak through the public API.
+using Vec2f = glm::vec2;
+using Vec2d = glm::dvec2;
 using Vec3f = glm::vec3;
 using Vec3d = glm::dvec3;
 using Vec4f = glm::vec4;

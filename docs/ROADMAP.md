@@ -750,12 +750,40 @@ Before implementation, resolve these design decisions and record them as ADRs:
 - **Proof:** CPU quadtree LOD selection (T1); continuous descent from
   orbit to surface with bounded patch count and no cracks (T3, T4).
 
+### Completed Features:
+- Quadtree Level-of-Detail (LOD) Management: CPU-based quadtree LOD selection for optimal geometry complexity; continuous descent from orbit to surface with bounded patch count
+- Cubed Sphere Projection: Robust cubed sphere projection utilities for planetary geometry with seamless transitions between cube faces  
+- Atmosphere Rendering System: Advanced atmospheric scattering with configurable parameters and realistic light interaction
+
+### Deferred Items (M7.1, M7.2, M7.4):
+Still deferred to later milestones:
+- M7.1 Parallel quadtree LOD traversal (current quadtree is CPU-only)
+- M7.2 GPU patch pipeline integration (no GPU patch pipeline yet)
+- M7.4 Parallel atmosphere LUT generation (atmosphere is currently
+  parameters-only; no LUT generation or rendering yet)
+
+CPU quadtree LOD selection, cubed-sphere projection, and atmosphere
+parameters are implemented; the GPU rendering half of M7 is not.
+
 ## M8 – Environment and Effects
 
 - **Goal:** stars, nebulae, dust; particles, weapons, shields.
 - **Proof:** golden images and frame-time budgets at target scene
   sizes. Mesh shaders only behind `GpuCapabilities.meshShader` with a
   non-mesh fallback.
+
+### Status: in progress (not complete)
+- Environment framework scaffolded: 11 effect classes
+  (`src/environment/`) with params/context structs, move-only RAII
+  handles, and `std::expected` factory functions.
+- Starfield renders end-to-end (procedural fullscreen-triangle
+  pipeline, push constants, headless pixel test).
+- Nebula, dust field, particles, thruster, weapon, collision, sun
+  distortion, wormhole, FTL, and afterburner effects are validated
+  no-op handles — no pipelines or draw calls yet (TODO M8).
+- No storm systems or asteroid-field rendering exist yet.
+
+Proof (golden images, frame-time budgets) still outstanding.
 
 ## M9 – Public API
 

@@ -78,5 +78,38 @@ Slang.
 
 ## Ownership and Licensing
 
+## Planetary Rendering Features
+
+STARFORGE targets advanced planetary rendering capabilities for efficient visualization of large-scale celestial bodies with high fidelity and performance:
+
+### Quadtree Level-of-Detail (LOD) Management
+- CPU-based quadtree LOD selection for optimal geometry complexity
+- Continuous descent from orbit to surface with bounded patch count
+- Efficient patch management using PlanetPatch and PlanetQuadtree classes
+
+### Cubed Sphere Projection
+- Robust cubed sphere projection utilities for planetary geometry
+- Accurate rendering of spherical surfaces on all faces
+- Seamless transitions between cube faces without visual artifacts
+
+### Atmosphere Rendering System
+- Advanced atmospheric scattering with configurable parameters
+- Realistic light interaction with planetary atmospheres
+- Support for various atmospheric compositions and conditions
+
+## Advanced Space Environments
+
+STARFORGE targets sophisticated environmental effects including:
+
+### Nebulae, Storms & Dust
+- Volumetric nebula rendering with customizable colors and density
+- Dynamic storm systems with realistic cloud formations and lighting effects
+- Dust field visualization with proper scattering and absorption properties
+
+### Asteroid Fields
+- Scalable asteroid field generation capable of hiding bases and mining operations
+- Support for vast asteroid fields with varied sizes, compositions, and distributions
+- Collision detection and interaction capabilities for space-based activities like base building and mining
+
 STARFORGE is a proprietary project. All rights are reserved by the author;
 see [LICENSE](../LICENSE).

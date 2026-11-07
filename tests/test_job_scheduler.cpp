@@ -43,19 +43,21 @@ TEST_CASE("JobScheduler: task dependencies")
 {
     JobScheduler scheduler(SchedulerConfig{.threadCount = 2});
     std::atomic<int> order{0};
-    int firstVal = 0, secondVal = 0;
     auto first = [](void* p) {
         auto* o = static_cast<std::atomic<int>*>(p);
         o->store(1);
     };
     auto second = [](void* p) {
-        // Should run after first
+        // Runs after first (dependency), so it must observe order == 1
+        // and advance it to 2.
+        auto* o = static_cast<std::atomic<int>*>(p);
+        o->store(o->load() + 1);
     };
     auto h1 = scheduler.submit(first, &order);
     std::vector<TaskHandle> deps = {h1};
-    auto h2 = scheduler.submit(second, nullptr, deps);
+    auto h2 = scheduler.submit(second, &order, deps);
     scheduler.wait(h2);
-    CHECK(order.load() == 1);
+    CHECK(order.load() == 2);
 }
 
 TEST_CASE("JobScheduler: single-threaded mode")

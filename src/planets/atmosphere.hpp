@@ -1,6 +1,5 @@
 #pragma once
 
-#include "gpu_resources/buffer.hpp"
 #include <cstdint>
 
 namespace starforge::planets

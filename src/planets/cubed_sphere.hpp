@@ -1,5 +1,7 @@
 #pragma once
 
+#include "math/math.hpp"
+
 #include <cstdint>
 #include <vector>
 
@@ -27,8 +29,15 @@ public:
     // Convert world position back to cube face coordinates and UV
     static bool sphereToFace(const float* position, CubeFace* outFace, float* outU, float* outV);
     
-    // Get the 6 faces of the cubed sphere  
+    // Get the 6 faces of the cubed sphere
     static constexpr int32_t getFaceCount() { return 6; }
 };
+
+// Double-precision free-function forms (used by PlanetQuadtree and tests).
+// cubeToSphere maps a face-local (u, v) in [-1, 1]^2 to a unit-sphere direction.
+// sphereToCube is its inverse: given a unit-sphere direction it recovers the
+// dominant face and the face-local (u, v).
+[[nodiscard]] math::Vec3d cubeToSphere(CubeFace face, double u, double v);
+[[nodiscard]] bool sphereToCube(const math::Vec3d& position, CubeFace& outFace, double& outU, double& outV);
 
 } // namespace starforge::planets

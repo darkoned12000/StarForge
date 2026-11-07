@@ -1,15 +1,27 @@
 #include "planets/planet_patch.hpp"
 #include "math/math.hpp"
 
+#include <algorithm>
+#include <cmath>
+
 namespace starforge::planets
 {
 
-PlanetQuadtree::PlanetQuadtree(float radius, float maxError) 
+PlanetQuadtree::PlanetQuadtree(float radius, float maxError)
     : radius_(radius), maxError_(maxError)
 {
-    // Calculate maximum level based on error tolerance and planet size
-    // This is a simplified approach - in practice this would be more sophisticated
-    maxLevel_ = 10; // Arbitrary for now
+    // Derive max LOD from the error tolerance: patch size halves each
+    // level, so stop subdividing once radius / 2^level <= maxError.
+    if (maxError_ > 0.0f && radius_ > 0.0f)
+    {
+        const float ratio = radius_ / maxError_;
+        const auto level = static_cast<std::uint32_t>(std::ceil(std::log2(ratio)));
+        maxLevel_ = std::clamp(level, 1u, 20u);
+    }
+    else
+    {
+        maxLevel_ = 10;
+    }
 }
 
 std::vector<PlanetPatch> PlanetQuadtree::generatePatches(int32_t x, int32_t y, uint32_t level) const

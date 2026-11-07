@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <expected>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -59,6 +60,17 @@ public:
     [[nodiscard]] std::expected<FrameStatus, std::string>
     renderClearedFrame(const VulkanSwapchain& swapchain, VkQueue queue, VkClearColorValue clearColor);
 
+    // Callback invoked inside a single dynamic-rendering pass (clear load
+    // op) for drawing additional content with the swapchain image as color
+    // attachment. The callback must set viewport/scissor if needed.
+    using FrameRecordFn = std::function<void(VkCommandBuffer cmd, VkExtent2D extent)>;
+
+    // Like renderClearedFrame, but records `record` into the swapchain image
+    // in the same clear pass before presenting.
+    [[nodiscard]] std::expected<FrameStatus, std::string>
+    renderFrame(const VulkanSwapchain& swapchain, VkQueue queue, VkClearColorValue clearColor,
+                const FrameRecordFn& record);
+
     [[nodiscard]] VkCommandBuffer currentCommandBuffer() const;
     [[nodiscard]] VkFence currentFence() const;
     void nextFrame();
@@ -66,6 +78,10 @@ public:
 private:
     FrameRenderer() = default;
     void destroy() noexcept;
+
+    [[nodiscard]] std::expected<FrameStatus, std::string>
+    renderFrameImpl(const VulkanSwapchain& swapchain, VkQueue queue, VkClearColorValue clearColor,
+                    const FrameRecordFn* record);
 
     VkDevice device_ = VK_NULL_HANDLE;
     std::uint32_t queueFamily_ = 0;
@@ -77,6 +93,7 @@ private:
     std::vector<VkSemaphore> renderFinishedSemaphores_;
     std::vector<VkFence> inFlightFences_;
     std::vector<VkFence> imagesInFlight_; // sized to swapchain image count
+    VkSwapchainKHR lastSwapchain_ = VK_NULL_HANDLE; // detects recreate to reset imagesInFlight_
 };
 
 } // namespace starforge::vulkan

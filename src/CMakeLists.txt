@@ -19,6 +19,7 @@ add_subdirectory(stats)
 add_subdirectory(platform)
 add_subdirectory(vulkan)
 add_subdirectory(gpu_resources)
+add_subdirectory(environment)
 
 # starforge_vulkan_core is a dependency of starforge_vulkan, no need to
 # add it separately to the umbrella (it's transitively linked).
@@ -37,6 +38,7 @@ target_link_libraries(starforge
         starforge_platform
         starforge_vulkan
         starforge_gpu
+        starforge_environment
 )
 
 # Public, developer-facing headers.

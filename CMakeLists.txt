@@ -158,6 +158,22 @@ starforge_add_shader(
     OUTPUT_NAME test_depth.frag
 )
 
+# Environment shaders for space effects
+
+starforge_add_shader(
+    SOURCE "${PROJECT_SOURCE_DIR}/shaders/graphics/starfield.slang"
+    STAGE  vertex
+    ENTRY  vertexMain
+    OUTPUT_NAME starfield.vert
+)
+
+starforge_add_shader(
+    SOURCE "${PROJECT_SOURCE_DIR}/shaders/graphics/starfield.slang"
+    STAGE  fragment
+    ENTRY  fragmentMain
+    OUTPUT_NAME starfield.frag
+)
+
 # (test_bda.slang removed - BDA debugging complete)
 
 # --------------------------------------------------

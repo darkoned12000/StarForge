@@ -37,12 +37,13 @@ TEST_CASE("Cubed sphere: basic face conversion")
 {
     float position[3];
     
-    // Test positive X face
+    // Test positive X face (result is normalized to a unit sphere)
     CubedSphere::faceToSphere(0, 0.5f, 0.5f, position);
-    
-    CHECK(std::abs(position[0] - 1.0f) < 1e-6f); 
-    CHECK(std::abs(position[1] - (-0.5f)) < 1e-6f);
-    CHECK(std::abs(position[2] - (-0.5f)) < 1e-6f);
+
+    // (1, -0.5, -0.5) / sqrt(1.5)
+    CHECK(std::abs(position[0] - 0.8164966f) < 1e-6f);
+    CHECK(std::abs(position[1] - (-0.4082483f)) < 1e-6f);
+    CHECK(std::abs(position[2] - (-0.4082483f)) < 1e-6f);
     
     // Test normalization
     float length = std::sqrt(position[0]*position[0] + position[1]*position[1] + position[2]*position[2]);

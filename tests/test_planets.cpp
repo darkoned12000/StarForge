@@ -51,22 +51,22 @@ TEST_CASE("Cubed sphere: reduced distortion")
 
 TEST_CASE("Planet quadtree: hierarchy construction")
 {
-    PlanetQuadtree qt(CubeFace::PosX);
+    PlanetQuadtree qt(CubeFace::PositiveX);
     auto leaves = qt.getLeaves();
     CHECK(leaves.size() == 1); // Just root initially
     CHECK(leaves[0]->level == 0);
-    CHECK(leaves[0]->face == CubeFace::PosX);
+    CHECK(leaves[0]->face == CubeFace::PositiveX);
 }
 
 TEST_CASE("Planet quadtree: adjacency invariant")
 {
-    PlanetQuadtree qt(CubeFace::PosX);
+    PlanetQuadtree qt(CubeFace::PositiveX);
     CHECK(qt.checkAdjacencyInvariant());
 }
 
 TEST_CASE("Planet quadtree: split and merge with hysteresis")
 {
-    PlanetQuadtree qt(CubeFace::PosX);
+    PlanetQuadtree qt(CubeFace::PositiveX);
     Vec3d planetCenter{0.0, 0.0, 0.0};
     Vec3d cameraPos{10000000.0, 0.0, 0.0}; // Close to planet
     double planetRadius = 6371000.0;
@@ -84,7 +84,7 @@ TEST_CASE("Planet quadtree: split and merge with hysteresis")
 
 TEST_CASE("Planet quadtree: bounded patch count")
 {
-    PlanetQuadtree qt(CubeFace::PosX);
+    PlanetQuadtree qt(CubeFace::PositiveX);
     Vec3d planetCenter{0.0, 0.0, 0.0};
     Vec3d cameraPos{7000000.0, 0.0, 0.0};
     double planetRadius = 6371000.0;

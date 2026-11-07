@@ -11,10 +11,27 @@
 #include "vulkan/vulkan_renderer.hpp"
 #include "vulkan/vulkan_swapchain.hpp"
 
+// Environment effects
+#include "environment/nebula_renderer.hpp"
+#include "environment/dust_field.hpp"
+#include "environment/particle_system.hpp"
+#include "environment/starfield_renderer.hpp"
+#include "environment/thruster_effect.hpp"
+#include "environment/weapon_effect.hpp"
+#include "environment/collision_effect.hpp"
+#include "environment/sun_distortion.hpp"
+#include "environment/wormhole_effect.hpp"
+#include "environment/ftl_effect.hpp"
+#include "environment/afterburner_effect.hpp"
+
 #include <chrono>
 #include <cstdlib>
 #include <thread>
 #include <utility>
+
+#ifndef STARFORGE_SHADER_DIR
+#define STARFORGE_SHADER_DIR "shaders"
+#endif
 
 namespace
 {
@@ -123,10 +140,96 @@ int main()
         return EXIT_FAILURE;
     }
 
+    // Initialize environment effects. Only the starfield renders today;
+    // the rest are validated handles awaiting their pipelines (TODO M8).
+    auto nebulaRenderer = environment::NebulaRenderer::create({
+        .device = device->device(),
+        .physicalDevice = context->physicalDevice(),
+        .queueFamily = device->graphicsQueueFamily()
+    });
+    if (!nebulaRenderer) { core::logError(kTag, "{}", nebulaRenderer.error()); return EXIT_FAILURE; }
+
+    auto dustFieldRenderer = environment::DustFieldRenderer::create({
+        .device = device->device(),
+        .physicalDevice = context->physicalDevice(),
+        .queueFamily = device->graphicsQueueFamily()
+    });
+    if (!dustFieldRenderer) { core::logError(kTag, "{}", dustFieldRenderer.error()); return EXIT_FAILURE; }
+
+    auto particleSystem = environment::ParticleSystem::create({
+        .device = device->device(),
+        .physicalDevice = context->physicalDevice(),
+        .queueFamily = device->graphicsQueueFamily()
+    });
+    if (!particleSystem) { core::logError(kTag, "{}", particleSystem.error()); return EXIT_FAILURE; }
+
+    auto starfieldRenderer = environment::StarfieldRenderer::create({
+        .device = device->device(),
+        .physicalDevice = context->physicalDevice(),
+        .queueFamily = device->graphicsQueueFamily(),
+        .colorFormat = swapchain->format(),
+        .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
+    });
+    if (!starfieldRenderer) { core::logError(kTag, "{}", starfieldRenderer.error()); return EXIT_FAILURE; }
+
+    auto thrusterEffect = environment::ThrusterEffect::create({
+        .device = device->device(),
+        .physicalDevice = context->physicalDevice(),
+        .queueFamily = device->graphicsQueueFamily()
+    });
+    if (!thrusterEffect) { core::logError(kTag, "{}", thrusterEffect.error()); return EXIT_FAILURE; }
+
+    auto weaponEffect = environment::WeaponEffect::create({
+        .device = device->device(),
+        .physicalDevice = context->physicalDevice(),
+        .queueFamily = device->graphicsQueueFamily()
+    });
+    if (!weaponEffect) { core::logError(kTag, "{}", weaponEffect.error()); return EXIT_FAILURE; }
+
+    auto collisionEffect = environment::CollisionEffect::create({
+        .device = device->device(),
+        .physicalDevice = context->physicalDevice(),
+        .queueFamily = device->graphicsQueueFamily()
+    });
+    if (!collisionEffect) { core::logError(kTag, "{}", collisionEffect.error()); return EXIT_FAILURE; }
+
+    auto sunDistortionEffect = environment::SunDistortionEffect::create({
+        .device = device->device(),
+        .physicalDevice = context->physicalDevice(),
+        .queueFamily = device->graphicsQueueFamily()
+    });
+    if (!sunDistortionEffect) { core::logError(kTag, "{}", sunDistortionEffect.error()); return EXIT_FAILURE; }
+
+    auto wormholeEffect = environment::WormholeEffect::create({
+        .device = device->device(),
+        .physicalDevice = context->physicalDevice(),
+        .queueFamily = device->graphicsQueueFamily()
+    });
+    if (!wormholeEffect) { core::logError(kTag, "{}", wormholeEffect.error()); return EXIT_FAILURE; }
+
+    auto ftlEffect = environment::FtlEffect::create({
+        .device = device->device(),
+        .physicalDevice = context->physicalDevice(),
+        .queueFamily = device->graphicsQueueFamily()
+    });
+    if (!ftlEffect) { core::logError(kTag, "{}", ftlEffect.error()); return EXIT_FAILURE; }
+
+    auto afterburnerEffect = environment::AfterburnerEffect::create({
+        .device = device->device(),
+        .physicalDevice = context->physicalDevice(),
+        .queueFamily = device->graphicsQueueFamily()
+    });
+    if (!afterburnerEffect) { core::logError(kTag, "{}", afterburnerEffect.error()); return EXIT_FAILURE; }
+
+    (void)nebulaRenderer; (void)dustFieldRenderer; (void)particleSystem;
+    (void)thrusterEffect; (void)weaponEffect; (void)collisionEffect;
+    (void)sunDistortionEffect; (void)wormholeEffect; (void)ftlEffect; (void)afterburnerEffect;
+
     core::logInfo(kTag, "Close the window to exit");
 
     bool needRecreate = false;
-    const VkClearColorValue clearColor{{0.02f, 0.03f, 0.08f, 1.0f}};
+    const VkClearColorValue clearColor{{0.0f, 0.0f, 0.0f, 1.0f}};
+    float time = 0.0f;
 
     while (!window->shouldClose())
     {
@@ -147,15 +250,65 @@ int main()
         if (needRecreate)
         {
             core::logInfo(kTag, "Framebuffer resized to {}x{}; recreating swapchain", size.width, size.height);
+            // In-flight frames may still reference the old swapchain images;
+            // wait for the GPU before destroying/recreating them.
+            vkDeviceWaitIdle(device->device());
+            const VkFormat oldFormat = swapchain->format();
             if (auto status = swapchain->recreate(size.width, size.height); !status)
             {
                 core::logError(kTag, "{}", status.error());
                 return EXIT_FAILURE;
             }
+
+            // The star pipeline is compiled for one color format; a format
+            // change (e.g. display switch) requires recreating it.
+            if (swapchain->format() != oldFormat)
+            {
+                auto newStarfieldRenderer = environment::StarfieldRenderer::create({
+                    .device = device->device(),
+                    .physicalDevice = context->physicalDevice(),
+                    .queueFamily = device->graphicsQueueFamily(),
+                    .colorFormat = swapchain->format(),
+                    .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
+                });
+                if (!newStarfieldRenderer)
+                {
+                    core::logError(kTag, "{}", newStarfieldRenderer.error());
+                    return EXIT_FAILURE;
+                }
+                starfieldRenderer = std::move(newStarfieldRenderer);
+            }
             needRecreate = false;
         }
 
-        auto frameStatus = renderer->renderClearedFrame(*swapchain, device->graphicsQueue(), clearColor);
+        // Render starfield into the swapchain image after the clear.
+        time += 0.016f;
+        environment::StarfieldRenderContext starContext;
+        starContext.resolution = {static_cast<float>(size.width), static_cast<float>(size.height)};
+        starContext.time = time;
+        environment::StarfieldParams starParams;
+        starParams.time = time;
+        starParams.intensity = 1.0f;
+
+        auto frameStatus = renderer->renderFrame(
+            *swapchain, device->graphicsQueue(), clearColor,
+            [&](VkCommandBuffer cmd, VkExtent2D extent) {
+                VkViewport viewport{};
+                viewport.x = 0.0f;
+                viewport.y = static_cast<float>(extent.height);
+                viewport.width = static_cast<float>(extent.width);
+                viewport.height = -static_cast<float>(extent.height);
+                viewport.minDepth = 0.0f;
+                viewport.maxDepth = 1.0f;
+                vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+                VkRect2D scissor{};
+                scissor.offset = {0, 0};
+                scissor.extent = extent;
+                vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+                starfieldRenderer->render(cmd, starContext, starParams);
+            });
         if (!frameStatus)
         {
             if (frameStatus.error().find("OUT_OF_DATE") != std::string::npos ||

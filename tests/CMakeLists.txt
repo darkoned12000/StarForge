@@ -40,6 +40,8 @@ add_executable(starforge_tests
     test_job_determinism.cpp
     test_instance_data.cpp
     test_instance_data_update.cpp
+    # Environment effects (M8)
+    test_environment_effects.cpp
 )
 
 target_link_libraries(starforge_tests
@@ -53,6 +55,8 @@ target_link_libraries(starforge_tests
         starforge_spatial
         starforge_stats
         starforge_vulkan
+        starforge_gpu
+        starforge_environment
         doctest::doctest
 )
 
@@ -75,6 +79,7 @@ add_executable(starforge_gpu_tests
     test_gpu_cull_parity.cpp
     test_gpu_driven_benchmark.cpp
     test_depth_ordering.cpp
+    test_starfield_render.cpp
     test_naive_control.cpp
     test_gpu_timestamps.cpp
     test_vma_memory_snapshot.cpp
@@ -89,6 +94,7 @@ target_link_libraries(starforge_gpu_tests
         starforge_spatial
         starforge_vulkan
         starforge_gpu
+        starforge_environment
         doctest::doctest
 )
 

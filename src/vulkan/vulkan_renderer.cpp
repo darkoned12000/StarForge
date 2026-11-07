@@ -201,7 +201,8 @@ FrameRenderer::FrameRenderer(FrameRenderer&& other) noexcept
       imageAvailableSemaphores_(std::move(other.imageAvailableSemaphores_)),
       renderFinishedSemaphores_(std::move(other.renderFinishedSemaphores_)),
       inFlightFences_(std::move(other.inFlightFences_)),
-      imagesInFlight_(std::move(other.imagesInFlight_))
+      imagesInFlight_(std::move(other.imagesInFlight_)),
+      lastSwapchain_(std::exchange(other.lastSwapchain_, VK_NULL_HANDLE))
 {
 }
 
@@ -220,6 +221,7 @@ FrameRenderer& FrameRenderer::operator=(FrameRenderer&& other) noexcept
         renderFinishedSemaphores_ = std::move(other.renderFinishedSemaphores_);
         inFlightFences_ = std::move(other.inFlightFences_);
         imagesInFlight_ = std::move(other.imagesInFlight_);
+        lastSwapchain_ = std::exchange(other.lastSwapchain_, VK_NULL_HANDLE);
     }
     return *this;
 }
@@ -247,6 +249,7 @@ void FrameRenderer::destroy() noexcept
     renderFinishedSemaphores_.clear();
     inFlightFences_.clear();
     imagesInFlight_.clear();
+    lastSwapchain_ = VK_NULL_HANDLE;
 }
 
 VkCommandBuffer FrameRenderer::currentCommandBuffer() const
@@ -273,7 +276,8 @@ void FrameRenderer::nextFrame()
 }
 
 std::expected<FrameStatus, std::string>
-FrameRenderer::renderClearedFrame(const VulkanSwapchain& swapchain, VkQueue queue, VkClearColorValue clearColor)
+FrameRenderer::renderFrameImpl(const VulkanSwapchain& swapchain, VkQueue queue, VkClearColorValue clearColor,
+                               const FrameRecordFn* record)
 {
     if (device_ == VK_NULL_HANDLE || currentFrame_ >= inFlightFences_.size())
     {
@@ -292,6 +296,14 @@ FrameRenderer::renderClearedFrame(const VulkanSwapchain& swapchain, VkQueue queu
         return std::unexpected(std::move(status.error()));
     }
 
+    // A recreated swapchain yields a new VkSwapchainKHR handle; per-image
+    // in-flight tracking from the old swapchain is stale and must reset.
+    if (swapchain.swapchain() != lastSwapchain_)
+    {
+        lastSwapchain_ = swapchain.swapchain();
+        std::fill(imagesInFlight_.begin(), imagesInFlight_.end(), VK_NULL_HANDLE);
+    }
+
     VkFence fence = inFlightFences_.at(currentFrame_);
     if (const VkResult result = vkWaitForFences(device_, 1, &fence, VK_TRUE, UINT64_MAX); result != VK_SUCCESS)
     {
@@ -305,6 +317,9 @@ FrameRenderer::renderClearedFrame(const VulkanSwapchain& swapchain, VkQueue queu
 
     if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR)
     {
+        // Advance the frame so the next acquire does not reuse a semaphore
+        // the driver may have signaled (VUID-vkAcquireNextImageKHR-semaphore-01286).
+        nextFrame();
         return FrameStatus::SwapchainOutOfDate;
     }
     if (acquireResult != VK_SUCCESS && acquireResult != VK_SUBOPTIMAL_KHR)
@@ -346,15 +361,89 @@ FrameRenderer::renderClearedFrame(const VulkanSwapchain& swapchain, VkQueue queu
         return std::unexpected(starforge::vulkan::describeFailure("vkBeginCommandBuffer", result));
     }
 
-    recordClearColorImage(
-        cmd,
-        images.at(imageIndex),
-        views.at(imageIndex),
-        swapchain.extent(),
-        clearColor,
-        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-        VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
-        0);
+    if (record == nullptr)
+    {
+        recordClearColorImage(
+            cmd,
+            images.at(imageIndex),
+            views.at(imageIndex),
+            swapchain.extent(),
+            clearColor,
+            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
+            0);
+    }
+    else
+    {
+        // Single pass: transition to attachment, clear, and draw in the
+        // same rendering instance (avoids a store+load round-trip that a
+        // separate clear pass would cause on tile-based GPUs).
+        VkImageMemoryBarrier2 toAttachment{};
+        toAttachment.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+        toAttachment.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        toAttachment.srcAccessMask = 0;
+        toAttachment.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        toAttachment.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+        toAttachment.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        toAttachment.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        toAttachment.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        toAttachment.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        toAttachment.image = images.at(imageIndex);
+        toAttachment.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        toAttachment.subresourceRange.baseMipLevel = 0;
+        toAttachment.subresourceRange.levelCount = 1;
+        toAttachment.subresourceRange.baseArrayLayer = 0;
+        toAttachment.subresourceRange.layerCount = 1;
+
+        VkDependencyInfo preDep{};
+        preDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        preDep.imageMemoryBarrierCount = 1;
+        preDep.pImageMemoryBarriers = &toAttachment;
+        vkCmdPipelineBarrier2(cmd, &preDep);
+
+        VkRenderingAttachmentInfo attachment{};
+        attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        attachment.imageView = views.at(imageIndex);
+        attachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        attachment.clearValue.color = clearColor;
+
+        VkRenderingInfo renderingInfo{};
+        renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+        renderingInfo.renderArea.offset = {0, 0};
+        renderingInfo.renderArea.extent = swapchain.extent();
+        renderingInfo.layerCount = 1;
+        renderingInfo.colorAttachmentCount = 1;
+        renderingInfo.pColorAttachments = &attachment;
+
+        vkCmdBeginRendering(cmd, &renderingInfo);
+        (*record)(cmd, swapchain.extent());
+        vkCmdEndRendering(cmd);
+
+        VkImageMemoryBarrier2 toPresent{};
+        toPresent.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+        toPresent.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        toPresent.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+        toPresent.dstStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
+        toPresent.dstAccessMask = 0;
+        toPresent.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        toPresent.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        toPresent.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        toPresent.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        toPresent.image = images.at(imageIndex);
+        toPresent.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        toPresent.subresourceRange.baseMipLevel = 0;
+        toPresent.subresourceRange.levelCount = 1;
+        toPresent.subresourceRange.baseArrayLayer = 0;
+        toPresent.subresourceRange.layerCount = 1;
+
+        VkDependencyInfo postDep{};
+        postDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        postDep.imageMemoryBarrierCount = 1;
+        postDep.pImageMemoryBarriers = &toPresent;
+        vkCmdPipelineBarrier2(cmd, &postDep);
+    }
 
     if (const VkResult result = vkEndCommandBuffer(cmd); result != VK_SUCCESS)
     {
@@ -413,6 +502,19 @@ FrameRenderer::renderClearedFrame(const VulkanSwapchain& swapchain, VkQueue queu
     }
 
     return FrameStatus::Presented;
+}
+
+std::expected<FrameStatus, std::string>
+FrameRenderer::renderClearedFrame(const VulkanSwapchain& swapchain, VkQueue queue, VkClearColorValue clearColor)
+{
+    return renderFrameImpl(swapchain, queue, clearColor, nullptr);
+}
+
+std::expected<FrameStatus, std::string>
+FrameRenderer::renderFrame(const VulkanSwapchain& swapchain, VkQueue queue, VkClearColorValue clearColor,
+                           const FrameRecordFn& record)
+{
+    return renderFrameImpl(swapchain, queue, clearColor, &record);
 }
 
 } // namespace starforge::vulkan

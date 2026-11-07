@@ -14,7 +14,7 @@ namespace starforge::planets
 // A node in the planet quadtree.
 struct PlanetQuadNode
 {
-    CubeFace face = CubeFace::PosX;
+    CubeFace face = CubeFace::PositiveX;
     int level = 0;           // LOD level (0 = root)
     int x = 0;               // Node index in quadtree
     int y = 0;

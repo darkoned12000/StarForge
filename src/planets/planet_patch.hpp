@@ -1,6 +1,5 @@
 #pragma once
 
-#include "gpu_resources/buffer.hpp"
 #include "math/math.hpp"
 
 #include <cstdint>
