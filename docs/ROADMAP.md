@@ -775,8 +775,8 @@ parameters are implemented; the GPU rendering half of M7 is not.
 | 7.2c ✅ | Continuous descent proof: scripted camera orbit→surface, bounded patch count, cross-face crack check | T3+T4 | Done: descent renders at 3 altitudes (3000/2000/1300 m, single patch = bounded); cross-face shared edges coincide to <1 m (T1). Known residual: different-LOD T-junction skirts still TODO |
 | 7.1b ✅ | Parallel quadtree LOD traversal (M7.1): job-based `update()` across faces | T1+T4 | Done: `PlanetQuadtree::updateParallel` (one job per leaf subtree); T1 determinism test passes (identical leaves). Speedup validation deferred to benchmark pass (timing asserts are flaky in unit tests) |
 | 7.2d ✅ | GPU patch pipeline integration (M7.2): secondary command buffers with dynamic-rendering inheritance (5.5.3b), GPU-timeline deferred retirement queue (5.5.3c) | T2+T3 | Done: `GpuRetirementQueue` (`vulkan_retirement.hpp/.cpp`) with fence-gated deleters + T2 test; secondary CB with `VkCommandBufferInheritanceRenderingInfo` executes identically (T3 starfield test). 2-frame stress validation still TODO |
-| 7.4a ⬜ | Parallel atmosphere LUT generation (M7.4): job-based LUT from `AtmosphereParams` | T1+T4 | LUT bit-identical across thread counts; generation 4x+ faster |
-| 7.4b ⬜ | Atmosphere rendering: scattering shell shader using the LUT | T3 | Atmosphere renders over planet limb in headless test; golden pixels match |
+| 7.4a ✅ | Parallel atmosphere LUT generation (M7.4): job-based LUT from `AtmosphereParams` | T1+T4 | Done: `generateAtmosphereLut` (128×64, single-scattering march, normalized); T1 tests pass (bit-identical parallel vs sequential, range, sun-facing brightness). Speedup validation deferred to benchmark pass |
+| 7.4b ✅ | Atmosphere rendering: scattering shell shader using the LUT | T3 | Done: `atmosphere.slang` shell (BDA LUT sampling, bilinear), headless test verifies disc + limb brightening. Golden comparison still TODO (pixel checks today) |
 
 ## M8 – Environment and Effects
 

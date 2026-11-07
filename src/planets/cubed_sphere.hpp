@@ -23,10 +23,13 @@ enum class CubeFace : std::uint8_t
 class CubedSphere
 {
 public:
-    // Convert cube face coordinates to world position on a unit sphere
+    // Legacy float wrapper. Prefer the double-precision free functions
+    // cubeToSphere/sphereToCube below (unified API used by patches/tests).
+    [[deprecated("Use cubeToSphere/sphereToCube free functions")]]
     static void faceToSphere(int32_t face, float u, float v, float* outPosition);
-    
+
     // Convert world position back to cube face coordinates and UV
+    [[deprecated("Use cubeToSphere/sphereToCube free functions (sphereToCube)")]]
     static bool sphereToFace(const float* position, CubeFace* outFace, float* outU, float* outV);
     
     // Get the 6 faces of the cubed sphere
