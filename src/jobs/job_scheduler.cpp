@@ -164,6 +164,10 @@ JobScheduler::JobScheduler(const SchedulerConfig& config)
 
 JobScheduler::~JobScheduler()
 {
+    // Drain outstanding work before tearing down: destroying userData
+    // while tasks are still in flight would race with their execution.
+    waitAll();
+
     {
         std::lock_guard lock(impl_->queueMutex);
         impl_->shutdown.store(true);

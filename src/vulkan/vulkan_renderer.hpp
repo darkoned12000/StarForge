@@ -23,6 +23,9 @@ enum class FrameStatus
 // from UNDEFINED to COLOR_ATTACHMENT_OPTIMAL, clears with `clearColor`, and
 // transitions to `finalLayout` (e.g. VK_IMAGE_LAYOUT_PRESENT_SRC_KHR or
 // VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL for headless readback tests).
+// When `depthImage`/`depthView` are supplied, also transitions the depth
+// image UNDEFINED -> DEPTH_ATTACHMENT_OPTIMAL, clears depth to
+// `clearDepth`, and transitions it to `finalLayout`.
 void recordClearColorImage(VkCommandBuffer cmd,
                            VkImage image,
                            VkImageView imageView,
@@ -30,7 +33,10 @@ void recordClearColorImage(VkCommandBuffer cmd,
                            VkClearColorValue clearColor,
                            VkImageLayout finalLayout,
                            VkPipelineStageFlags2 dstStageMask,
-                           VkAccessFlags2 dstAccessMask);
+                           VkAccessFlags2 dstAccessMask,
+                           VkImage depthImage = VK_NULL_HANDLE,
+                           VkImageView depthView = VK_NULL_HANDLE,
+                           float clearDepth = 1.0f);
 
 class FrameRenderer
 {

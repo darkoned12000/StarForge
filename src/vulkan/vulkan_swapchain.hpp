@@ -57,10 +57,17 @@ public:
     [[nodiscard]] VkExtent2D extent() const noexcept { return extent_; }
     [[nodiscard]] const std::vector<VkImage>& images() const noexcept { return images_; }
     [[nodiscard]] const std::vector<VkImageView>& imageViews() const noexcept { return imageViews_; }
+    // Per-swapchain-image depth attachments (recreated with the swapchain).
+    [[nodiscard]] VkFormat depthFormat() const noexcept { return depthFormat_; }
+    [[nodiscard]] const std::vector<VkImage>& depthImages() const noexcept { return depthImages_; }
+    [[nodiscard]] const std::vector<VkImageView>& depthViews() const noexcept { return depthViews_; }
 
 private:
     VulkanSwapchain() = default;
     void destroy() noexcept;
+
+    [[nodiscard]] std::expected<void, std::string> createDepthImages(std::uint32_t imageCount);
+    void destroyDepthImages() noexcept;
 
     [[nodiscard]] static std::expected<VulkanSwapchain, std::string>
     build(const CreateInfo& info, VkSwapchainKHR oldSwapchain);
@@ -73,6 +80,10 @@ private:
     VkExtent2D extent_ = {0, 0};
     std::vector<VkImage> images_;
     std::vector<VkImageView> imageViews_;
+    VkFormat depthFormat_ = VK_FORMAT_UNDEFINED;
+    std::vector<VkImage> depthImages_;
+    std::vector<VkImageView> depthViews_;
+    std::vector<VkDeviceMemory> depthMemories_;
     CreateInfo info_;
 };
 

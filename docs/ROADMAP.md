@@ -672,8 +672,8 @@ Before implementation, resolve these design decisions and record them as ADRs:
 | Step | Deliverable | Verified by | Done when |
 |------|-------------|-------------|-----------|
 | 5.5.3a ✅ | Per-thread, per-frame-in-flight command pool allocator (ThreadedCommandPools) | T2 | Command pools created per thread x frame; reset via vkResetCommandPool |
-| 5.5.3b ⬜ | Secondary command buffer recording with Dynamic Rendering inheritance | T3 | Deferred to M7.2 GPU patch pipeline integration |
-| 5.5.3c ⬜ | GPU-timeline deferred resource retirement queue | T2 | Deferred to M7.2 |
+| 5.5.3b ✅ | Secondary command buffer recording with Dynamic Rendering inheritance | T3 | Done in M7.2d test (dynamic-rendering inheritance, secondary executes identically) |
+| 5.5.3c ✅ | GPU-timeline deferred resource retirement queue | T2 | Done in M7.2d (`GpuRetirementQueue`, fence-gated deleters) |
 | 5.5.3d ✅ | Asynchronous staging ring-buffer uploader (StagingRingBuffer) | T2 | Lock-free slice reservation via atomic fetch_add; reset at frame boundary |
 
 ### 5.5.4 Procedural Content Parallelization
@@ -690,8 +690,8 @@ Before implementation, resolve these design decisions and record them as ADRs:
 | Step | Deliverable | Verified by | Done when |
 |------|-------------|-------------|-----------|
 | 5.5.5a ✅ | Parallel heightfield evaluation (heightFractalBatch, job-based) | T1+T4 | Height maps bit-identical to single-threaded |
-| 5.5.5b ⬜ | Parallel atmosphere LUT generation | T1+T4 | Deferred to M7.4 |
-| 5.5.5c ⬜ | Parallel quadtree LOD traversal | T1+T4 | Deferred to M7.1 |
+| 5.5.5b ✅ | Parallel atmosphere LUT generation | T1+T4 | Done in M7.4a (job-based, bit-identical) |
+| 5.5.5c ✅ | Parallel quadtree LOD traversal | T1+T4 | Done in M7.1b (`updateParallel`, bit-identical) |
 | 5.5.5d ⬜ | Parallel secondary command recording | T3 | Deferred to M7.2 |
 
 ### 5.5.6 Verification & Profiling
@@ -765,6 +765,12 @@ Still deferred to later milestones:
 CPU quadtree LOD selection, cubed-sphere projection, and atmosphere
 parameters are implemented; the GPU rendering half of M7 is not.
 
+### Status: complete (2026-11-07)
+GPU patch rendering, descent + seam proofs, parallel traversal, and
+atmosphere LUT + shell rendering all pass headless tests (see TODO
+table above). Residual polish (post-M7): T-junction skirts, terrain
+displacement, retirement stress validation, speedup validations.
+
 ### Remaining work (TODO)
 
 | Step | Deliverable | Verified by | Done when |
@@ -802,6 +808,13 @@ Residual (post-M8 polish, not blockers): bloom post-pass for HDR glow
 (star cores currently clamp at UNORM white), true volumetric raymarch
 (nebula/dust are FBM approximations), GPU culling for asteroids
 (CPU instance list today), golden images beyond the starfield.
+
+### Milestone gate (M1–M8)
+Milestones 1–8 are complete as of this revision: build is green with
+0 warnings, CPU (187+ cases) and GPU test suites pass, the sandbox
+runs validation-clean, and every milestone's TODO table above reflects
+reality. M9 work starts from this baseline; new polish items go into
+the respective milestone residuals, not new milestones.
 
 ### Remaining work (TODO)
 

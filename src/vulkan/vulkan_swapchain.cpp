@@ -109,6 +109,140 @@ chooseSwapchainExtent(const VkSurfaceCapabilitiesKHR& capabilities,
     return extent;
 }
 
+std::expected<void, std::string> VulkanSwapchain::createDepthImages(std::uint32_t imageCount)
+{
+    // Depth format preference mirrors gpu_resources::findDepthFormat
+    // (kept local: this library must not depend on gpu_resources).
+    VkFormat candidates[] = {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D32_SFLOAT_S8_UINT};
+    depthFormat_ = VK_FORMAT_D32_SFLOAT;
+    for (VkFormat candidate : candidates)
+    {
+        VkFormatProperties props{};
+        vkGetPhysicalDeviceFormatProperties(info_.physicalDevice, candidate, &props);
+        if ((props.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) != 0)
+        {
+            depthFormat_ = candidate;
+            break;
+        }
+    }
+
+    VkPhysicalDeviceMemoryProperties memProps{};
+    vkGetPhysicalDeviceMemoryProperties(info_.physicalDevice, &memProps);
+    auto findMemoryType = [&memProps](std::uint32_t typeFilter, VkMemoryPropertyFlags flags) {
+        for (std::uint32_t i = 0; i < memProps.memoryTypeCount; ++i)
+        {
+            if ((typeFilter & (1u << i)) != 0 && (memProps.memoryTypes[i].propertyFlags & flags) == flags)
+            {
+                return i;
+            }
+        }
+        return UINT32_MAX;
+    };
+
+    depthImages_.assign(imageCount, VK_NULL_HANDLE);
+    depthViews_.assign(imageCount, VK_NULL_HANDLE);
+    depthMemories_.assign(imageCount, VK_NULL_HANDLE);
+
+    for (std::uint32_t i = 0; i < imageCount; ++i)
+    {
+        VkImageCreateInfo imageInfo{};
+        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        imageInfo.imageType = VK_IMAGE_TYPE_2D;
+        imageInfo.format = depthFormat_;
+        imageInfo.extent = {extent_.width, extent_.height, 1};
+        imageInfo.mipLevels = 1;
+        imageInfo.arrayLayers = 1;
+        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+        imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+        VkImage depthImage = VK_NULL_HANDLE;
+        if (const VkResult result = vkCreateImage(device_, &imageInfo, nullptr, &depthImage);
+            result != VK_SUCCESS)
+        {
+            return std::unexpected(starforge::vulkan::describeFailure("vkCreateImage (depth)", result));
+        }
+        depthImages_[i] = depthImage;
+
+        VkMemoryRequirements memReq{};
+        vkGetImageMemoryRequirements(device_, depthImage, &memReq);
+        const std::uint32_t memType = findMemoryType(memReq.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        if (memType == UINT32_MAX)
+        {
+            return std::unexpected("No device-local memory for swapchain depth image");
+        }
+        VkMemoryAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        allocInfo.allocationSize = memReq.size;
+        allocInfo.memoryTypeIndex = memType;
+        if (const VkResult result = vkAllocateMemory(device_, &allocInfo, nullptr, &depthMemories_[i]);
+            result != VK_SUCCESS)
+        {
+            return std::unexpected(starforge::vulkan::describeFailure("vkAllocateMemory (depth)", result));
+        }
+        vkBindImageMemory(device_, depthImage, depthMemories_[i], 0);
+
+        const VkImageAspectFlags aspect =
+            (depthFormat_ == VK_FORMAT_D24_UNORM_S8_UINT || depthFormat_ == VK_FORMAT_D32_SFLOAT_S8_UINT)
+            ? (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)
+            : VK_IMAGE_ASPECT_DEPTH_BIT;
+
+        VkImageViewCreateInfo viewInfo{};
+        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        viewInfo.image = depthImage;
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.format = depthFormat_;
+        viewInfo.subresourceRange.aspectMask = aspect;
+        viewInfo.subresourceRange.baseMipLevel = 0;
+        viewInfo.subresourceRange.levelCount = 1;
+        viewInfo.subresourceRange.baseArrayLayer = 0;
+        viewInfo.subresourceRange.layerCount = 1;
+        if (const VkResult result = vkCreateImageView(device_, &viewInfo, nullptr, &depthViews_[i]);
+            result != VK_SUCCESS)
+        {
+            return std::unexpected(starforge::vulkan::describeFailure("vkCreateImageView (depth)", result));
+        }
+    }
+
+    return {};
+}
+
+void VulkanSwapchain::destroyDepthImages() noexcept
+{
+    if (device_ == VK_NULL_HANDLE)
+    {
+        depthImages_.clear();
+        depthViews_.clear();
+        depthMemories_.clear();
+        return;
+    }
+    for (auto view : depthViews_)
+    {
+        if (view != VK_NULL_HANDLE)
+        {
+            vkDestroyImageView(device_, view, nullptr);
+        }
+    }
+    for (auto image : depthImages_)
+    {
+        if (image != VK_NULL_HANDLE)
+        {
+            vkDestroyImage(device_, image, nullptr);
+        }
+    }
+    for (auto memory : depthMemories_)
+    {
+        if (memory != VK_NULL_HANDLE)
+        {
+            vkFreeMemory(device_, memory, nullptr);
+        }
+    }
+    depthImages_.clear();
+    depthViews_.clear();
+    depthMemories_.clear();
+}
+
 std::expected<VulkanSwapchain, std::string> VulkanSwapchain::create(const CreateInfo& info)
 {
     return build(info, VK_NULL_HANDLE);
@@ -235,6 +369,11 @@ VulkanSwapchain::build(const CreateInfo& info, VkSwapchainKHR oldSwapchain)
         }
     }
 
+    if (auto status = swapchain.createDepthImages(imageCount); !status)
+    {
+        return std::unexpected(std::move(status.error()));
+    }
+
     core::logInfo(kTag, "Swapchain created: {}x{}, format {}, present mode {}, {} images",
                   extent->width, extent->height, formatName(surfaceFormat->format), presentModeName(presentMode), imageCount);
     return swapchain;
@@ -286,6 +425,10 @@ VulkanSwapchain::VulkanSwapchain(VulkanSwapchain&& other) noexcept
       extent_(other.extent_),
       images_(std::move(other.images_)),
       imageViews_(std::move(other.imageViews_)),
+      depthFormat_(std::exchange(other.depthFormat_, VK_FORMAT_UNDEFINED)),
+      depthImages_(std::move(other.depthImages_)),
+      depthViews_(std::move(other.depthViews_)),
+      depthMemories_(std::move(other.depthMemories_)),
       info_(other.info_)
 {
 }
@@ -303,6 +446,10 @@ VulkanSwapchain& VulkanSwapchain::operator=(VulkanSwapchain&& other) noexcept
         extent_ = other.extent_;
         images_ = std::move(other.images_);
         imageViews_ = std::move(other.imageViews_);
+        depthFormat_ = std::exchange(other.depthFormat_, VK_FORMAT_UNDEFINED);
+        depthImages_ = std::move(other.depthImages_);
+        depthViews_ = std::move(other.depthViews_);
+        depthMemories_ = std::move(other.depthMemories_);
         info_ = other.info_;
     }
     return *this;
@@ -310,6 +457,7 @@ VulkanSwapchain& VulkanSwapchain::operator=(VulkanSwapchain&& other) noexcept
 
 void VulkanSwapchain::destroy() noexcept
 {
+    destroyDepthImages();
     if (device_ != VK_NULL_HANDLE)
     {
         for (auto view : imageViews_)

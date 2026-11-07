@@ -76,6 +76,7 @@ function(starforge_add_shader)
                 -profile ${SF_PROFILE}
                 -entry ${SF_ENTRY}
                 -stage ${SF_STAGE}
+                -matrix-layout-column-major
                 -o "${shader_output}"
         DEPENDS "${SF_SOURCE}"
         COMMENT "Compiling Slang shader: ${shader_name}"

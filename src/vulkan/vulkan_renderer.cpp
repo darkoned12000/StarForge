@@ -23,7 +23,10 @@ void recordClearColorImage(VkCommandBuffer cmd,
                            VkClearColorValue clearColor,
                            VkImageLayout finalLayout,
                            VkPipelineStageFlags2 dstStageMask,
-                           VkAccessFlags2 dstAccessMask)
+                           VkAccessFlags2 dstAccessMask,
+                           VkImage depthImage,
+                           VkImageView depthView,
+                           float clearDepth)
 {
     VkImageMemoryBarrier2 toAttachment{};
     toAttachment.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -56,6 +59,42 @@ void recordClearColorImage(VkCommandBuffer cmd,
     colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     colorAttachment.clearValue.color = clearColor;
 
+    VkRenderingAttachmentInfo depthAttachment{};
+    depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    depthAttachment.imageView = depthView;
+    depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    depthAttachment.clearValue.depthStencil = VkClearDepthStencilValue{clearDepth, 0};
+
+    VkImageMemoryBarrier2 depthToAttachment{};
+    const bool hasDepth = depthImage != VK_NULL_HANDLE && depthView != VK_NULL_HANDLE;
+    if (hasDepth)
+    {
+        depthToAttachment.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+        depthToAttachment.srcStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT;
+        depthToAttachment.srcAccessMask = 0;
+        depthToAttachment.dstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT;
+        depthToAttachment.dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        depthToAttachment.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        depthToAttachment.newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+        depthToAttachment.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        depthToAttachment.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        depthToAttachment.image = depthImage;
+        depthToAttachment.subresourceRange.aspectMask =
+            VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+        depthToAttachment.subresourceRange.baseMipLevel = 0;
+        depthToAttachment.subresourceRange.levelCount = 1;
+        depthToAttachment.subresourceRange.baseArrayLayer = 0;
+        depthToAttachment.subresourceRange.layerCount = 1;
+
+        VkDependencyInfo depthDep{};
+        depthDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        depthDep.imageMemoryBarrierCount = 1;
+        depthDep.pImageMemoryBarriers = &depthToAttachment;
+        vkCmdPipelineBarrier2(cmd, &depthDep);
+    }
+
     VkRenderingInfo renderingInfo{};
     renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
     renderingInfo.renderArea.offset = {0, 0};
@@ -63,6 +102,7 @@ void recordClearColorImage(VkCommandBuffer cmd,
     renderingInfo.layerCount = 1;
     renderingInfo.colorAttachmentCount = 1;
     renderingInfo.pColorAttachments = &colorAttachment;
+    renderingInfo.pDepthAttachment = hasDepth ? &depthAttachment : nullptr;
 
     vkCmdBeginRendering(cmd, &renderingInfo);
     vkCmdEndRendering(cmd);
@@ -89,6 +129,33 @@ void recordClearColorImage(VkCommandBuffer cmd,
     postDep.imageMemoryBarrierCount = 1;
     postDep.pImageMemoryBarriers = &toFinal;
     vkCmdPipelineBarrier2(cmd, &postDep);
+
+    if (hasDepth)
+    {
+        VkImageMemoryBarrier2 depthToFinal{};
+        depthToFinal.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+        depthToFinal.srcStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT;
+        depthToFinal.srcAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        depthToFinal.dstStageMask = dstStageMask;
+        depthToFinal.dstAccessMask = dstAccessMask;
+        depthToFinal.oldLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+        depthToFinal.newLayout = finalLayout;
+        depthToFinal.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        depthToFinal.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        depthToFinal.image = depthImage;
+        depthToFinal.subresourceRange.aspectMask =
+            VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+        depthToFinal.subresourceRange.baseMipLevel = 0;
+        depthToFinal.subresourceRange.levelCount = 1;
+        depthToFinal.subresourceRange.baseArrayLayer = 0;
+        depthToFinal.subresourceRange.layerCount = 1;
+
+        VkDependencyInfo depthPostDep{};
+        depthPostDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        depthPostDep.imageMemoryBarrierCount = 1;
+        depthPostDep.pImageMemoryBarriers = &depthToFinal;
+        vkCmdPipelineBarrier2(cmd, &depthPostDep);
+    }
 }
 
 std::expected<FrameRenderer, std::string> FrameRenderer::create(const CreateInfo& info)
@@ -361,6 +428,10 @@ FrameRenderer::renderFrameImpl(const VulkanSwapchain& swapchain, VkQueue queue, 
         return std::unexpected(starforge::vulkan::describeFailure("vkBeginCommandBuffer", result));
     }
 
+    const bool hasDepth = imageIndex < swapchain.depthViews().size();
+    const VkImage depthImage = hasDepth ? swapchain.depthImages().at(imageIndex) : VK_NULL_HANDLE;
+    const VkImageView depthView = hasDepth ? swapchain.depthViews().at(imageIndex) : VK_NULL_HANDLE;
+
     if (record == nullptr)
     {
         recordClearColorImage(
@@ -371,7 +442,10 @@ FrameRenderer::renderFrameImpl(const VulkanSwapchain& swapchain, VkQueue queue, 
             clearColor,
             VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
             VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
-            0);
+            0,
+            depthImage,
+            depthView,
+            1.0f);
     }
     else
     {
@@ -401,6 +475,33 @@ FrameRenderer::renderFrameImpl(const VulkanSwapchain& swapchain, VkQueue queue, 
         preDep.pImageMemoryBarriers = &toAttachment;
         vkCmdPipelineBarrier2(cmd, &preDep);
 
+        if (hasDepth)
+        {
+            VkImageMemoryBarrier2 depthPre{};
+            depthPre.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+            depthPre.srcStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT;
+            depthPre.srcAccessMask = 0;
+            depthPre.dstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT;
+            depthPre.dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+            depthPre.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            depthPre.newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+            depthPre.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            depthPre.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            depthPre.image = depthImage;
+            depthPre.subresourceRange.aspectMask =
+                VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+            depthPre.subresourceRange.baseMipLevel = 0;
+            depthPre.subresourceRange.levelCount = 1;
+            depthPre.subresourceRange.baseArrayLayer = 0;
+            depthPre.subresourceRange.layerCount = 1;
+
+            VkDependencyInfo depthDep{};
+            depthDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+            depthDep.imageMemoryBarrierCount = 1;
+            depthDep.pImageMemoryBarriers = &depthPre;
+            vkCmdPipelineBarrier2(cmd, &depthDep);
+        }
+
         VkRenderingAttachmentInfo attachment{};
         attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
         attachment.imageView = views.at(imageIndex);
@@ -409,6 +510,14 @@ FrameRenderer::renderFrameImpl(const VulkanSwapchain& swapchain, VkQueue queue, 
         attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         attachment.clearValue.color = clearColor;
 
+        VkRenderingAttachmentInfo depthAttachment{};
+        depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        depthAttachment.imageView = depthView;
+        depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+        depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        depthAttachment.clearValue.depthStencil = VkClearDepthStencilValue{1.0f, 0};
+
         VkRenderingInfo renderingInfo{};
         renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
         renderingInfo.renderArea.offset = {0, 0};
@@ -416,10 +525,38 @@ FrameRenderer::renderFrameImpl(const VulkanSwapchain& swapchain, VkQueue queue, 
         renderingInfo.layerCount = 1;
         renderingInfo.colorAttachmentCount = 1;
         renderingInfo.pColorAttachments = &attachment;
+        renderingInfo.pDepthAttachment = hasDepth ? &depthAttachment : nullptr;
 
         vkCmdBeginRendering(cmd, &renderingInfo);
         (*record)(cmd, swapchain.extent());
         vkCmdEndRendering(cmd);
+
+        if (hasDepth)
+        {
+            VkImageMemoryBarrier2 depthPost{};
+            depthPost.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+            depthPost.srcStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT;
+            depthPost.srcAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+            depthPost.dstStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
+            depthPost.dstAccessMask = 0;
+            depthPost.oldLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+            depthPost.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+            depthPost.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            depthPost.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            depthPost.image = depthImage;
+            depthPost.subresourceRange.aspectMask =
+                VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+            depthPost.subresourceRange.baseMipLevel = 0;
+            depthPost.subresourceRange.levelCount = 1;
+            depthPost.subresourceRange.baseArrayLayer = 0;
+            depthPost.subresourceRange.layerCount = 1;
+
+            VkDependencyInfo depthPostDep{};
+            depthPostDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+            depthPostDep.imageMemoryBarrierCount = 1;
+            depthPostDep.pImageMemoryBarriers = &depthPost;
+            vkCmdPipelineBarrier2(cmd, &depthPostDep);
+        }
 
         VkImageMemoryBarrier2 toPresent{};
         toPresent.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;

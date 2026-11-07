@@ -175,6 +175,7 @@ int main()
         .physicalDevice = context->physicalDevice(),
         .queueFamily = device->graphicsQueueFamily(),
         .colorFormat = swapchain->format(),
+        .depthFormat = swapchain->depthFormat(),
         .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
     });
     if (!starfieldRenderer) { core::logError(kTag, "{}", starfieldRenderer.error()); return EXIT_FAILURE; }
@@ -310,6 +311,7 @@ int main()
                     .physicalDevice = context->physicalDevice(),
                     .queueFamily = device->graphicsQueueFamily(),
                     .colorFormat = swapchain->format(),
+                    .depthFormat = swapchain->depthFormat(),
                     .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
                 });
                 if (!newStarfieldRenderer) { core::logError(kTag, "{}", newStarfieldRenderer.error()); return EXIT_FAILURE; }
