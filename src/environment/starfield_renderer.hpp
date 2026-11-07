@@ -1,5 +1,6 @@
 #pragma once
 
+#include "internal/effect_pipeline.hpp"
 #include "math/math.hpp"
 #include "vulkan/vulkan_pipeline.hpp"
 
@@ -16,6 +17,7 @@ namespace starforge::environment
 struct StarfieldRenderContext
 {
     math::Mat4f viewProj{};
+    math::Mat4f invViewProj{1.0f}; // Unproject for world-locked directions.
     math::Vec3f cameraPosition{0.0f, 0.0f, 0.0f};
     // Target resolution in pixels (used for resolution-independent star density).
     math::Vec2f resolution{1.0f, 1.0f};
@@ -83,6 +85,8 @@ private:
     VkDevice device_ = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
     std::optional<vulkan::GraphicsPipeline> pipeline_;
+    // Sun billboard (billboard.slang), drawn at StarfieldParams.worldPosition.
+    std::optional<internal::BillboardEffect> sunEffect_;
 };
 
 } // namespace starforge::environment

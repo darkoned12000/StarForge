@@ -202,6 +202,21 @@ starforge_add_shader(
     OUTPUT_NAME starfield.frag
 )
 
+foreach(effect_shaders IN ITEMS nebula dust sun_distortion wormhole ftl storm billboard asteroid)
+    starforge_add_shader(
+        SOURCE "${PROJECT_SOURCE_DIR}/shaders/graphics/${effect_shaders}.slang"
+        STAGE  vertex
+        ENTRY  vertexMain
+        OUTPUT_NAME ${effect_shaders}.vert
+    )
+    starforge_add_shader(
+        SOURCE "${PROJECT_SOURCE_DIR}/shaders/graphics/${effect_shaders}.slang"
+        STAGE  fragment
+        ENTRY  fragmentMain
+        OUTPUT_NAME ${effect_shaders}.frag
+    )
+endforeach()
+
 # (test_bda.slang removed - BDA debugging complete)
 
 # --------------------------------------------------

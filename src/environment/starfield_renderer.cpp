@@ -16,18 +16,18 @@ namespace
 {
 
 // Must match the PushConstants struct in shaders/graphics/starfield.slang
-// (std430: time @0, intensity @4, resolution @8; 16 bytes total).
+// (std430: time @0, intensity @4, resolution @8, invViewProj @16; 80 bytes).
 struct PushConstants
 {
     float time = 0.0f;
     float intensity = 1.0f;
     math::Vec2f resolution{1.0f, 1.0f};
+    math::Mat4f invViewProj{1.0f};
 };
 
-static_assert(sizeof(PushConstants) == 16, "PushConstants size must match Slang std430 layout (16 bytes)");
-static_assert(offsetof(PushConstants, time) == 0, "PushConstants time offset must be 0");
-static_assert(offsetof(PushConstants, intensity) == 4, "PushConstants intensity offset must be 4");
+static_assert(sizeof(PushConstants) == 80, "PushConstants size must match Slang std430 layout (80 bytes)");
 static_assert(offsetof(PushConstants, resolution) == 8, "PushConstants resolution offset must be 8");
+static_assert(offsetof(PushConstants, invViewProj) == 16, "PushConstants invViewProj offset must be 16");
 
 std::vector<char> readFile(const std::string& path)
 {
@@ -170,6 +170,20 @@ std::expected<StarfieldRenderer, std::string> StarfieldRenderer::create(const Cr
     renderer.pipeline_ = std::move(*pipeline);
     // (optional<GraphicsPipeline> holds the pipeline; reset() replaces it.)
 
+    // Sun billboard pipeline (shared billboard shader).
+    auto sun = internal::BillboardEffect::create({
+        .device = info.device,
+        .colorFormat = info.colorFormat,
+        .shaderDirectory = info.shaderDirectory,
+        .shaderBaseName = "billboard",
+        .pushConstantSize = sizeof(internal::BillboardPush),
+    });
+    if (!sun)
+    {
+        return std::unexpected(std::move(sun.error()));
+    }
+    renderer.sunEffect_ = std::move(*sun);
+
     return renderer;
 }
 
@@ -181,7 +195,8 @@ StarfieldRenderer::~StarfieldRenderer()
 StarfieldRenderer::StarfieldRenderer(StarfieldRenderer&& other) noexcept
     : device_(std::exchange(other.device_, VK_NULL_HANDLE)),
       pipelineLayout_(std::exchange(other.pipelineLayout_, VK_NULL_HANDLE)),
-      pipeline_(std::exchange(other.pipeline_, std::nullopt))
+      pipeline_(std::exchange(other.pipeline_, std::nullopt)),
+      sunEffect_(std::exchange(other.sunEffect_, std::nullopt))
 {
 }
 
@@ -194,6 +209,7 @@ StarfieldRenderer& StarfieldRenderer::operator=(StarfieldRenderer&& other) noexc
         device_ = std::exchange(other.device_, VK_NULL_HANDLE);
         pipelineLayout_ = std::exchange(other.pipelineLayout_, VK_NULL_HANDLE);
         pipeline_ = std::exchange(other.pipeline_, std::nullopt);
+        sunEffect_ = std::exchange(other.sunEffect_, std::nullopt);
     }
     return *this;
 }
@@ -203,6 +219,7 @@ void StarfieldRenderer::destroy() noexcept
     // The pipeline layout must not be destroyed while a pipeline using it
     // still exists, so release the pipeline first, then the layout.
     pipeline_.reset();
+    sunEffect_.reset();
     if (device_ != VK_NULL_HANDLE && pipelineLayout_ != VK_NULL_HANDLE)
     {
         vkDestroyPipelineLayout(device_, pipelineLayout_, nullptr);
@@ -222,6 +239,7 @@ void StarfieldRenderer::render(VkCommandBuffer cmd, const StarfieldRenderContext
         .time = params.time != 0.0f ? params.time : context.time,
         .intensity = params.intensity,
         .resolution = context.resolution,
+        .invViewProj = context.invViewProj,
     };
 
     vkCmdPushConstants(cmd, pipelineLayout_, VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -229,6 +247,27 @@ void StarfieldRenderer::render(VkCommandBuffer cmd, const StarfieldRenderContext
 
     // Fullscreen triangle: 3 vertices, no vertex buffers.
     pipeline_->bindAndDraw(cmd, 3, 0, 1);
+
+    // Sun billboard at the params' world position: frustum-culled when
+    // behind the camera plane, aspect-corrected (no widescreen ellipse).
+    if (sunEffect_.has_value())
+    {
+        const math::Vec4f clip = context.viewProj * math::Vec4f{params.worldPosition, 1.0f};
+        if (clip.w > 1e-3f)
+        {
+            const math::Vec3f ndc{clip.x / clip.w, clip.y / clip.w, clip.z / clip.w};
+            const float aspect = context.resolution.x / std::max(context.resolution.y, 1.0f);
+            internal::BillboardPush sunPush;
+            sunPush.centerSize = {
+                ndc.x, ndc.y,
+                internal::ndcHalfSize(context.viewProj, params.worldPosition, params.radius), aspect};
+            sunPush.color = params.color;
+            sunPush.time = context.time;
+            sunPush.intensity = params.intensity;
+            sunPush.shape = static_cast<std::uint32_t>(internal::BillboardShape::Disc);
+            sunEffect_->render(cmd, &sunPush, sizeof(sunPush));
+        }
+    }
 }
 
 } // namespace starforge::environment

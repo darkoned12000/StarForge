@@ -8,6 +8,8 @@
 #include "vulkan/vulkan_device.hpp"
 
 #include <cstdint>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 #ifndef STARFORGE_SHADER_DIR
 #define STARFORGE_SHADER_DIR "shaders"
@@ -15,6 +17,7 @@
 
 using namespace starforge::environment;
 using namespace starforge::gpu_resources;
+using namespace starforge::math;
 using namespace starforge::vulkan;
 
 TEST_CASE("Starfield render: procedural stars appear in offscreen image")
@@ -128,9 +131,18 @@ TEST_CASE("Starfield render: procedural stars appear in offscreen image")
                 StarfieldRenderContext starContext;
                 starContext.resolution = {static_cast<float>(w), static_cast<float>(h)};
                 starContext.time = 1.0f;
+                // Camera at +Z looking at origin; sun at the origin renders
+                // as a billboard at screen center.
+                starContext.viewProj = perspectiveVulkan(glm::radians(60.0f), 1.0f, 0.1f, 100.0f) *
+                                       glm::lookAt(Vec3f{0.0f, 0.0f, 5.0f}, Vec3f{0.0f, 0.0f, 0.0f},
+                                                   Vec3f{0.0f, 1.0f, 0.0f});
+                starContext.invViewProj = glm::inverse(starContext.viewProj);
                 StarfieldParams starParams;
                 starParams.time = 1.0f;
                 starParams.intensity = 1.0f;
+                starParams.worldPosition = {0.0f, 0.0f, 0.0f};
+                starParams.radius = 2.0f;
+                starParams.color = {1.0f, 0.9f, 0.6f, 1.0f};
 
                 starRenderer->render(cmd, starContext, starParams);
 
@@ -347,9 +359,16 @@ TEST_CASE("Starfield render: secondary command buffer executes identically (7.2d
                 StarfieldRenderContext starContext;
                 starContext.resolution = {static_cast<float>(w), static_cast<float>(h)};
                 starContext.time = 1.0f;
+                starContext.viewProj = perspectiveVulkan(glm::radians(60.0f), 1.0f, 0.1f, 100.0f) *
+                                       glm::lookAt(Vec3f{0.0f, 0.0f, 5.0f}, Vec3f{0.0f, 0.0f, 0.0f},
+                                                   Vec3f{0.0f, 1.0f, 0.0f});
+                starContext.invViewProj = glm::inverse(starContext.viewProj);
                 StarfieldParams starParams;
                 starParams.time = 1.0f;
                 starParams.intensity = 1.0f;
+                starParams.worldPosition = {0.0f, 0.0f, 0.0f};
+                starParams.radius = 2.0f;
+                starParams.color = {1.0f, 0.9f, 0.6f, 1.0f};
                 starRenderer->render(secondary, starContext, starParams);
 
                 REQUIRE(vkEndCommandBuffer(secondary) == VK_SUCCESS);

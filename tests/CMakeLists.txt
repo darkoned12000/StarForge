@@ -40,8 +40,6 @@ add_executable(starforge_tests
     test_job_determinism.cpp
     test_instance_data.cpp
     test_instance_data_update.cpp
-    # Environment effects (M8)
-    test_environment_effects.cpp
 )
 
 target_link_libraries(starforge_tests
@@ -81,6 +79,10 @@ add_executable(starforge_gpu_tests
     test_depth_ordering.cpp
     test_starfield_render.cpp
     test_planet_patch_render.cpp
+    test_environment_render.cpp
+    test_asteroid_render.cpp
+    test_environment_effects.cpp
+    test_golden_starfield.cpp
     test_atmosphere_render.cpp
     test_vulkan_retirement.cpp
     test_naive_control.cpp
@@ -106,6 +108,7 @@ target_compile_definitions(starforge_gpu_tests
     PRIVATE
         STARFORGE_SHADER_DIR="${PROJECT_BINARY_DIR}/shaders"
         STARFORGE_BASELINE_DIR="${PROJECT_BINARY_DIR}/benchmarks/baselines"
+        STARFORGE_GOLDEN_DIR="${PROJECT_SOURCE_DIR}/tests/goldens"
 )
 
 target_include_directories(starforge_gpu_tests SYSTEM

@@ -42,18 +42,24 @@ GraphicsPipeline::create(const GraphicsPipelineConfig& config)
     inputAssembly.topology = config.topology;
     inputAssembly.primitiveRestartEnable = VK_FALSE;
 
+    // Positive unsigned dimensions for the scissor; Vulkan Y-flip is the
+    // negative viewport height. (Casting the negative height to uint32
+    // would be undefined behavior.)
+    const float vpWidth = config.viewportWidth > 0.0f ? config.viewportWidth : 1.0f;
+    const float vpHeight = config.viewportHeight > 0.0f ? config.viewportHeight : 1.0f;
+
     VkViewport viewport{};
     viewport.x = 0.0f;
-    viewport.y = config.viewportHeight > 0.0f ? config.viewportHeight : 1.0f;
-    viewport.width = config.viewportWidth > 0.0f ? config.viewportWidth : 1.0f;
-    viewport.height = config.viewportHeight > 0.0f ? -config.viewportHeight : -1.0f;
+    viewport.y = vpHeight;
+    viewport.width = vpWidth;
+    viewport.height = -vpHeight; // Vulkan flipped-Y convention
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
 
     VkRect2D scissor{};
     scissor.offset = {0, 0};
-    scissor.extent = {static_cast<std::uint32_t>(viewport.width),
-                      static_cast<std::uint32_t>(viewport.height)};
+    scissor.extent = {static_cast<std::uint32_t>(vpWidth),
+                      static_cast<std::uint32_t>(vpHeight)};
 
     VkPipelineViewportStateCreateInfo viewportState{};
     viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -86,10 +92,13 @@ GraphicsPipeline::create(const GraphicsPipelineConfig& config)
     multisampling.sampleShadingEnable = VK_FALSE;
     multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
+    const bool hasDepth = (config.depthFormat != VK_FORMAT_UNDEFINED);
     VkPipelineDepthStencilStateCreateInfo depthStencil{};
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = config.depthTest ? VK_TRUE : VK_FALSE;
-    depthStencil.depthWriteEnable = config.depthWrite ? VK_TRUE : VK_FALSE;
+    // Depth-only / color-only pipelines must not enable depth when the
+    // depth attachment format is UNDEFINED (VUID-06540).
+    depthStencil.depthTestEnable = (hasDepth && config.depthTest) ? VK_TRUE : VK_FALSE;
+    depthStencil.depthWriteEnable = (hasDepth && config.depthWrite) ? VK_TRUE : VK_FALSE;
     depthStencil.depthCompareOp = config.depthCompare;
     depthStencil.depthBoundsTestEnable = VK_FALSE;
     depthStencil.stencilTestEnable = VK_FALSE;
@@ -97,17 +106,24 @@ GraphicsPipeline::create(const GraphicsPipelineConfig& config)
     VkPipelineColorBlendAttachmentState colorBlendAttachment{};
     colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                                          VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    colorBlendAttachment.blendEnable = VK_FALSE;
+    colorBlendAttachment.blendEnable = config.blendEnable ? VK_TRUE : VK_FALSE;
+    colorBlendAttachment.srcColorBlendFactor = config.blendSrcFactor;
+    colorBlendAttachment.dstColorBlendFactor = config.blendDstFactor;
+    colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+    colorBlendAttachment.srcAlphaBlendFactor = config.blendSrcAlphaFactor;
+    colorBlendAttachment.dstAlphaBlendFactor = config.blendDstAlphaFactor;
+    colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
 
+    // Attachment count must match VkPipelineRenderingCreateInfo (06042).
+    const bool hasColor = (config.colorFormat != VK_FORMAT_UNDEFINED);
     VkPipelineColorBlendStateCreateInfo colorBlending{};
     colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     colorBlending.logicOpEnable = VK_FALSE;
-    colorBlending.attachmentCount = 1;
-    colorBlending.pAttachments = &colorBlendAttachment;
+    colorBlending.attachmentCount = hasColor ? 1 : 0;
+    colorBlending.pAttachments = hasColor ? &colorBlendAttachment : nullptr;
 
     // Dynamic rendering: specify color and depth formats at pipeline creation.
     VkFormat colorFormats[] = {config.colorFormat};
-    bool hasColor = (config.colorFormat != VK_FORMAT_UNDEFINED);
     VkPipelineRenderingCreateInfo renderingInfo{};
     renderingInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
     renderingInfo.colorAttachmentCount = hasColor ? 1 : 0;
@@ -201,7 +217,7 @@ createPushConstantPipelineLayout(VkDevice device, std::uint32_t pushConstantSize
     VkPushConstantRange pushRange{};
     pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     pushRange.offset = 0;
-    pushRange.size = pushConstantSize;
+    pushRange.size = (pushConstantSize + 3u) & ~3u; // Enforce 4-byte multiple
 
     VkPipelineLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;

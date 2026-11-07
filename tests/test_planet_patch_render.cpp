@@ -87,15 +87,16 @@ std::expected<Buffer, std::string> uploadBuffer(Allocator& allocator, const void
     return buffer;
 }
 
-// Must match PlanetVertex / PushConstants in planet_patch.slang.
-// Interleaved vertex: float3 pos, float3 normal, float2 uv (HLSL packing).
+// Must match vertex format in planet_patch.slang: float4 position /
+// float4 normal / float2 uv interleaved (std430-safe stride 48).
 struct CpuVertex
 {
-    float pos[3];
-    float normal[3];
+    float pos[4];
+    float normal[4];
     float uv[2];
+    float uvPad[2] = {};
 };
-static_assert(sizeof(CpuVertex) == 32, "interleaved vertex must be 32 bytes");
+static_assert(sizeof(CpuVertex) == 48, "interleaved vertex must be 48 bytes");
 
 struct PushData
 {
@@ -144,9 +145,11 @@ TEST_CASE("Planet patch render: quadtree patch renders headlessly (7.2b)")
                 vertices[i].pos[0] = mesh.positions[i].x;
                 vertices[i].pos[1] = mesh.positions[i].y;
                 vertices[i].pos[2] = mesh.positions[i].z;
+                vertices[i].pos[3] = 1.0f;
                 vertices[i].normal[0] = mesh.normals[i].x;
                 vertices[i].normal[1] = mesh.normals[i].y;
                 vertices[i].normal[2] = mesh.normals[i].z;
+                vertices[i].normal[3] = 0.0f;
                 vertices[i].uv[0] = mesh.uvs[i].x;
                 vertices[i].uv[1] = mesh.uvs[i].y;
             }
@@ -230,7 +233,7 @@ TEST_CASE("Planet patch render: quadtree patch renders headlessly (7.2b)")
             VkCommandPoolCreateInfo poolInfo{};
             poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
             poolInfo.queueFamilyIndex = device->graphicsQueueFamily();
-            poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+            poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
             VkCommandPool cmdPool = VK_NULL_HANDLE;
             REQUIRE(vkCreateCommandPool(device->device(), &poolInfo, nullptr, &cmdPool) == VK_SUCCESS);
 

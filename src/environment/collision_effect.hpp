@@ -1,7 +1,7 @@
 #pragma once
 
+#include "internal/effect_pipeline.hpp"
 #include "math/math.hpp"
-#include "vulkan/vulkan_pipeline.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -61,9 +61,7 @@ private:
     void destroy() noexcept;
 
     VkDevice device_ = VK_NULL_HANDLE;
-    VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
-    std::optional<vulkan::GraphicsPipeline> pipeline_;
-    VkDescriptorPool descriptorPool_ = VK_NULL_HANDLE;
+    std::optional<internal::BillboardEffect> effect_;
 };
 
 } // namespace starforge::environment

@@ -23,6 +23,8 @@
 #include "environment/wormhole_effect.hpp"
 #include "environment/ftl_effect.hpp"
 #include "environment/afterburner_effect.hpp"
+#include "environment/storm_effect.hpp"
+#include "environment/shield_effect.hpp"
 
 #include <chrono>
 #include <cstdlib>
@@ -140,26 +142,31 @@ int main()
         return EXIT_FAILURE;
     }
 
-    // Initialize environment effects. Only the starfield renders today;
-    // the rest are validated handles awaiting their pipelines (TODO M8).
+    // Initialize environment effects (12 renderers + asteroid field).
     auto nebulaRenderer = environment::NebulaRenderer::create({
         .device = device->device(),
         .physicalDevice = context->physicalDevice(),
-        .queueFamily = device->graphicsQueueFamily()
+        .queueFamily = device->graphicsQueueFamily(),
+        .colorFormat = swapchain->format(),
+        .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
     });
     if (!nebulaRenderer) { core::logError(kTag, "{}", nebulaRenderer.error()); return EXIT_FAILURE; }
 
     auto dustFieldRenderer = environment::DustFieldRenderer::create({
         .device = device->device(),
         .physicalDevice = context->physicalDevice(),
-        .queueFamily = device->graphicsQueueFamily()
+        .queueFamily = device->graphicsQueueFamily(),
+        .colorFormat = swapchain->format(),
+        .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
     });
     if (!dustFieldRenderer) { core::logError(kTag, "{}", dustFieldRenderer.error()); return EXIT_FAILURE; }
 
     auto particleSystem = environment::ParticleSystem::create({
         .device = device->device(),
         .physicalDevice = context->physicalDevice(),
-        .queueFamily = device->graphicsQueueFamily()
+        .queueFamily = device->graphicsQueueFamily(),
+        .colorFormat = swapchain->format(),
+        .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
     });
     if (!particleSystem) { core::logError(kTag, "{}", particleSystem.error()); return EXIT_FAILURE; }
 
@@ -175,55 +182,88 @@ int main()
     auto thrusterEffect = environment::ThrusterEffect::create({
         .device = device->device(),
         .physicalDevice = context->physicalDevice(),
-        .queueFamily = device->graphicsQueueFamily()
+        .queueFamily = device->graphicsQueueFamily(),
+        .colorFormat = swapchain->format(),
+        .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
     });
     if (!thrusterEffect) { core::logError(kTag, "{}", thrusterEffect.error()); return EXIT_FAILURE; }
 
     auto weaponEffect = environment::WeaponEffect::create({
         .device = device->device(),
         .physicalDevice = context->physicalDevice(),
-        .queueFamily = device->graphicsQueueFamily()
+        .queueFamily = device->graphicsQueueFamily(),
+        .colorFormat = swapchain->format(),
+        .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
     });
     if (!weaponEffect) { core::logError(kTag, "{}", weaponEffect.error()); return EXIT_FAILURE; }
 
     auto collisionEffect = environment::CollisionEffect::create({
         .device = device->device(),
         .physicalDevice = context->physicalDevice(),
-        .queueFamily = device->graphicsQueueFamily()
+        .queueFamily = device->graphicsQueueFamily(),
+        .colorFormat = swapchain->format(),
+        .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
     });
     if (!collisionEffect) { core::logError(kTag, "{}", collisionEffect.error()); return EXIT_FAILURE; }
 
     auto sunDistortionEffect = environment::SunDistortionEffect::create({
         .device = device->device(),
         .physicalDevice = context->physicalDevice(),
-        .queueFamily = device->graphicsQueueFamily()
+        .queueFamily = device->graphicsQueueFamily(),
+        .colorFormat = swapchain->format(),
+        .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
     });
     if (!sunDistortionEffect) { core::logError(kTag, "{}", sunDistortionEffect.error()); return EXIT_FAILURE; }
 
     auto wormholeEffect = environment::WormholeEffect::create({
         .device = device->device(),
         .physicalDevice = context->physicalDevice(),
-        .queueFamily = device->graphicsQueueFamily()
+        .queueFamily = device->graphicsQueueFamily(),
+        .colorFormat = swapchain->format(),
+        .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
     });
     if (!wormholeEffect) { core::logError(kTag, "{}", wormholeEffect.error()); return EXIT_FAILURE; }
 
     auto ftlEffect = environment::FtlEffect::create({
         .device = device->device(),
         .physicalDevice = context->physicalDevice(),
-        .queueFamily = device->graphicsQueueFamily()
+        .queueFamily = device->graphicsQueueFamily(),
+        .colorFormat = swapchain->format(),
+        .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
     });
     if (!ftlEffect) { core::logError(kTag, "{}", ftlEffect.error()); return EXIT_FAILURE; }
 
     auto afterburnerEffect = environment::AfterburnerEffect::create({
         .device = device->device(),
         .physicalDevice = context->physicalDevice(),
-        .queueFamily = device->graphicsQueueFamily()
+        .queueFamily = device->graphicsQueueFamily(),
+        .colorFormat = swapchain->format(),
+        .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
     });
     if (!afterburnerEffect) { core::logError(kTag, "{}", afterburnerEffect.error()); return EXIT_FAILURE; }
+
+    auto stormEffect = environment::StormEffect::create({
+        .device = device->device(),
+        .physicalDevice = context->physicalDevice(),
+        .queueFamily = device->graphicsQueueFamily(),
+        .colorFormat = swapchain->format(),
+        .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
+    });
+    if (!stormEffect) { core::logError(kTag, "{}", stormEffect.error()); return EXIT_FAILURE; }
+
+    auto shieldEffect = environment::ShieldEffect::create({
+        .device = device->device(),
+        .physicalDevice = context->physicalDevice(),
+        .queueFamily = device->graphicsQueueFamily(),
+        .colorFormat = swapchain->format(),
+        .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
+    });
+    if (!shieldEffect) { core::logError(kTag, "{}", shieldEffect.error()); return EXIT_FAILURE; }
 
     (void)nebulaRenderer; (void)dustFieldRenderer; (void)particleSystem;
     (void)thrusterEffect; (void)weaponEffect; (void)collisionEffect;
     (void)sunDistortionEffect; (void)wormholeEffect; (void)ftlEffect; (void)afterburnerEffect;
+    (void)stormEffect; (void)shieldEffect;
 
     core::logInfo(kTag, "Close the window to exit");
 
@@ -260,8 +300,9 @@ int main()
                 return EXIT_FAILURE;
             }
 
-            // The star pipeline is compiled for one color format; a format
-            // change (e.g. display switch) requires recreating it.
+            // All effect pipelines are compiled for one color format; a
+            // format change (e.g. display switch) requires recreating
+            // every active pipeline, not just the starfield.
             if (swapchain->format() != oldFormat)
             {
                 auto newStarfieldRenderer = environment::StarfieldRenderer::create({
@@ -271,12 +312,128 @@ int main()
                     .colorFormat = swapchain->format(),
                     .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
                 });
-                if (!newStarfieldRenderer)
-                {
-                    core::logError(kTag, "{}", newStarfieldRenderer.error());
-                    return EXIT_FAILURE;
-                }
+                if (!newStarfieldRenderer) { core::logError(kTag, "{}", newStarfieldRenderer.error()); return EXIT_FAILURE; }
                 starfieldRenderer = std::move(newStarfieldRenderer);
+
+                auto newNebula = environment::NebulaRenderer::create({
+                    .device = device->device(),
+                    .physicalDevice = context->physicalDevice(),
+                    .queueFamily = device->graphicsQueueFamily(),
+                    .colorFormat = swapchain->format(),
+                    .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
+                });
+                if (!newNebula) { core::logError(kTag, "{}", newNebula.error()); return EXIT_FAILURE; }
+                nebulaRenderer = std::move(newNebula);
+
+                auto newDust = environment::DustFieldRenderer::create({
+                    .device = device->device(),
+                    .physicalDevice = context->physicalDevice(),
+                    .queueFamily = device->graphicsQueueFamily(),
+                    .colorFormat = swapchain->format(),
+                    .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
+                });
+                if (!newDust) { core::logError(kTag, "{}", newDust.error()); return EXIT_FAILURE; }
+                dustFieldRenderer = std::move(newDust);
+
+                auto newParticles = environment::ParticleSystem::create({
+                    .device = device->device(),
+                    .physicalDevice = context->physicalDevice(),
+                    .queueFamily = device->graphicsQueueFamily(),
+                    .colorFormat = swapchain->format(),
+                    .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
+                });
+                if (!newParticles) { core::logError(kTag, "{}", newParticles.error()); return EXIT_FAILURE; }
+                particleSystem = std::move(newParticles);
+
+                auto newThruster = environment::ThrusterEffect::create({
+                    .device = device->device(),
+                    .physicalDevice = context->physicalDevice(),
+                    .queueFamily = device->graphicsQueueFamily(),
+                    .colorFormat = swapchain->format(),
+                    .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
+                });
+                if (!newThruster) { core::logError(kTag, "{}", newThruster.error()); return EXIT_FAILURE; }
+                thrusterEffect = std::move(newThruster);
+
+                auto newWeapon = environment::WeaponEffect::create({
+                    .device = device->device(),
+                    .physicalDevice = context->physicalDevice(),
+                    .queueFamily = device->graphicsQueueFamily(),
+                    .colorFormat = swapchain->format(),
+                    .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
+                });
+                if (!newWeapon) { core::logError(kTag, "{}", newWeapon.error()); return EXIT_FAILURE; }
+                weaponEffect = std::move(newWeapon);
+
+                auto newCollision = environment::CollisionEffect::create({
+                    .device = device->device(),
+                    .physicalDevice = context->physicalDevice(),
+                    .queueFamily = device->graphicsQueueFamily(),
+                    .colorFormat = swapchain->format(),
+                    .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
+                });
+                if (!newCollision) { core::logError(kTag, "{}", newCollision.error()); return EXIT_FAILURE; }
+                collisionEffect = std::move(newCollision);
+
+                auto newSun = environment::SunDistortionEffect::create({
+                    .device = device->device(),
+                    .physicalDevice = context->physicalDevice(),
+                    .queueFamily = device->graphicsQueueFamily(),
+                    .colorFormat = swapchain->format(),
+                    .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
+                });
+                if (!newSun) { core::logError(kTag, "{}", newSun.error()); return EXIT_FAILURE; }
+                sunDistortionEffect = std::move(newSun);
+
+                auto newWormhole = environment::WormholeEffect::create({
+                    .device = device->device(),
+                    .physicalDevice = context->physicalDevice(),
+                    .queueFamily = device->graphicsQueueFamily(),
+                    .colorFormat = swapchain->format(),
+                    .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
+                });
+                if (!newWormhole) { core::logError(kTag, "{}", newWormhole.error()); return EXIT_FAILURE; }
+                wormholeEffect = std::move(newWormhole);
+
+                auto newFtl = environment::FtlEffect::create({
+                    .device = device->device(),
+                    .physicalDevice = context->physicalDevice(),
+                    .queueFamily = device->graphicsQueueFamily(),
+                    .colorFormat = swapchain->format(),
+                    .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
+                });
+                if (!newFtl) { core::logError(kTag, "{}", newFtl.error()); return EXIT_FAILURE; }
+                ftlEffect = std::move(newFtl);
+
+                auto newAfterburner = environment::AfterburnerEffect::create({
+                    .device = device->device(),
+                    .physicalDevice = context->physicalDevice(),
+                    .queueFamily = device->graphicsQueueFamily(),
+                    .colorFormat = swapchain->format(),
+                    .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
+                });
+                if (!newAfterburner) { core::logError(kTag, "{}", newAfterburner.error()); return EXIT_FAILURE; }
+                afterburnerEffect = std::move(newAfterburner);
+
+                auto newStorm = environment::StormEffect::create({
+                    .device = device->device(),
+                    .physicalDevice = context->physicalDevice(),
+                    .queueFamily = device->graphicsQueueFamily(),
+                    .colorFormat = swapchain->format(),
+                    .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
+                });
+                if (!newStorm) { core::logError(kTag, "{}", newStorm.error()); return EXIT_FAILURE; }
+                stormEffect = std::move(newStorm);
+
+                auto newShield = environment::ShieldEffect::create({
+                    .device = device->device(),
+                    .physicalDevice = context->physicalDevice(),
+                    .queueFamily = device->graphicsQueueFamily(),
+                    .colorFormat = swapchain->format(),
+                    .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
+                });
+                if (!newShield) { core::logError(kTag, "{}", newShield.error()); return EXIT_FAILURE; }
+                shieldEffect = std::move(newShield);
             }
             needRecreate = false;
         }
@@ -286,9 +443,20 @@ int main()
         environment::StarfieldRenderContext starContext;
         starContext.resolution = {static_cast<float>(size.width), static_cast<float>(size.height)};
         starContext.time = time;
+        // Fixed demonstration camera (0,0,5) looking at the origin; the
+        // sun billboard at worldPosition renders at screen center.
+        const auto aspect =
+            static_cast<float>(size.width) / std::max(static_cast<float>(size.height), 1.0f);
+        starContext.viewProj = math::perspectiveVulkan(glm::radians(60.0f), aspect, 0.1f, 1000.0f) *
+                               glm::lookAt(math::Vec3f{0.0f, 0.0f, 5.0f}, math::Vec3f{0.0f, 0.0f, 0.0f},
+                                           math::Vec3f{0.0f, 1.0f, 0.0f});
+        starContext.invViewProj = glm::inverse(starContext.viewProj);
         environment::StarfieldParams starParams;
         starParams.time = time;
         starParams.intensity = 1.0f;
+        starParams.worldPosition = {0.0f, 0.0f, -50.0f};
+        starParams.radius = 8.0f;
+        starParams.color = {1.0f, 0.9f, 0.6f, 1.0f};
 
         auto frameStatus = renderer->renderFrame(
             *swapchain, device->graphicsQueue(), clearColor,
@@ -325,7 +493,9 @@ int main()
             needRecreate = true;
         }
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        // No sleep here: FIFO swapchain present paces the loop (double-
+        // sleeping would halve the framerate). The minimized branch above
+        // already sleeps.
     }
 
     vkDeviceWaitIdle(device->device());

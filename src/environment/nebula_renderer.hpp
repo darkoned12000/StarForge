@@ -1,7 +1,7 @@
 #pragma once
 
+#include "internal/effect_pipeline.hpp"
 #include "math/math.hpp"
-#include "vulkan/vulkan_pipeline.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -15,7 +15,7 @@ namespace starforge::environment
 
 struct NebulaRenderContext
 {
-    math::Mat4f invViewProj{};
+    math::Mat4f invViewProj{1.0f};
     math::Vec3f cameraPosition{0.0f, 0.0f, 0.0f};
     float nearPlane = 0.1f;
     float farPlane = 1000.0f;
@@ -27,8 +27,12 @@ struct NebulaParams
 {
     math::Vec4f baseColor{0.5f, 0.2f, 0.8f, 1.0f};
     float density = 1.0f;
-    float absorption = 0.1f;
+    float absorption = 0.1f; // Self-attenuation of dense layers (wired).
     float scattering = 0.5f;
+    // phaseG / stepCount / nearPlane / farPlane / sceneDepthView are
+    // reserved for a future true volumetric raymarch pass (needs a
+    // depth texture + per-step phase evaluation); the current pass is
+    // an FBM approximation that uses density/scattering/absorption.
     float phaseG = 0.2f;        // Henyey-Greenstein asymmetry factor
     std::uint32_t stepCount = 64;
     float time = 0.0f;
@@ -65,9 +69,7 @@ private:
     void destroy() noexcept;
 
     VkDevice device_ = VK_NULL_HANDLE;
-    VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
-    std::optional<vulkan::GraphicsPipeline> pipeline_;
-    VkDescriptorPool descriptorPool_ = VK_NULL_HANDLE;
+    std::optional<internal::FullscreenEffect> effect_;
 };
 
 } // namespace starforge::environment

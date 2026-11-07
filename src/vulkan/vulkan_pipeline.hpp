@@ -24,6 +24,12 @@ struct GraphicsPipelineConfig
     bool depthWrite = true;
     VkCompareOp depthCompare = VK_COMPARE_OP_GREATER;
     bool backfaceCulling = true;
+    // Additive/translucent blending for overlays (default: off, opaque).
+    bool blendEnable = false;
+    VkBlendFactor blendSrcFactor = VK_BLEND_FACTOR_ONE;
+    VkBlendFactor blendDstFactor = VK_BLEND_FACTOR_ONE;
+    VkBlendFactor blendSrcAlphaFactor = VK_BLEND_FACTOR_ONE;
+    VkBlendFactor blendDstAlphaFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
     float viewportWidth = 0.0f;
     float viewportHeight = 0.0f;
 };

@@ -1,7 +1,7 @@
 #pragma once
 
+#include "internal/effect_pipeline.hpp"
 #include "math/math.hpp"
-#include "vulkan/vulkan_pipeline.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -16,7 +16,7 @@ namespace starforge::environment
 // Camera/volumetric context for raymarched dust (mirrors NebulaRenderContext).
 struct DustFieldRenderContext
 {
-    math::Mat4f invViewProj{};
+    math::Mat4f invViewProj{1.0f};
     math::Vec3f cameraPosition{0.0f, 0.0f, 0.0f};
     float nearPlane = 0.1f;
     float farPlane = 1000.0f;
@@ -34,7 +34,9 @@ struct DustFieldParams
     math::Vec4f color{0.8f, 0.7f, 0.5f, 1.0f}; // Beige/tan default
 };
 
-// Dust field rendering system (rendering pending).
+// Dust field rendering system. Volumetric-extinction look; true scene
+// depth testing (sceneDepthView) needs a depth texture input and is
+// future work — the pass is a fullscreen approximation today.
 class DustFieldRenderer
 {
 public:
@@ -66,9 +68,7 @@ private:
     void destroy() noexcept;
 
     VkDevice device_ = VK_NULL_HANDLE;
-    VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
-    std::optional<vulkan::GraphicsPipeline> pipeline_;
-    VkDescriptorPool descriptorPool_ = VK_NULL_HANDLE;
+    std::optional<internal::FullscreenEffect> effect_;
 };
 
 } // namespace starforge::environment

@@ -1,7 +1,7 @@
 #pragma once
 
+#include "internal/effect_pipeline.hpp"
 #include "math/math.hpp"
-#include "vulkan/vulkan_pipeline.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -15,6 +15,8 @@ namespace starforge::environment
 
 struct WormholeRenderContext
 {
+    // Reserved for a future framebuffer-texture refraction pass; unused
+    // (additive glow approximation) until descriptor plumbing exists.
     VkImageView sceneColorView = VK_NULL_HANDLE;
     VkImageView sceneDepthView = VK_NULL_HANDLE;
     math::Mat4f viewProj{};
@@ -65,9 +67,7 @@ private:
     void destroy() noexcept;
 
     VkDevice device_ = VK_NULL_HANDLE;
-    VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
-    std::optional<vulkan::GraphicsPipeline> pipeline_;
-    VkDescriptorPool descriptorPool_ = VK_NULL_HANDLE;
+    std::optional<internal::FullscreenEffect> effect_;
 };
 
 } // namespace starforge::environment

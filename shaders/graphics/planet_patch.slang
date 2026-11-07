@@ -7,23 +7,20 @@
 // Hardware indexed drawing (vkCmdBindIndexBuffer + vkCmdDrawIndexed):
 // SV_VertexID is the dereferenced index, so the GPU post-transform
 // cache reuses transformed vertices across shared triangle edges.
-
-struct PlanetVertex
-{
-    float3 rtcPos;
-    float3 normal;
-    float2 uv;
-}; // 32 bytes (HLSL packing: 0, 12, 24)
+//
+// Vertex format: float4 position / float4 normal / float2 uv interleaved
+// (std430-safe stride 48) — float3 structs straddle in storage buffers.
 
 struct PushConstants
 {
     float4x4 viewProj;
-    uint64_t vertexBufferAddress; // BDA: PlanetVertex[]
+    uint64_t vertexBufferAddress; // BDA: interleaved vertices (48B stride)
 };
 
 [[vk::push_constant]] PushConstants pc;
 
-typedef vk::BufferPointer<PlanetVertex> VertexBufferPtr;
+typedef vk::BufferPointer<float4> Float4BufferPtr;
+typedef vk::BufferPointer<float2> Float2BufferPtr;
 
 struct VSOutput
 {
@@ -37,13 +34,17 @@ VSOutput vertexMain(uint vertexId : SV_VertexID)
 {
     // NOTE: this Slang version's vk::BufferPointer has no variable
     // subscript; index via raw address arithmetic + Get() (element).
-    VertexBufferPtr vp = { pc.vertexBufferAddress + uint64_t(vertexId) * 32u };
-    PlanetVertex v = vp.Get();
+    Float4BufferPtr pp = { pc.vertexBufferAddress + uint64_t(vertexId) * 48u };
+    Float4BufferPtr np = { pc.vertexBufferAddress + uint64_t(vertexId) * 48u + 16u };
+    Float2BufferPtr up = { pc.vertexBufferAddress + uint64_t(vertexId) * 48u + 32u };
+
+    float4 rtcPos = pp.Get();
+    float4 rtcNormal = np.Get();
 
     VSOutput out;
-    out.position = mul(pc.viewProj, float4(v.rtcPos, 1.0));
-    out.normal = v.normal;
-    out.uv = v.uv;
+    out.position = mul(pc.viewProj, rtcPos);
+    out.normal = rtcNormal.xyz;
+    out.uv = up.Get();
     return out;
 }
 

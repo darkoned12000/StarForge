@@ -1,6 +1,7 @@
 # Environment effects module
 
 add_library(starforge_environment STATIC
+    internal/effect_pipeline.cpp
     nebula_renderer.cpp
     dust_field.cpp
     particle_system.cpp
@@ -12,6 +13,9 @@ add_library(starforge_environment STATIC
     wormhole_effect.cpp
     ftl_effect.cpp
     afterburner_effect.cpp
+    storm_effect.cpp
+    shield_effect.cpp
+    asteroid_field.cpp
 )
 
 target_include_directories(starforge_environment PUBLIC

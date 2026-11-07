@@ -1,7 +1,7 @@
 #pragma once
 
+#include "internal/effect_pipeline.hpp"
 #include "math/math.hpp"
-#include "vulkan/vulkan_pipeline.hpp"
 
 #include <vulkan/vulkan.h>
 
@@ -15,12 +15,15 @@ namespace starforge::environment
 
 struct SunDistortionRenderContext
 {
-    // Sun center in [0, 1] UV space (origin top-left, y down).
+    // Sun center in [0, 1] UV space (origin bottom-left, y up, matching
+    // the fullscreen vertex shader's uv).
     math::Vec2f sunScreenPos{0.5f, 0.5f};
     // Sun screen radius as a fraction of the shorter framebuffer edge.
     float sunRadiusScreen = 0.1f;
     // Framebuffer resolution in pixels (for aspect-correct distortion).
     math::Vec2f resolution{1.0f, 1.0f};
+    // Reserved for a future framebuffer-texture refraction pass; unused
+    // (glow+ring approximation) until descriptor plumbing exists.
     VkImageView sceneColorView = VK_NULL_HANDLE;
     VkImageView sceneDepthView = VK_NULL_HANDLE;
     math::Mat4f viewProj{};
@@ -68,9 +71,7 @@ private:
     void destroy() noexcept;
 
     VkDevice device_ = VK_NULL_HANDLE;
-    VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
-    std::optional<vulkan::GraphicsPipeline> pipeline_;
-    VkDescriptorPool descriptorPool_ = VK_NULL_HANDLE;
+    std::optional<internal::FullscreenEffect> effect_;
 };
 
 } // namespace starforge::environment

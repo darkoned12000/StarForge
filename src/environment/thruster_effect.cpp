@@ -1,5 +1,8 @@
 #include "thruster_effect.hpp"
 
+#include "internal/effect_pipeline.hpp"
+
+#include <algorithm>
 #include <utility>
 
 namespace starforge::environment
@@ -11,11 +14,30 @@ std::expected<ThrusterEffect, std::string> ThrusterEffect::create(const CreateIn
     {
         return std::unexpected("ThrusterEffect: invalid device");
     }
+    if (info.colorFormat == VK_FORMAT_UNDEFINED)
+    {
+        return std::unexpected("ThrusterEffect: colorFormat is VK_FORMAT_UNDEFINED");
+    }
+    if (info.shaderDirectory.empty())
+    {
+        return std::unexpected("ThrusterEffect: shaderDirectory is empty");
+    }
 
     ThrusterEffect effect;
     effect.device_ = info.device;
 
-    // TODO(M8): create thruster shader modules and pipeline here.
+    auto inner = internal::BillboardEffect::create({
+        .device = info.device,
+        .colorFormat = info.colorFormat,
+        .shaderDirectory = info.shaderDirectory,
+        .shaderBaseName = "billboard",
+        .pushConstantSize = sizeof(internal::BillboardPush),
+    });
+    if (!inner)
+    {
+        return std::unexpected(std::move(inner.error()));
+    }
+    effect.effect_ = std::move(*inner);
 
     return effect;
 }
@@ -27,9 +49,7 @@ ThrusterEffect::~ThrusterEffect()
 
 ThrusterEffect::ThrusterEffect(ThrusterEffect&& other) noexcept
     : device_(std::exchange(other.device_, VK_NULL_HANDLE)),
-      pipelineLayout_(std::exchange(other.pipelineLayout_, VK_NULL_HANDLE)),
-      pipeline_(std::exchange(other.pipeline_, std::nullopt)),
-      descriptorPool_(std::exchange(other.descriptorPool_, VK_NULL_HANDLE))
+      effect_(std::exchange(other.effect_, std::nullopt))
 {
 }
 
@@ -38,34 +58,34 @@ ThrusterEffect& ThrusterEffect::operator=(ThrusterEffect&& other) noexcept
     if (this != &other)
     {
         destroy();
-
         device_ = std::exchange(other.device_, VK_NULL_HANDLE);
-        pipelineLayout_ = std::exchange(other.pipelineLayout_, VK_NULL_HANDLE);
-        pipeline_ = std::exchange(other.pipeline_, std::nullopt);
-        descriptorPool_ = std::exchange(other.descriptorPool_, VK_NULL_HANDLE);
+        effect_ = std::exchange(other.effect_, std::nullopt);
     }
     return *this;
 }
 
 void ThrusterEffect::destroy() noexcept
 {
-    pipeline_.reset();
-    if (device_ != VK_NULL_HANDLE && pipelineLayout_ != VK_NULL_HANDLE)
-    {
-        vkDestroyPipelineLayout(device_, pipelineLayout_, nullptr);
-    }
-    if (device_ != VK_NULL_HANDLE && descriptorPool_ != VK_NULL_HANDLE)
-    {
-        vkDestroyDescriptorPool(device_, descriptorPool_, nullptr);
-    }
-    pipelineLayout_ = VK_NULL_HANDLE;
-    descriptorPool_ = VK_NULL_HANDLE;
+    effect_.reset();
     device_ = VK_NULL_HANDLE;
 }
 
-void ThrusterEffect::render(VkCommandBuffer /*cmd*/, const ThrusterRenderContext& /*context*/, const ThrusterParams& /*params*/)
+void ThrusterEffect::render(VkCommandBuffer cmd, const ThrusterRenderContext& context, const ThrusterParams& params)
 {
-    // TODO(M8): record thruster draw commands here.
+    if (!effect_.has_value())
+    {
+        return;
+    }
+    const math::Vec3f worldPos = params.position + params.direction * (params.length * 0.5f);
+    const math::Vec3f ndc = internal::projectToNdc(context.viewProj, worldPos);
+    internal::BillboardPush push;
+    push.centerSize = {ndc.x, ndc.y, internal::ndcHalfSize(context.viewProj, worldPos, params.width), context.resolution.x / std::max(context.resolution.y, 1.0f)};
+    push.color = params.color;
+    push.time = params.time;
+    push.intensity = params.intensity;
+    push.shape = static_cast<std::uint32_t>(internal::BillboardShape::Cone);
+    push.rotationAngle = internal::projectedAngle(context.viewProj, worldPos, params.direction);
+    effect_->render(cmd, &push, sizeof(push));
 }
 
 } // namespace starforge::environment
