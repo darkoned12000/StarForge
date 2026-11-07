@@ -7,6 +7,21 @@
 #include <type_traits>
 #include <utility>
 
+namespace
+{
+
+[[nodiscard]] bool hasDisplay()
+{
+#if defined(__linux__)
+    return std::getenv("WAYLAND_DISPLAY") != nullptr || std::getenv("DISPLAY") != nullptr;
+#else
+    return true;
+#endif
+}
+
+} // namespace
+
+
 TEST_CASE("Public Renderer: is move-only")
 {
     static_assert(!std::is_copy_constructible_v<starforge::Renderer>);
@@ -18,7 +33,7 @@ TEST_CASE("Public Renderer: is move-only")
 
 TEST_CASE("Public Renderer: zero frames in flight is rejected")
 {
-    if (std::getenv("WAYLAND_DISPLAY") == nullptr && std::getenv("DISPLAY") == nullptr)
+    if (!hasDisplay())
     {
         WARN("Skipping renderer creation: no Wayland/X11 display is available");
         return;
@@ -39,7 +54,7 @@ TEST_CASE("Public Renderer: zero frames in flight is rejected")
 
 TEST_CASE("Public Renderer: creates a swapchain and presents a cleared frame")
 {
-    if (std::getenv("WAYLAND_DISPLAY") == nullptr && std::getenv("DISPLAY") == nullptr)
+    if (!hasDisplay())
     {
         WARN("Skipping renderer creation: no Wayland/X11 display is available");
         return;

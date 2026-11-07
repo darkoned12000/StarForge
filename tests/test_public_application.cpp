@@ -7,6 +7,21 @@
 #include <type_traits>
 #include <utility>
 
+namespace
+{
+
+[[nodiscard]] bool hasDisplay()
+{
+#if defined(__linux__)
+    return std::getenv("WAYLAND_DISPLAY") != nullptr || std::getenv("DISPLAY") != nullptr;
+#else
+    return true;
+#endif
+}
+
+} // namespace
+
+
 static_assert(!std::is_copy_constructible_v<starforge::Application>);
 static_assert(!std::is_copy_assignable_v<starforge::Application>);
 static_assert(std::is_move_constructible_v<starforge::Application>);
@@ -44,7 +59,7 @@ TEST_CASE("Public Application: empty title is rejected without a window")
 
 TEST_CASE("Public Application: moved-from instance is safe to query")
 {
-    if (std::getenv("WAYLAND_DISPLAY") == nullptr && std::getenv("DISPLAY") == nullptr)
+    if (!hasDisplay())
     {
         WARN("Skipping valid window creation: no Wayland/X11 display is available");
         return;

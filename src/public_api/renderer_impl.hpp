@@ -49,4 +49,39 @@ struct Renderer::Impl
     }
 };
 
+// Internal-only bridge for public facades (e.g. Starfield) that need
+// backend handles without exposing them in the public interface.
+struct RendererInternalAccess
+{
+    [[nodiscard]] static bool isValid(const Renderer& renderer) noexcept
+    {
+        return renderer.impl_ && renderer.impl_->device && renderer.impl_->swapchain && renderer.impl_->frameRenderer;
+    }
+
+    [[nodiscard]] static VkDevice device(Renderer& renderer) noexcept
+    {
+        return renderer.impl_->device->device();
+    }
+    [[nodiscard]] static VkPhysicalDevice physicalDevice(Renderer& renderer) noexcept
+    {
+        return renderer.impl_->context->physicalDevice();
+    }
+    [[nodiscard]] static std::uint32_t queueFamily(Renderer& renderer) noexcept
+    {
+        return renderer.impl_->device->graphicsQueueFamily();
+    }
+    [[nodiscard]] static VkFormat colorFormat(Renderer& renderer) noexcept
+    {
+        return renderer.impl_->swapchain->format();
+    }
+    [[nodiscard]] static VkFormat depthFormat(Renderer& renderer) noexcept
+    {
+        return renderer.impl_->swapchain->depthFormat();
+    }
+    [[nodiscard]] static VkCommandBuffer commandBuffer(FrameContext& frameContext) noexcept
+    {
+        return static_cast<VkCommandBuffer>(frameContext.commandBuffer_);
+    }
+};
+
 } // namespace starforge

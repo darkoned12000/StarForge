@@ -81,6 +81,19 @@ TEST_CASE("Public math: perspective and lookAt conventions")
     CHECK(near(origin.y(), 0.0f));
     CHECK(near(origin.z(), -5.0f));
     CHECK(near(origin.w(), 1.0f));
+
+    // Matrix inverse: M * inverse(M) == I for a non-trivial view matrix.
+    const auto product = view * inverse(view);
+    CHECK(near(product.columns[0][0], 1.0f));
+    CHECK(near(product.columns[1][1], 1.0f));
+    CHECK(near(product.columns[2][2], 1.0f));
+    CHECK(near(product.columns[3][3], 1.0f));
+    CHECK(near(product.columns[0][1], 0.0f));
+    CHECK(near(product.columns[3][0], 0.0f));
+    const auto roundTrip = inverse(view) * view * Vec4f{1.0f, 2.0f, 3.0f, 1.0f};
+    CHECK(near(roundTrip.x(), 1.0f));
+    CHECK(near(roundTrip.y(), 2.0f));
+    CHECK(near(roundTrip.z(), 3.0f));
 }
 
 TEST_CASE("Public world: fromMeters round-trips and rejects invalid input")

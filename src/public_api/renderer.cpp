@@ -120,6 +120,32 @@ std::expected<Renderer, std::string> Renderer::create(Application& app, const Cr
     return Renderer(std::move(impl));
 }
 
+namespace
+{
+
+[[nodiscard]] std::expected<Renderer::FrameResult, std::string>
+mapFrameStatus(std::expected<vulkan::FrameStatus, std::string>&& status)
+{
+    if (!status)
+    {
+        if (status.error().find("OUT_OF_DATE") != std::string::npos ||
+            status.error().find("SUBOPTIMAL") != std::string::npos)
+        {
+            return Renderer::FrameResult::SwapchainOutOfDate;
+        }
+        return std::unexpected(status.error());
+    }
+    return *status == vulkan::FrameStatus::SwapchainOutOfDate ? Renderer::FrameResult::SwapchainOutOfDate
+                                                                : Renderer::FrameResult::Presented;
+}
+
+} // namespace
+
+Size2D FrameContext::extent() const noexcept
+{
+    return extent_;
+}
+
 std::expected<Renderer::FrameResult, std::string> Renderer::renderClearedFrame(const ClearColor& clearColor)
 {
     if (!impl_)
@@ -128,21 +154,47 @@ std::expected<Renderer::FrameResult, std::string> Renderer::renderClearedFrame(c
     }
 
     const VkClearColorValue clear{{clearColor.red, clearColor.green, clearColor.blue, clearColor.alpha}};
-    auto status = impl_->frameRenderer->renderClearedFrame(*impl_->swapchain, impl_->device->graphicsQueue(), clear);
-    if (!status)
-    {
-        if (status.error().find("OUT_OF_DATE") != std::string::npos ||
-            status.error().find("SUBOPTIMAL") != std::string::npos)
-        {
-            return FrameResult::SwapchainOutOfDate;
-        }
-        return std::unexpected(status.error());
-    }
-    return *status == vulkan::FrameStatus::SwapchainOutOfDate ? FrameResult::SwapchainOutOfDate
-                                                                : FrameResult::Presented;
+    return mapFrameStatus(
+        impl_->frameRenderer->renderClearedFrame(*impl_->swapchain, impl_->device->graphicsQueue(), clear));
 }
 
-std::expected<void, std::string> Renderer::recreate()
+std::expected<Renderer::FrameResult, std::string> Renderer::renderFrame(const ClearColor& clearColor, const RecordFn& record)
+{
+    if (!impl_)
+    {
+        return std::unexpected("Renderer is moved-from");
+    }
+    if (!record)
+    {
+        return std::unexpected("Renderer::renderFrame requires a record callback");
+    }
+
+    const VkClearColorValue clear{{clearColor.red, clearColor.green, clearColor.blue, clearColor.alpha}};
+    return mapFrameStatus(impl_->frameRenderer->renderFrame(
+        *impl_->swapchain, impl_->device->graphicsQueue(), clear,
+        [&record](VkCommandBuffer cmd, VkExtent2D extent) {
+            VkViewport viewport{};
+            viewport.x = 0.0f;
+            viewport.y = static_cast<float>(extent.height);
+            viewport.width = static_cast<float>(extent.width);
+            viewport.height = -static_cast<float>(extent.height);
+            viewport.minDepth = 0.0f;
+            viewport.maxDepth = 1.0f;
+            vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+            VkRect2D scissor{};
+            scissor.offset = {0, 0};
+            scissor.extent = extent;
+            vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+            FrameContext frameContext;
+            frameContext.commandBuffer_ = cmd;
+            frameContext.extent_ = Size2D{.width = extent.width, .height = extent.height};
+            record(frameContext);
+        }));
+}
+
+std::expected<Renderer::RecreateResult, std::string> Renderer::recreate()
 {
     if (!impl_)
     {
@@ -155,6 +207,7 @@ std::expected<void, std::string> Renderer::recreate()
         return std::unexpected("Cannot recreate swapchain while the framebuffer is minimized or empty");
     }
 
+    const VkFormat oldFormat = impl_->swapchain->format();
     vkDeviceWaitIdle(impl_->device->device());
     if (auto status = impl_->swapchain->recreate(size.width, size.height); !status)
     {
@@ -166,7 +219,7 @@ std::expected<void, std::string> Renderer::recreate()
     {
         return std::unexpected(status.error());
     }
-    return {};
+    return impl_->swapchain->format() != oldFormat ? RecreateResult::FormatChanged : RecreateResult::Resized;
 }
 
 Size2D Renderer::extent() const noexcept

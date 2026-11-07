@@ -43,6 +43,7 @@ add_executable(starforge_tests
     test_public_application.cpp
     test_public_math_world.cpp
     test_public_renderer.cpp
+    test_public_starfield.cpp
 )
 
 target_link_libraries(starforge_tests

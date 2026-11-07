@@ -310,6 +310,54 @@ template <class Scalar>
     };
 }
 
+// General 4x4 inverse (adjugate/cofactor method, column-major storage).
+// Returns the identity for singular matrices.
+[[nodiscard]] inline Mat4f inverse(const Mat4f& matrix) noexcept
+{
+    const auto& m = matrix.columns;
+    // clang-format off
+    const float det =
+        m[0][0] * (m[1][1] * (m[2][2] * m[3][3] - m[2][3] * m[3][2]) - m[1][2] * (m[2][1] * m[3][3] - m[2][3] * m[3][1]) + m[1][3] * (m[2][1] * m[3][2] - m[2][2] * m[3][1])) -
+        m[0][1] * (m[1][0] * (m[2][2] * m[3][3] - m[2][3] * m[3][2]) - m[1][2] * (m[2][0] * m[3][3] - m[2][3] * m[3][0]) + m[1][3] * (m[2][0] * m[3][2] - m[2][2] * m[3][0])) +
+        m[0][2] * (m[1][0] * (m[2][1] * m[3][3] - m[2][3] * m[3][1]) - m[1][1] * (m[2][0] * m[3][3] - m[2][3] * m[3][0]) + m[1][3] * (m[2][0] * m[3][1] - m[2][1] * m[3][0])) -
+        m[0][3] * (m[1][0] * (m[2][1] * m[3][2] - m[2][2] * m[3][1]) - m[1][1] * (m[2][0] * m[3][2] - m[2][2] * m[3][0]) + m[1][2] * (m[2][0] * m[3][1] - m[2][1] * m[3][0]));
+    // clang-format on
+    if (det == 0.0f)
+    {
+        return Mat4f(1.0f);
+    }
+    const float invDet = 1.0f / det;
+    Mat4f result;
+    for (std::size_t column = 0; column < 4; ++column)
+    {
+        for (std::size_t row = 0; row < 4; ++row)
+        {
+            // Cofactor of (row, column), transposed for the adjugate.
+            std::size_t k[3];
+            std::size_t l[3];
+            std::size_t ki = 0;
+            std::size_t li = 0;
+            for (std::size_t i = 0; i < 4; ++i)
+            {
+                if (i != row)
+                {
+                    k[ki++] = i;
+                }
+                if (i != column)
+                {
+                    l[li++] = i;
+                }
+            }
+            const float cofactor = (m[k[0]][l[0]] * (m[k[1]][l[1]] * m[k[2]][l[2]] - m[k[1]][l[2]] * m[k[2]][l[1]]) -
+                                    m[k[0]][l[1]] * (m[k[1]][l[0]] * m[k[2]][l[2]] - m[k[1]][l[2]] * m[k[2]][l[0]]) +
+                                    m[k[0]][l[2]] * (m[k[1]][l[0]] * m[k[2]][l[1]] - m[k[1]][l[1]] * m[k[2]][l[0]]));
+            const float sign = ((row + column) % 2 == 0) ? 1.0f : -1.0f;
+            result.columns[column][row] = sign * cofactor * invDet;
+        }
+    }
+    return result;
+}
+
 // Pure element-wise cast; no backend dependency, so this lives in the public
 // header instead of crossing the world bridge.
 [[nodiscard]] inline Mat4f toFloat32(const Mat4d& matrix) noexcept
