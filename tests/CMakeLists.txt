@@ -81,6 +81,7 @@ add_executable(starforge_gpu_tests
     test_depth_ordering.cpp
     test_starfield_render.cpp
     test_planet_patch_render.cpp
+    test_vulkan_retirement.cpp
     test_naive_control.cpp
     test_gpu_timestamps.cpp
     test_vma_memory_snapshot.cpp

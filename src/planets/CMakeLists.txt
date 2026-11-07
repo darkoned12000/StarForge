@@ -23,9 +23,8 @@ target_link_libraries(starforge_planets
         starforge_core
         starforge_math
         starforge_spatial
+        starforge_jobs
 )
-
-target_link_libraries(starforge_planets PRIVATE starforge_jobs)
 
 target_compile_features(starforge_planets PUBLIC cxx_std_20)
 

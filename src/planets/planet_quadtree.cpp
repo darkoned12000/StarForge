@@ -127,12 +127,21 @@ bool shouldSplit(
         double camDist = std::sqrt(toCenter.x * toCenter.x + toCenter.y * toCenter.y + toCenter.z * toCenter.z);
         if (camDist > planetRadius)
         {
-            double cosAngle = (toPatch.x * toCenter.x + toPatch.y * toCenter.y + toPatch.z * toCenter.z) / (toPatchLen * camDist);
-            double horizonCos = std::sqrt(1.0 - (planetRadius / camDist) * (planetRadius / camDist));
-            // Far side: patch center points away from the camera, so its
-            // angle to the center direction exceeds the horizon cone.
-            // (Previously inverted: this culled the visible hemisphere.)
-            if (cosAngle < -horizonCos)
+            // Horizon culling: the horizon plane is orthogonal to the
+            // camera direction u at distance R^2 / camDist from the
+            // planet center. The patch's bounding sphere lies entirely
+            // behind it when (P - C).u < R^2/camDist - r_bound.
+            // (Both previous forms were wrong: this is the plane test.)
+            const double ux = -toCenter.x / camDist;
+            const double uy = -toCenter.y / camDist;
+            const double uz = -toCenter.z / camDist;
+            const double horizonPlaneDist = (planetRadius * planetRadius) / camDist;
+            const double patchProj = (patchPos.x - planetCenter.x) * ux +
+                                     (patchPos.y - planetCenter.y) * uy +
+                                     (patchPos.z - planetCenter.z) * uz;
+            const double patchSize = (node.uMax - node.uMin) * planetRadius * 0.5;
+            const double patchBoundingRadius = patchSize * 1.41421356;
+            if (patchProj < horizonPlaneDist - patchBoundingRadius)
             {
                 return false;
             }
@@ -214,6 +223,100 @@ std::vector<PlanetQuadNode*> PlanetQuadtree::update(
     return getLeaves();
 }
 
+struct PlanetQuadtree::ParallelLeafJob
+{
+    PlanetQuadtree* tree = nullptr;
+    PlanetQuadNode* node = nullptr;
+    const math::Vec3d* planetCenter = nullptr;
+    const math::Vec3d* cameraPos = nullptr;
+    double planetRadius = 0.0;
+    double splitThreshold = 0.0;
+    double mergeThreshold = 0.0;
+    int maxLevelDelta = 1;
+};
+
+void PlanetQuadtree::parallelLeafTrampoline(void* userData)
+{
+    auto* job = static_cast<ParallelLeafJob*>(userData);
+    job->tree->updateNode(job->node, *job->planetCenter, *job->cameraPos,
+                          job->planetRadius, job->splitThreshold,
+                          job->mergeThreshold, job->maxLevelDelta);
+}
+
+std::vector<PlanetQuadNode*> PlanetQuadtree::updateParallel(
+    const math::Vec3d& planetCenter,
+    const math::Vec3d& cameraPos,
+    double planetRadius,
+    double splitThreshold,
+    double mergeThreshold,
+    jobs::JobScheduler& scheduler,
+    int maxLevelDelta)
+{
+    std::vector<PlanetQuadNode*> leaves = getLeaves();
+    if (leaves.size() < 2 || scheduler.threadCount() <= 1)
+    {
+        updateNode(root_.get(), planetCenter, cameraPos, planetRadius, splitThreshold, mergeThreshold, maxLevelDelta);
+        return getLeaves();
+    }
+
+    std::vector<ParallelLeafJob> jobs;
+    jobs.reserve(leaves.size());
+    std::vector<jobs::TaskHandle> handles;
+    handles.reserve(leaves.size());
+
+    for (PlanetQuadNode* leaf : leaves)
+    {
+        jobs.push_back(ParallelLeafJob{
+            this, leaf, &planetCenter, &cameraPos,
+            planetRadius, splitThreshold, mergeThreshold, maxLevelDelta,
+        });
+        handles.push_back(scheduler.submit(&parallelLeafTrampoline, &jobs.back()));
+    }
+
+    for (const auto& handle : handles)
+    {
+        scheduler.wait(handle);
+    }
+
+    // Merge pass (sequential, bottom-up): parallel jobs only see leaves,
+    // so pruning must happen here for retreat-to-orbit to work.
+    mergePass(root_.get(), planetCenter, cameraPos, planetRadius, mergeThreshold);
+
+    return getLeaves();
+}
+
+void PlanetQuadtree::mergePass(PlanetQuadNode* node,
+                               const math::Vec3d& planetCenter,
+                               const math::Vec3d& cameraPos,
+                               double planetRadius,
+                               double mergeThreshold)
+{
+    if (node->isLeaf())
+    {
+        return;
+    }
+
+    for (std::size_t i = 0; i < 4; ++i)
+    {
+        mergePass(node->children[i].get(), planetCenter, cameraPos, planetRadius, mergeThreshold);
+    }
+
+    bool allChildrenLeaves = true;
+    for (std::size_t i = 0; i < 4; ++i)
+    {
+        if (!node->children[i]->isLeaf())
+        {
+            allChildrenLeaves = false;
+            break;
+        }
+    }
+
+    if (allChildrenLeaves && shouldMerge(*node, planetCenter, cameraPos, planetRadius, mergeThreshold))
+    {
+        removeChildren(node);
+    }
+}
+
 void PlanetQuadtree::collectLeaves(PlanetQuadNode* node, std::vector<PlanetQuadNode*>& leaves) const
 {
     if (node->isLeaf())
@@ -240,8 +343,22 @@ std::vector<PlanetQuadNode*> PlanetQuadtree::getLeaves() const
 bool PlanetQuadtree::checkNodeAdjacency(const PlanetQuadNode* node) const
 {
     if (node->isLeaf()) return true;
-    
-    // Check children satisfy 2:1 rule with each other
+
+    // Sibling 2:1 check: children of a node must be within one level of
+    // each other. (Cross-edge balancing is gradual via maxLevelDelta in
+    // updateNode; full neighbor lookup is a documented limitation.)
+    int minLevel = node->children[0]->level;
+    int maxLevel = node->children[0]->level;
+    for (std::size_t i = 1; i < 4; ++i)
+    {
+        minLevel = std::min(minLevel, node->children[i]->level);
+        maxLevel = std::max(maxLevel, node->children[i]->level);
+    }
+    if (maxLevel - minLevel > 1)
+    {
+        return false;
+    }
+
     for (std::size_t i = 0; i < 4; ++i)
     {
         if (!checkNodeAdjacency(node->children[i].get()))

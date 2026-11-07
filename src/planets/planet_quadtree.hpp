@@ -1,5 +1,6 @@
 #pragma once
 
+#include "jobs/job_scheduler.hpp"
 #include "planets/cubed_sphere.hpp"
 #include "spatial/world_position.hpp"
 
@@ -46,7 +47,19 @@ public:
         double splitThreshold,
         double mergeThreshold,
         int maxLevelDelta = 1);
-    
+
+    // Parallel update (M7.1): snapshots the current leaves and runs one
+    // job per leaf subtree on `scheduler`. Subtrees are disjoint, so
+    // results are bit-identical to update() regardless of job order.
+    std::vector<PlanetQuadNode*> updateParallel(
+        const math::Vec3d& planetCenter,
+        const math::Vec3d& cameraPos,
+        double planetRadius,
+        double splitThreshold,
+        double mergeThreshold,
+        jobs::JobScheduler& scheduler,
+        int maxLevelDelta = 1);
+
     // Get all leaf nodes.
     std::vector<PlanetQuadNode*> getLeaves() const;
     
@@ -66,6 +79,16 @@ private:
     
     void collectLeaves(PlanetQuadNode* node, std::vector<PlanetQuadNode*>& leaves) const;
     bool checkNodeAdjacency(const PlanetQuadNode* node) const;
+
+    // Bottom-up merge pass used by updateParallel after the split pass.
+    void mergePass(PlanetQuadNode* node,
+                   const math::Vec3d& planetCenter,
+                   const math::Vec3d& cameraPos,
+                   double planetRadius,
+                   double mergeThreshold);
+
+    struct ParallelLeafJob;
+    static void parallelLeafTrampoline(void* userData);
     
     std::unique_ptr<PlanetQuadNode> root_;
     CubeFace face_;

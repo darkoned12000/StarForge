@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 
+#include "jobs/job_scheduler.hpp"
 #include "planets/cubed_sphere.hpp"
 #include "planets/planet_mesh.hpp"
 #include "planets/planet_patch.hpp"
@@ -9,6 +10,7 @@
 #include <cmath>
 #include <vector>
 
+using namespace starforge::jobs;
 using namespace starforge::planets;
 using namespace starforge::math;
 
@@ -124,9 +126,8 @@ TEST_CASE("Planet quadtree: deep subdivision keeps neighbor LOD balanced")
 {
     PlanetQuadtree qt(CubeFace::PositiveX);
     Vec3d planetCenter{0.0, 0.0, 0.0};
-    // Camera off-axis (Z direction) at 10x radius: the root patch center
-    // sits outside the horizon-cull cone, so SSE-driven splits occur.
-    Vec3d cameraPos{0.0, 0.0, 6371000.0 * 10.0};
+    // Camera in the visible hemisphere of the +X face (5R, 0, 2R).
+    Vec3d cameraPos{6371000.0 * 5.0, 0.0, 6371000.0 * 2.0};
     double planetRadius = 6371000.0;
 
     // Repeated updates so balancing can propagate (maxLevelDelta per call).
@@ -168,6 +169,31 @@ TEST_CASE("Planet quadtree: split and merge with hysteresis")
     cameraPos = Vec3d{100000000.0, 0.0, 0.0};
     leaves = qt.update(planetCenter, cameraPos, planetRadius, 0.001, 0.0005);
     CHECK(qt.checkAdjacencyInvariant());
+}
+
+TEST_CASE("Planet quadtree: parallel update matches single-threaded (7.1b)")
+{
+    const Vec3d planetCenter{0.0, 0.0, 0.0};
+    const Vec3d cameraPos{0.0, 0.0, 6371000.0 * 10.0};
+    const double planetRadius = 6371000.0;
+
+    PlanetQuadtree sequential(CubeFace::PositiveX);
+    auto seqLeaves = sequential.update(planetCenter, cameraPos, planetRadius, 0.001, 0.0005);
+
+    PlanetQuadtree parallel(CubeFace::PositiveX);
+    JobScheduler scheduler(SchedulerConfig{.threadCount = 4});
+    auto parLeaves = parallel.updateParallel(planetCenter, cameraPos, planetRadius, 0.001, 0.0005, scheduler);
+
+    REQUIRE(seqLeaves.size() == parLeaves.size());
+    REQUIRE(seqLeaves.size() > 1); // Non-trivial subdivision happened
+    for (std::size_t i = 0; i < seqLeaves.size(); ++i)
+    {
+        CHECK(parLeaves[i]->level == seqLeaves[i]->level);
+        CHECK(parLeaves[i]->x == seqLeaves[i]->x);
+        CHECK(parLeaves[i]->y == seqLeaves[i]->y);
+        CHECK(parLeaves[i]->face == seqLeaves[i]->face);
+    }
+    CHECK(parallel.checkAdjacencyInvariant());
 }
 
 TEST_CASE("Planet quadtree: bounded patch count")

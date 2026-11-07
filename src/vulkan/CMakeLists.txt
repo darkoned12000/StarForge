@@ -18,6 +18,7 @@ add_library(starforge_vulkan STATIC
     vulkan_pipeline.cpp
     vulkan_renderer.cpp
     threaded_command_pools.cpp
+    vulkan_retirement.cpp
     vulkan_swapchain.cpp
     vulkan_timestamps.cpp
 )
