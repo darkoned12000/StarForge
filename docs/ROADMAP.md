@@ -836,6 +836,35 @@ the respective milestone residuals, not new milestones.
 - **Proof:** the sandbox scene rebuilt using only `include/starforge/`,
   with no Vulkan types visible.
 
+### API-shape constraints
+
+- Only abstractions proven by the current working slice move to
+  `include/starforge/`; internal-only concepts and unimplemented effects stay
+  internal until they have their own end-to-end example.
+- Public headers must be self-contained and must not expose Vulkan, VMA, SDL,
+  or GLM types. Public math types use the existing `starforge::math` aliases.
+- Public owners are move-only where they own GPU resources. Errors use
+  `std::expected` unless an ADR records a different policy.
+- Pipeline setup, attachment formats, swapchain depth creation, fences,
+  semaphores, queues, allocations, and shader modules remain backend
+  responsibilities; callers provide scene-level parameters such as extent,
+  color, time, radii, and public context values.
+
+### Remaining work (TODO)
+
+| Step | Deliverable | Verified by | Done when |
+|------|-------------|-------------|-----------|
+| 9.1 ⬜ | API inventory and contract pass: map every sandbox dependency to a public concept; decide which working-slice systems are public; record a Vulkan-free boundary and error/lifetime policy in an ADR | Review | Inventory committed; public/internal boundary approved; no public type exposes a backend handle or third-party math type |
+| 9.2 ⬜ | Application/window facade: public, move-only wrappers for engine lifecycle, window/input, surface lifetime, frame submission, resize, and presentation | T1+T5 | Window and application lifecycle work through public headers; lifetime ends cleanly after device idle; no `Vk*` or SDL types appear in the public API |
+| 9.3 ⬜ | Backend renderer facade: an opaque renderer object for swapchain creation/recreation, frame recording, render callbacks, clear and depth handling, and presentation | T2+T5 | Sandbox renders and resizes through the public object; the backend selects and owns color/depth formats and all fencing/semaphore state |
+| 9.4 ⬜ | Math/world-space public API: expose vectors, matrices, projection helpers, `WorldPosition`, and camera-relative conversion without GLM or Vulkan types | T1 | Existing convention, precision, and translation-invariance suites pass against the public aliases; no GLM headers leak into dependent code |
+| 9.5 ⬜ | Working-slice domain facades: expose only interfaces exercised by an end-to-end public example—initially the starfield plus any planet/environment effects used by that example | T2/T3 | A public-header consumer can configure and render the slice; unrendered or speculative effects remain internal |
+| 9.6 ⬜ | Shader/resource encapsulation: the public API loads bundled shader artifacts and owns buffers, pipelines, images, and allocations; callers do not pass Vulkan formats, handles, or device addresses | T1+T2 | Public scene setup succeeds with public parameters only; shader loading failures are reported as API errors, not raw backend handles |
+| 9.7 ⬜ | Sandbox migration: rebuild the sandbox scene using only `include/starforge/` and the public CMake target; remove all internal include paths and direct backend calls | T5 | The sandbox compiles with only the public include directory on its include path and runs with zero validation errors |
+| 9.8 ⬜ | Leakage and regression gates: a test that compiles an external consumer using only public headers, a scan that rejects `Vk`, `<vulkan/>`, VMA, SDL, and GLM from public headers, plus public API smoke tests | T1+T5 | Leakage test fails on a deliberately Vulkan-typed public header and passes on the final API; all existing suites remain green |
+| 9.9 ⬜ | Developer documentation and stability policy: public API guide, ownership/threading/error rules, supported configurations, and what may change before 1.0 | Review | README and API docs link to the public example; documented behavior matches the shipped headers |
+| 9.10 ⬜ | M9 exit proof: build the public example from a clean checkout using only `include/starforge/`, run it and the full test suites, and confirm no Vulkan types are visible in the public interface | T1+T5 | Sandbox and test suites pass; the no-Vulkan leakage gate passes; README status reflects the shipped API |
+
 ## Game Layer (M10+)
 
 STARFORGE remains a rendering library. Game systems are developed as a

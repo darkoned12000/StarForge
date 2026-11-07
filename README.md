@@ -89,18 +89,25 @@ cannot be disabled.
 
 ## Repository Layout
 
-    include/starforge/   Public, developer-facing headers (Vulkan-free)
+    include/starforge/   Public, developer-facing headers (intentionally minimal until M9)
     src/core/            Logging, version, foundational utilities
-    src/math/            Vector, matrix, and Vulkan clip-space projection helpers
-    src/spatial/         WorldPosition (int64 cell + double offset) and camera-relative math
+    src/math/            STARFORGE vector/matrix aliases and projection helpers
+    src/spatial/         WorldPosition, camera-relative transforms, and render objects
+    src/content/         Deterministic procedural content generation and deltas
+    src/jobs/            Job scheduler, dependencies, scratch memory, deferred deletion
+    src/stats/           Shared statistics helpers
     src/platform/        SDL3 window, surface, and event handling
-    src/vulkan/          Private Vulkan backend (instance, device, swapchain, frame loop)
-    src/gpu_resources/   VMA allocator, buffers, staging upload, compute pipeline
-    src/bench/           Benchmark result schema, JSON I/O, and metadata
+    src/vulkan/          Private Vulkan backend (instance, device, swapchain, renderer)
+    src/gpu_resources/   VMA allocator, buffers, images, transfer, compute, culling
+    src/planets/         Cubed-sphere and quadtree planet systems, meshes, terrain, atmosphere
+    src/environment/     Internal star, nebula, dust, storm, wormhole, FTL, combat,
+                         ship, asteroid-field, and other effect renderers
+    src/bench/           Benchmark harness, scene/workload generation, results, and compare tool
     apps/sandbox/        Thin host application for experiments
-    tests/               CPU unit tests (T1) and headless GPU tests (T2/T3)
-    shaders/             Slang shader sources
-    third_party/         Vendored third-party libraries (VMA)
+    benchmarks/          Machine-readable frame-time budgets and baseline data
+    tests/               CPU unit tests (T1), headless GPU tests (T2/T3), and golden images
+    shaders/             Slang shader sources (compute/ and graphics/)
+    third_party/         Vendored third-party libraries (VMA, GLM, stb, nlohmann, doctest)
     cmake/               Build helper modules
     docs/                Vision, architecture, roadmap, decisions, AI instructions
 
@@ -164,9 +171,13 @@ Milestone M3: Geometry and Precision on the GPU
 - [x] 3.4c Naive control error table
 - [x] 3.5 Sandbox integration
 
-Milestone M4: Measure
+Milestone M4: Measure (largely complete)
 
-- [ ] 4.0 Decision notes: Tracy, benchmark methodology, timing modes, noise policy, metrics, JSON schema, workload profiles, budgets
+The benchmark methodology, frame-time budgets, and hardware scope are
+documented in [ADR-004](docs/decisions/004-performance-budgets.md), with
+machine-readable allocations in `benchmarks/budgets.json`. A formal
+committed baseline-versus-budget table remains follow-up work.
+- [x] 4.0 Decision notes: benchmark methodology, timing modes, noise policy, metrics, JSON schema, workload profiles, budgets (Tracy remains deferred)
 - [x] 4.1a Statistics library (percentiles) + T1 tests
 - [x] 4.1b JSON writer with versioned schema + T1 tests
 - [x] 4.1c GPU timestamps + named scopes + T2 tests
@@ -183,13 +194,13 @@ Milestone M4: Measure
 - [x] 4.3b Naive + competent CPU-driven baselines (infrastructure ready, benchmark test verifies harness runs)
 - [x] 4.3c Sweep (10k/100k/1M × ~100%/~10%/~1% visible) (infrastructure ready, sweep verified via test)
 - [x] 4.3d Per-machine baseline files + re-baselining procedure (infrastructure ready, baseline files generatable)
-- [ ] 4.4a Frame-time target and budget document
-- [ ] 4.4b Baseline-to-budget comparison
-- [ ] 4.4c Hardware scope documentation
+- [x] 4.4a Frame-time target and budget document (ADR-004 and benchmarks/budgets.json)
+- [ ] 4.4b Baseline-to-budget comparison (compare tool reports budget status, but no committed comparison table yet)
+- [x] 4.4c Hardware scope documentation (RX 7900 XTX development target)
 
-Milestone M5.5: Job System & Multi-Threading Foundation
+Milestone M5.5: Job System & Multi-Threading Foundation (largely complete)
 
-- [x] 5.5.1a Work-stealing thread pool (Chase-Lev deques, thread affinity) -- centralized queue with work-helping; Chase-Lev upgrade pending
+- [x] 5.5.1a Thread pool and task graph -- centralized queue with work-helping; Chase-Lev work-stealing upgrade pending
 - [x] 5.5.1b Task graph (counter-based dependencies, continuations) -- dependencies working with race fixes
 - [x] 5.5.1c Thread-local scratch linear allocators -- thread_local chunked blocks, no pointer invalidation
 - [x] 5.5.1d CPU epoch/frame-based deferred deletion queue -- retire/collectRetired with safe deletion
@@ -198,17 +209,17 @@ Milestone M5.5: Job System & Multi-Threading Foundation
 - [x] 5.5.2b VMA multi-threaded allocation validation (VMA is thread-safe by default)
 - [x] 5.5.2c WorldPosition and Math purity verification (value types, no shared state)
 - [x] 5.5.3a Per-thread, per-frame-in-flight command pools (ThreadedCommandPools)
-- [ ] 5.5.3b Secondary command buffers (Dynamic Rendering inheritance) -- deferred to M7.2 GPU patch pipeline
-- [ ] 5.5.3c GPU-timeline deferred resource retirement queue -- deferred to M7.2
+- [x] 5.5.3b Secondary command buffers (Dynamic Rendering inheritance) -- completed during M7.2d
+- [x] 5.5.3c GPU-timeline deferred resource retirement queue -- completed during M7.2d
 - [x] 5.5.3d Asynchronous staging ring-buffer uploader (StagingRingBuffer)
 - [x] 5.5.4a Pure functional cell generation jobs (generateContentParallel, batched, span-based)
 - [x] 5.5.4b Isolated runtime TLS RNG (thread_local scratch in job scheduler)
 - [x] 5.5.4c Lock-free chunk collection buffer (pre-allocated result vector)
 - [x] 5.5.4d Multi-threaded long-flight simulation (generateContentParallel)
 - [x] 5.5.5a Parallel heightfield evaluation (heightFractalBatch, job-based, refactored per Google review)
-- [ ] 5.5.5b Parallel atmosphere LUT generation -- deferred to M7.4
-- [ ] 5.5.5c Parallel quadtree LOD traversal -- deferred to M7.1
-- [ ] 5.5.5d Parallel secondary command recording -- deferred to M7.2
+- [x] 5.5.5b Parallel atmosphere LUT generation -- completed during M7.4a
+- [x] 5.5.5c Parallel quadtree LOD traversal -- completed during M7.1b
+- [ ] 5.5.5d Parallel secondary command recording -- deferred follow-up
 - [x] 5.5.6a ThreadSanitizer build (with driver suppressions) -- build config documented
 - [x] 5.5.6b Multi-core bit-exact determinism test (content + terrain)
 - [ ] 5.5.6c Scaling benchmarks (1/2/4/8/16 threads) -- deferred to profiling pass
@@ -241,24 +252,55 @@ Milestone M6: Deterministic Exploration
 - [x] 6.4.1 Long Flight Simulation (correctness)
 - [x] 6.4.2 Translation-Invariance at Maximum Extent
 
-Milestone M7: Planets (Infrastructure)
+Milestone M7: Planets (complete)
 
-- [x] 7.1.1 Cubed-sphere mapping (linear gnomonic projection, right-handed bases)
-- [x] 7.1.2 Quadtree node hierarchy (6 root quadtrees, one per cube face)
-- [x] 7.1.3 Split/merge criteria with hysteresis (SSE + distance-based)
-- [x] 7.1.4 Adjacency invariant (2:1 balance rule)
-- [x] 7.2.1 Camera-relative patch placement via LargeObjectSetup
-- [x] 7.2.2 Shared patch mesh geometry (33x33 vertices) with BDA access
-- [x] 7.2.3 Terrain skirts for crack elimination
-- [x] 7.2.4 BDA precision validation
-- [x] 7.3.1 Procedural terrain displacement (fractal noise)
-- [x] 7.3.2 Seam-free normal reconstruction (central differencing)
-- [x] 7.3.3 Continuous descent path testing
-- [x] 7.3.4 Performance validation within planet budget
-- [x] 7.4.1 Scattering model (Rayleigh + Mie with spherical phase functions)
-- [x] 7.4.2 Precomputed LUTs (Transmittance, Multiple Scattering, SkyView)
-- [x] 7.4.3 Sky dome and aerial perspective integration
-- [x] 7.4.4 Sun direction and terminator handling
+- [x] Double-precision cubed-sphere mapping with round-trip and boundary tests
+- [x] CPU quadtree LOD with screen-space error, hysteresis, sibling 2:1 checks, and
+      bounded leaf counts
+- [x] Parallel quadtree traversal with deterministic, bit-identical leaves
+- [x] Patch mesh generation: RTC vertices, normals, UVs, indexed geometry, analytical
+      double-precision bounding spheres, and outward winding
+- [x] GPU planet patch rendering through BDA buffers, Slang shaders, a depth-tested
+      dynamic-rendering pipeline, secondary command buffers, and a GPU retirement queue
+- [x] Headless descent render at multiple altitudes and cross-face seam coincidence checks
+- [x] Fractal terrain height generation and parallel heightfield evaluation
+- [x] Atmosphere single-scattering LUT generation (Rayleigh/Mie, separate scale heights,
+      per-channel transmittance, normalized output)
+- [x] Atmosphere shell rendering with BDA LUT sampling and limb-brightening verification
+
+Current limitations recorded in the roadmap: terrain-height displacement is not yet
+applied to patch meshes, different-LOD T-junction skirts remain TODO, and several
+parallel-speedup validations are still deferred to benchmark passes.
+
+Milestone M8: Environment and Effects (complete)
+
+- [x] World-locked procedural starfield with power-law brightness distribution and
+      projectable sun billboard
+- [x] FBM volumetric-look nebula and dust passes with inverse-camera directional sampling
+- [x] Particles, weapons, shields, thrusters, collision shockwaves, and afterburners
+- [x] Sun distortion, wormhole, FTL streak, and storm-cloud passes
+- [x] Instanced displaced-rock asteroid field with depth-tested Lambert lighting
+- [x] Additive composition across overlay passes
+- [x] Starfield golden image and environment render tests
+- [x] Frame-time budget smoke test against the ADR-004 6.94 ms interval
+
+Current limitations recorded in the roadmap: HDR bloom post-processing, true
+volumetric raymarching, depth-texture refraction/occlusion, GPU particle buffers,
+GPU asteroid culling, and additional golden images remain follow-up polish.
+
+Milestone M9: Public API (planned, not yet implemented)
+
+The public headers under `include/starforge/` intentionally remain minimal while
+M9 is planned. The planned work is tracked in [docs/ROADMAP.md](docs/ROADMAP.md)
+as steps 9.1–9.10:
+
+- API inventory and Vulkan-free contract/ADR
+- Application/window and renderer/frame facades
+- Public math, world-coordinate, and working-slice scene APIs
+- Shader/resource encapsulation
+- Sandbox rebuild using only `include/starforge/`
+- Public API leakage gates, smoke tests, documentation, and stability policy
+- Clean-checkout M9 exit proof
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for details.
 
