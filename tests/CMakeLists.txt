@@ -41,6 +41,8 @@ add_executable(starforge_tests
     test_instance_data.cpp
     test_instance_data_update.cpp
     test_public_application.cpp
+    test_public_math_world.cpp
+    test_public_renderer.cpp
 )
 
 target_link_libraries(starforge_tests

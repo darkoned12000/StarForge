@@ -2,6 +2,9 @@
 
 add_library(starforge_public_api STATIC
     application.cpp
+    renderer.cpp
+    world.cpp
+    world_bridge.cpp
 )
 
 target_include_directories(starforge_public_api
@@ -14,6 +17,8 @@ target_include_directories(starforge_public_api
 target_link_libraries(starforge_public_api
     PRIVATE
         starforge_platform
+        starforge_vulkan
+        starforge_spatial
 )
 
 starforge_set_warnings(starforge_public_api)

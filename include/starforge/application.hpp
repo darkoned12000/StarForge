@@ -17,11 +17,6 @@ struct Size2D
     bool operator==(const Size2D&) const noexcept = default;
 };
 
-inline bool operator==(const Size2D& lhs, const Size2D& rhs) noexcept
-{
-    return lhs.width == rhs.width && lhs.height == rhs.height;
-}
-
 // Backend-neutral application and window owner.
 // Movable; destruction releases the window and its platform subsystem.
 class Application
