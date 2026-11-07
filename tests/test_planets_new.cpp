@@ -2,6 +2,7 @@
 
 #include "planets/cubed_sphere.hpp"
 #include "planets/planet_patch.hpp"
+#include "planets/planet_quadtree.hpp"
 #include "planets/atmosphere.hpp"
 
 #include <cmath>
@@ -22,15 +23,58 @@ TEST_CASE("Planet patches: basic structure")
     CHECK(patch.level == 3);
 }
 
-TEST_CASE("Planet quadtree: initialization and level calculation")
+TEST_CASE("Planet patch generator: initialization and level calculation")
 {
-    PlanetQuadtree qt(6371000.0f, 1.0f); // Earth radius with 1m error tolerance
-    
-    CHECK(qt.getMaxLevel() > 0);
-    
-    // Test patch generation
-    auto patches = qt.generatePatches(0, 0, 0);
-    CHECK(patches.size() == 4); // Should generate 4 patches for level 0
+    PlanetPatchGenerator gen(6371000.0, 1.0); // Earth radius with 1m error tolerance
+
+    CHECK(gen.getMaxLevel() > 0);
+    CHECK(gen.getRadius() == 6371000.0);
+
+    // Coarse tolerance (maxError > radius) must yield level 1, not wrap
+    // around via an undefined float->uint32 cast of a negative log2.
+    PlanetPatchGenerator coarse(100.0, 1000.0);
+    CHECK(coarse.getMaxLevel() == 1);
+
+    // Subdividing a root patch yields 4 children at level + 1 with
+    // doubled coordinates and halved UV bounds.
+    auto root = gen.createRootPatch(CubeFace::PositiveX);
+    CHECK(root.level == 0);
+    CHECK(root.face == CubeFace::PositiveX);
+    CHECK(root.uMin == -1.0);
+    CHECK(root.uMax == 1.0);
+
+    // Root bounding sphere must contain the face; it must be tighter
+    // than the whole planet (regression: every patch used to bound
+    // the entire planet).
+    CHECK(root.boundingRadius > 0.0);
+    CHECK(root.boundingRadius < 6371000.0);
+
+    auto children = gen.subdivide(root);
+    CHECK(children.size() == 4);
+    for (const auto& child : children)
+    {
+        CHECK(child.level == 1);
+        CHECK(child.face == CubeFace::PositiveX);
+        CHECK(child.uMax - child.uMin == 1.0);
+        CHECK(child.vMax - child.vMin == 1.0);
+    }
+
+    // Children tile the root bounds exactly.
+    bool sawBottomLeft = false;
+    bool sawTopRight = false;
+    for (const auto& child : children)
+    {
+        if (child.uMin == -1.0 && child.vMin == -1.0)
+        {
+            sawBottomLeft = true;
+        }
+        if (child.uMax == 1.0 && child.vMax == 1.0)
+        {
+            sawTopRight = true;
+        }
+    }
+    CHECK(sawBottomLeft);
+    CHECK(sawTopRight);
 }
 
 TEST_CASE("Cubed sphere: basic face conversion")

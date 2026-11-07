@@ -1,6 +1,8 @@
 #include <doctest/doctest.h>
 
 #include "planets/cubed_sphere.hpp"
+#include "planets/planet_mesh.hpp"
+#include "planets/planet_patch.hpp"
 #include "planets/planet_quadtree.hpp"
 
 #include <cmath>
@@ -98,4 +100,69 @@ TEST_CASE("Planet quadtree: bounded patch count")
         CHECK(leaves.size() < 1000000); // Bounded
         CHECK(qt.checkAdjacencyInvariant());
     }
+}
+
+TEST_CASE("Planet patch mesh: structure and bounds")
+{
+    const double radius = 6371000.0;
+    PlanetPatchGenerator gen(radius, 1.0);
+    auto root = gen.createRootPatch(CubeFace::PositiveX);
+    auto mesh = generatePatchMesh(root, 4, radius);
+
+    // (n+1)^2 vertices, 6n^2 indices.
+    CHECK(mesh.positions.size() == 25);
+    CHECK(mesh.normals.size() == 25);
+    CHECK(mesh.uvs.size() == 25);
+    CHECK(mesh.indices.size() == 96);
+
+    // All indices reference valid vertices.
+    for (std::uint32_t idx : mesh.indices)
+    {
+        CHECK(idx < mesh.positions.size());
+    }
+
+    // RTC positions: world position (center + offset) lies on the sphere;
+    // offsets stay within the patch bounding radius; normals unit-length.
+    for (std::size_t i = 0; i < mesh.positions.size(); ++i)
+    {
+        const Vec3d world{
+            root.center.x + static_cast<double>(mesh.positions[i].x),
+            root.center.y + static_cast<double>(mesh.positions[i].y),
+            root.center.z + static_cast<double>(mesh.positions[i].z),
+        };
+        const double len = std::sqrt(world.x * world.x + world.y * world.y + world.z * world.z);
+        CHECK(std::abs(len - radius) < 1.0);
+
+        const auto& off = mesh.positions[i];
+        const double offLen = std::sqrt(off.x * off.x + off.y * off.y + off.z * off.z);
+        CHECK(offLen <= root.boundingRadius + 1.0);
+
+        const auto& n = mesh.normals[i];
+        const double nlen = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+        CHECK(std::abs(nlen - 1.0) < 1e-5);
+    }
+
+    // Winding: first triangle normal points outward (dot with world
+    // position > 0).
+    const auto toWorld = [&root](const Vec3f& off) {
+        return Vec3d{
+            root.center.x + static_cast<double>(off.x),
+            root.center.y + static_cast<double>(off.y),
+            root.center.z + static_cast<double>(off.z),
+        };
+    };
+    const Vec3d a = toWorld(mesh.positions[mesh.indices[0]]);
+    const Vec3d b = toWorld(mesh.positions[mesh.indices[1]]);
+    const Vec3d c = toWorld(mesh.positions[mesh.indices[2]]);
+    const Vec3d ab{b.x - a.x, b.y - a.y, b.z - a.z};
+    const Vec3d ac{c.x - a.x, c.y - a.y, c.z - a.z};
+    const Vec3d triN{ab.y * ac.z - ab.z * ac.y,
+                     ab.z * ac.x - ab.x * ac.z,
+                     ab.x * ac.y - ab.y * ac.x};
+    CHECK((triN.x * a.x + triN.y * a.y + triN.z * a.z) > 0.0);
+
+    // Degenerate input yields an empty mesh.
+    auto empty = generatePatchMesh(root, 0, radius);
+    CHECK(empty.positions.empty());
+    CHECK(empty.indices.empty());
 }

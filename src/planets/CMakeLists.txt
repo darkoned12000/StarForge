@@ -5,6 +5,8 @@ add_library(starforge_planets STATIC
     planet_quadtree.hpp
     planet_patch.cpp
     planet_patch.hpp
+    planet_mesh.cpp
+    planet_mesh.hpp
     terrain.cpp
     terrain.hpp
     atmosphere.cpp

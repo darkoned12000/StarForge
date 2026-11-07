@@ -752,8 +752,8 @@ Before implementation, resolve these design decisions and record them as ADRs:
 
 ### Completed Features:
 - Quadtree Level-of-Detail (LOD) Management: CPU-based quadtree LOD selection for optimal geometry complexity; continuous descent from orbit to surface with bounded patch count
-- Cubed Sphere Projection: Robust cubed sphere projection utilities for planetary geometry with seamless transitions between cube faces  
-- Atmosphere Rendering System: Advanced atmospheric scattering with configurable parameters and realistic light interaction
+- Cubed Sphere Projection: Robust cubed sphere projection utilities for planetary geometry with seamless transitions between cube faces
+- Atmosphere Parameters: `AtmosphereParams` struct with Rayleigh/Mie scattering coefficients and sun direction (no LUT generation or rendering yet)
 
 ### Deferred Items (M7.1, M7.2, M7.4):
 Still deferred to later milestones:
@@ -764,6 +764,19 @@ Still deferred to later milestones:
 
 CPU quadtree LOD selection, cubed-sphere projection, and atmosphere
 parameters are implemented; the GPU rendering half of M7 is not.
+
+### Remaining work (TODO)
+
+| Step | Deliverable | Verified by | Done when |
+|------|-------------|-------------|-----------|
+| 7.1a ✅ | Resolve duplicate `PlanetQuadtree` (face-based in `planet_quadtree.hpp` vs radius-based in `planet_patch.hpp`) — merge or rename so both headers can be included in one TU | T1 | Done: radius-based class renamed to `PlanetPatchGenerator`; `test_planets_new.cpp` now includes both headers and passes |
+| 7.2a ✅ | Patch mesh generation: vertex positions/normals/UVs + index buffer from quadtree leaves (cubed-sphere projection + terrain height) | T1 | Done: `generatePatchMesh(patch, subdivisions, radius)` in `planet_mesh.hpp/.cpp` — RTC offsets from double patch center, analytical bounding spheres, outward winding verified. Terrain-height displacement still TODO (mesh is smooth sphere today); T-junction skirts deferred to 7.2c |
+| 7.2b ⬜ | GPU patch pipeline: BDA vertex/index buffers, Slang vertex/fragment shaders, `GraphicsPipeline` with depth; headless render of one patch | T3 | Patch renders with non-zero pixels; zero validation errors |
+| 7.2c ⬜ | Continuous descent proof: scripted camera orbit→surface, bounded patch count, cross-face crack check | T3+T4 | Rendered descent passes; no visible seams; patch count bounded at every altitude |
+| 7.1b ⬜ | Parallel quadtree LOD traversal (M7.1): job-based `update()` across faces | T1+T4 | Bit-identical leaves to single-threaded; 4x+ speedup on 4 cores |
+| 7.2d ⬜ | GPU patch pipeline integration (M7.2): secondary command buffers with dynamic-rendering inheritance (5.5.3b), GPU-timeline deferred retirement queue (5.5.3c) | T2+T3 | Deferred recording validated; retirement keeps 2-frame safety under stress |
+| 7.4a ⬜ | Parallel atmosphere LUT generation (M7.4): job-based LUT from `AtmosphereParams` | T1+T4 | LUT bit-identical across thread counts; generation 4x+ faster |
+| 7.4b ⬜ | Atmosphere rendering: scattering shell shader using the LUT | T3 | Atmosphere renders over planet limb in headless test; golden pixels match |
 
 ## M8 – Environment and Effects
 
@@ -784,6 +797,20 @@ parameters are implemented; the GPU rendering half of M7 is not.
 - No storm systems or asteroid-field rendering exist yet.
 
 Proof (golden images, frame-time budgets) still outstanding.
+
+### Remaining work (TODO)
+
+| Step | Deliverable | Verified by | Done when |
+|------|-------------|-------------|-----------|
+| 8.1 ⬜ | Nebula pipeline: volumetric-look FBM raymarch shader (fullscreen pass, `NebulaRenderer` pipeline + push constants) | T2+T3 | Nebula renders headlessly; golden image matches within tolerance |
+| 8.2 ⬜ | Dust field pipeline: volumetric extinction pass (`DustFieldRenderer`) | T2+T3 | Dust renders headlessly; golden image matches within tolerance |
+| 8.3 ⬜ | Particles, weapons, shields: particle state buffer + emitter, laser/projectile billboards; add missing `ShieldEffect` class | T2+T3 | Each effect renders headlessly; pixel checks pass |
+| 8.4 ⬜ | Thruster, collision, sun distortion, wormhole, FTL, afterburner pipelines | T2+T3 | Each renders headlessly; pixel checks pass |
+| 8.5 ⬜ | Starfield realism: brightness/size/color distribution, HDR + bloom, sun billboard with glow | T3 | Golden image shows distributed stars + sun glow; no uniform-grid artifacts |
+| 8.6 ⬜ | Asteroid field rendering (VISION): instanced displaced-rock mesh, GPU culling, depth + lighting | T2+T3 | Hundreds of asteroids render headlessly; correct occlusion |
+| 8.7 ⬜ | Storm systems (VISION): animated cloud-layer shader pass | T3 | Storm renders headlessly; golden image matches |
+| 8.8 ⬜ | Golden images + frame-time budgets (M8 proof): golden PNG harness for environment scenes, benchmark runs vs ADR-004 budgets | T3+T4 | Goldens committed; environment scene meets budget at 1080p |
+| 8.9 ⬜ | Mesh-shader criterion: any mesh-shader path gated behind `GpuCapabilities.meshShader` with non-mesh fallback | T2 | Both paths validated; fallback renders identically within tolerance |
 
 ## M9 – Public API
 
