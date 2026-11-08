@@ -50,6 +50,11 @@ option(STARFORGE_USE_FLECS
     ON
 )
 
+option(STARFORGE_USE_JOLT
+    "Fetch and build Jolt Physics for the physics layer (M11)"
+    ON
+)
+
 # --------------------------------------------------
 # Helper modules
 # --------------------------------------------------
@@ -75,6 +80,30 @@ if(STARFORGE_USE_FLECS)
         GIT_SHALLOW TRUE
     )
     FetchContent_MakeAvailable(flecs)
+endif()
+
+# Jolt Physics (pinned) — FetchContent, like Flecs/doctest. Jolt's
+# CMake entry point lives in its Build/ subdirectory.
+if(STARFORGE_USE_JOLT)
+    include(FetchContent)
+    set(TARGET_UNIT_TESTS OFF CACHE BOOL "" FORCE)
+    set(TARGET_SAMPLES OFF CACHE BOOL "" FORCE)
+    set(USE_ASSERTS ON CACHE BOOL "" FORCE)
+    set(CPP_RTTI_ENABLED ON CACHE BOOL "" FORCE)
+    set(DOUBLE_PRECISION OFF CACHE BOOL "" FORCE)
+    set(CROSS_PLATFORM_DETERMINISTIC ON CACHE BOOL "" FORCE)
+    # We do not use Jolt's hair/compute shaders (dxc is unavailable).
+    set(JPH_USE_VK OFF CACHE BOOL "" FORCE)
+    set(JPH_USE_DX12 OFF CACHE BOOL "" FORCE)
+    set(JPH_USE_MTL OFF CACHE BOOL "" FORCE)
+    set(JPH_USE_CPU_COMPUTE OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(JoltPhysics
+        GIT_REPOSITORY https://github.com/jrouwe/JoltPhysics.git
+        GIT_TAG v5.6.0
+        GIT_SHALLOW TRUE
+        SOURCE_SUBDIR Build
+    )
+    FetchContent_MakeAvailable(JoltPhysics)
 endif()
 
 # GLM (math library) — FetchContent fallback if not installed system-wide.

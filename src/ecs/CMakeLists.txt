@@ -1,4 +1,5 @@
 # ECS scene layer (M10): Flecs world wrapper, components, spatial index.
+# (Physics bridge lives in starforge_physics to avoid a dependency cycle.)
 
 add_library(starforge_ecs STATIC
     world.cpp
