@@ -5,6 +5,9 @@
 
 #include <flecs.h>
 
+#include <array>
+#include <cstdint>
+
 namespace starforge::ecs
 {
 
@@ -32,10 +35,18 @@ struct CollisionEvent
 };
 struct CollisionData
 {
-    flecs::entity other{};
-    spatial::WorldPosition point;
-    math::Vec3f normal{0.0f, 0.0f, 1.0f};
-    float impulse = 0.0f;
+    static constexpr std::size_t kMaxContacts = 4;
+
+    struct Entry
+    {
+        flecs::entity other{};
+        spatial::WorldPosition point;
+        math::Vec3f normal{0.0f, 0.0f, 1.0f};
+        float impulse = 0.0f;
+    };
+
+    std::uint32_t count = 0;
+    std::array<Entry, kMaxContacts> contacts;
 };
 
 // Entity kind tags (Flecs empty components).

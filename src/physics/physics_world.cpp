@@ -10,36 +10,6 @@
 
 namespace starforge::physics
 {
-namespace
-{
-
-// One-time Jolt registration (allocator, factory, collision handlers).
-// The global object unregisters and frees the factory at process exit
-// so sanitizers report no leak.
-struct GlobalJoltRegistration
-{
-    GlobalJoltRegistration()
-    {
-        JPH::RegisterDefaultAllocator();
-        // Required by RegisterTypes even when unused for pure
-        // code-driven simulations (Jolt HelloWorld pattern).
-        JPH::Factory::sInstance = new JPH::Factory();
-        JPH::RegisterTypes();
-    }
-
-    ~GlobalJoltRegistration()
-    {
-        JPH::UnregisterTypes();
-        delete JPH::Factory::sInstance;
-        JPH::Factory::sInstance = nullptr;
-    }
-};
-
-const GlobalJoltRegistration gJoltRegistration;
-
-} // namespace
-
-PhysicsWorld::JoltRegistration::JoltRegistration() = default;
 
 PhysicsWorld::PhysicsWorld(const Config& config)
     : config_(config), broadPhaseFilter_(broadPhaseLayers_, objectLayerFilter_), contactListener_(contactQueue_)
@@ -127,13 +97,38 @@ BodyHandle PhysicsWorld::createSensorBox(float halfX, float halfY, float halfZ, 
     return {body->GetID()};
 }
 
-std::optional<PhysicsWorld::RayHit> PhysicsWorld::castRay(const JPH::Vec3& from, const JPH::Vec3& direction) const
+namespace
+{
+
+// Raycast object-layer filter with optional sensor inclusion.
+class RaycastObjectLayerFilter final : public JPH::ObjectLayerFilter
+{
+public:
+    RaycastObjectLayerFilter(const JPH::ObjectLayerPairFilter& pairFilter, bool includeSensors)
+        : pairFilter_(pairFilter), includeSensors_(includeSensors)
+    {
+    }
+
+    bool ShouldCollide(JPH::ObjectLayer layer) const override
+    {
+        return includeSensors_ || layer != Layers::Sensor;
+    }
+
+private:
+    const JPH::ObjectLayerPairFilter& pairFilter_;
+    bool includeSensors_;
+};
+
+} // namespace
+
+std::optional<PhysicsWorld::RayHit>
+PhysicsWorld::castRay(const JPH::Vec3& from, const JPH::Vec3& direction, RaycastTarget target) const
 {
     JPH::RRayCast ray(JPH::RVec3(from.GetX(), from.GetY(), from.GetZ()),
                       JPH::RVec3(direction.GetX(), direction.GetY(), direction.GetZ()));
     JPH::RayCastResult hit;
     const JPH::DefaultBroadPhaseLayerFilter broadPhaseFilter(broadPhaseFilter_, Layers::Moving);
-    const JPH::DefaultObjectLayerFilter objectLayerFilter(objectLayerFilter_, Layers::Moving);
+    const RaycastObjectLayerFilter objectLayerFilter(objectLayerFilter_, target == RaycastTarget::IncludeSensors);
     const bool found = system_.GetNarrowPhaseQuery().CastRay(ray, hit, broadPhaseFilter, objectLayerFilter);
     if (!found)
     {

@@ -963,7 +963,7 @@ Recommended tech stack for the game layer:
 | 11.2 ✅ | ECS bridge: `PhysicsBody`/`Collider` components (motion type, mass, shape) with pre-sync (ECS→Jolt, kinematic/teleport) and post-sync (Jolt→ECS: position, orientation, velocity) in camera-relative float32 | T1 | Done: `attachBody`/`syncEcsToPhysics`/`syncPhysicsToEcs` with camera-relative conversion both ways; ECS entity falls and rests via Jolt, teleport sync verified; body user-data mapping lands with 11.3 contacts |
 | 11.3 ✅ | Collision events: contact listener → deferred chunk queue → ECS `CollisionEvent` (both entities, point, normal, impulse) flushed after the step; deleted entities deregister from Jolt immediately | T1 | Done: worker threads only push to a mutex-guarded queue; flush emits tag+payload components on both entities (rebased to world space); sphere–sphere test proves events on both sides |
 | 11.4 ✅ | CCD, raycasts, sensors: `LinearCast` motion quality on fast bodies, `castRay(from, dir, maxDist)` query API, sensor triggers (docking zones) | T1 | Done: 2000 m/s sphere stops at a thin wall with LinearCast; raycast hits/misses as expected; sensor overlap fires an ECS event on the intruding entity |
-| 11.5 ⬜ | M11 exit proof: ship vs asteroid field through ECS + physics with island activation, frame budget | T2 | Ship collides in the field (events fire), no tunneling at 1 km/s, physics step ≤ 2 ms of the ADR-004 interval, zero validation errors |
+| 11.5 ✅ | M11 exit proof: ship vs asteroid field through ECS + physics with island activation, frame budget | T2 | Done: ship flies through a 200-rock ECS field; island activation attaches local bodies, collision events fire, traveled > 5 m, p95 step+sync ≤ 2 ms, zero validation errors |
 
 ### M12 – Audio
 

@@ -19,12 +19,15 @@ std::size_t ContactQueue::size() const
 
 void ContactQueue::clearTransientEvents(ecs::Ecs& world)
 {
+    // The query is scoped to this call: cached queries would outlive
+    // their Flecs world if the Ecs wrapper dies first (Flecs asserts on
+    // query destruction against a dead world). Construction cost is
+    // negligible next to the flush itself.
+    auto query = world.world().query<ecs::CollisionData>();
     // Collect first: structural changes during iteration are deferred in
     // Flecs but simpler to reason about in two passes.
     std::vector<flecs::entity> targets;
-    // Query by the payload component (empty tag components cannot be
-    // each() callbacks in Flecs); the tag is always paired with data.
-    world.world().query<ecs::CollisionData>().each([&targets](flecs::entity entity, ecs::CollisionData&) {
+    query.each([&targets](flecs::entity entity, ecs::CollisionData&) {
         targets.push_back(entity);
     });
     for (const auto target : targets)
@@ -74,8 +77,18 @@ void ContactQueue::flush(ecs::Ecs& world, const spatial::WorldPosition& camera)
                     otherId != 0 ? flecs::entity(flecsWorld, static_cast<flecs::entity_t>(otherId))
                                  : flecs::entity::null();
                 target.add<ecs::CollisionEvent>();
-                target.set<ecs::CollisionData>(
-                    {.other = other, .point = *rebased, .normal = normal, .impulse = impulse});
+                // Append to the contact buffer (fixed capacity; events
+                // beyond capacity are dropped).
+                ecs::CollisionData data{};
+                if (target.has<ecs::CollisionData>())
+                {
+                    data = target.get<ecs::CollisionData>();
+                }
+                if (data.count < ecs::CollisionData::kMaxContacts)
+                {
+                    data.contacts[data.count++] = {.other = other, .point = *rebased, .normal = normal, .impulse = impulse};
+                }
+                target.set<ecs::CollisionData>(data);
             };
 
         // Equal-and-opposite normals (Newton's third law).

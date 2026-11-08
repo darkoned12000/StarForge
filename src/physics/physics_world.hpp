@@ -16,6 +16,7 @@
 #include <Jolt/RegisterTypes.h>
 
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <optional>
 
@@ -75,8 +76,15 @@ public:
         JPH::Vec3 point{0.0f, 0.0f, 0.0f};
     };
 
+    enum class RaycastTarget
+    {
+        SolidOnly,      // Sensors do not stop the ray.
+        IncludeSensors, // Sensor volumes count as hits.
+    };
+
     // Casts a ray (direction encodes length) and returns the closest hit.
-    [[nodiscard]] std::optional<RayHit> castRay(const JPH::Vec3& from, const JPH::Vec3& direction) const;
+    [[nodiscard]] std::optional<RayHit>
+    castRay(const JPH::Vec3& from, const JPH::Vec3& direction, RaycastTarget target = RaycastTarget::SolidOnly) const;
 
     [[nodiscard]] JPH::Vec3 getPosition(BodyHandle body) const;
     [[nodiscard]] JPH::Vec3 getLinearVelocity(BodyHandle body) const;
@@ -91,12 +99,29 @@ public:
     void flushContacts(ecs::Ecs& world, const spatial::WorldPosition& camera);
 
 private:
-    // First member: ensures Jolt allocator/types registration (see
-    // physics_world.cpp for the global RAII guard) before any other
-    // member allocates through Jolt.
+    // First member: registers Jolt allocator/types (magic static, so it
+    // runs immediately before any other member allocates through Jolt
+    // and exactly once per process).
     struct JoltRegistration
     {
-        JoltRegistration();
+        JoltRegistration()
+        {
+            static const bool registered = [] {
+                JPH::RegisterDefaultAllocator();
+                // Required by RegisterTypes even when unused for pure
+                // code-driven simulations (Jolt HelloWorld pattern).
+                JPH::Factory::sInstance = new JPH::Factory();
+                JPH::RegisterTypes();
+                // Free the factory at process exit (no sanitizer leak).
+                std::atexit([] {
+                    JPH::UnregisterTypes();
+                    delete JPH::Factory::sInstance;
+                    JPH::Factory::sInstance = nullptr;
+                });
+                return true;
+            }();
+            (void)registered;
+        }
     };
     JoltRegistration joltRegistration_;
 

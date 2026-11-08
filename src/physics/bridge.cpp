@@ -6,6 +6,9 @@
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 
+#include <cmath>
+#include <vector>
+
 namespace starforge::physics
 {
 namespace
@@ -34,11 +37,14 @@ namespace
 
 } // namespace
 
-BodyHandle attachBody(ecs::Ecs& world, flecs::entity entity, PhysicsWorld& physics, const spatial::WorldPosition& camera)
+BodyHandle attachBody(ecs::Ecs& world, flecs::entity entity, PhysicsWorld& physics, const spatial::WorldPosition& camera,
+                      MotionType motionType)
 {
     const auto& transform = entity.get<ecs::Transform>();
     const auto collider = entity.get<Collider>();
     const JPH::Vec3 position = toJolt(transform.position, camera);
+    const JPH::EMotionType joltMotion =
+        motionType == MotionType::Kinematic ? JPH::EMotionType::Kinematic : JPH::EMotionType::Dynamic;
 
     BodyHandle body;
     if (collider.shape == Collider::Shape::Sphere)
@@ -46,7 +52,12 @@ BodyHandle attachBody(ecs::Ecs& world, flecs::entity entity, PhysicsWorld& physi
         body = physics.createDynamicSphere(collider.radius, 1.0f, position.GetX(), position.GetY(), position.GetZ());
         if (body.isValid())
         {
-            physics.system().GetBodyInterface().SetPositionAndRotation(
+            auto& bodyInterface = physics.system().GetBodyInterface();
+            if (motionType == MotionType::Kinematic)
+            {
+                bodyInterface.SetMotionType(body.id, JPH::EMotionType::Kinematic, JPH::EActivation::Activate);
+            }
+            bodyInterface.SetPositionAndRotation(
                 body.id, JPH::RVec3(position.GetX(), position.GetY(), position.GetZ()),
                 toJolt(transform.orientation), JPH::EActivation::Activate);
         }
@@ -59,7 +70,7 @@ BodyHandle attachBody(ecs::Ecs& world, flecs::entity entity, PhysicsWorld& physi
         shapeSettings.SetEmbedded();
         JPH::ShapeRefC shape = shapeSettings.Create().Get();
         JPH::BodyCreationSettings settings(shape, JPH::RVec3(position.GetX(), position.GetY(), position.GetZ()),
-                                           toJolt(transform.orientation), JPH::EMotionType::Dynamic, Layers::Moving);
+                                           toJolt(transform.orientation), joltMotion, Layers::Moving);
         settings.mMassPropertiesOverride.mMass = 1.0f;
         settings.mOverrideMassProperties = JPH::EOverrideMassProperties::MassAndInertiaProvided;
         body = {bodyInterface.CreateAndAddBody(settings, JPH::EActivation::Activate)};
@@ -70,20 +81,34 @@ BodyHandle attachBody(ecs::Ecs& world, flecs::entity entity, PhysicsWorld& physi
         // Map the Flecs entity into the body user data so contact
         // callbacks can identify involved entities.
         physics.system().GetBodyInterface().SetUserData(body.id, entity.id());
-        entity.set<PhysicsBody>({body});
+        entity.set<PhysicsBody>({body, motionType});
+        if (motionType == MotionType::Dynamic && entity.has<ecs::Velocity>())
+        {
+            // Jolt owns motion for dynamic bodies; ECS integration of
+            // the same velocity would double-apply. Kinematic bodies
+            // keep Velocity (it drives them via syncEcsToPhysics).
+            entity.remove<ecs::Velocity>();
+        }
     }
     return body;
 }
 
-void syncEcsToPhysics(ecs::Ecs& world, PhysicsWorld& physics, const spatial::WorldPosition& camera)
+void syncEcsToPhysics(ecs::Ecs& world, PhysicsWorld& physics, const spatial::WorldPosition& camera, float dt)
 {
     auto& bodyInterface = physics.system().GetBodyInterface();
+    // Only kinematic bodies are driven from ECS (continuous
+    // MoveKinematic so impacts impart momentum); dynamic bodies are
+    // integrated by Jolt and read back by syncPhysicsToEcs.
     world.world().query<const ecs::Transform, const PhysicsBody>().each(
-        [&bodyInterface, &camera](flecs::entity entity, const ecs::Transform& transform, const PhysicsBody& body) {
+        [&bodyInterface, &camera, dt](flecs::entity entity, const ecs::Transform& transform, const PhysicsBody& body) {
+            if (body.motionType != MotionType::Kinematic)
+            {
+                return;
+            }
             const JPH::Vec3 position = toJolt(transform.position, camera);
-            bodyInterface.SetPositionAndRotation(
-                body.body.id, JPH::RVec3(position.GetX(), position.GetY(), position.GetZ()),
-                toJolt(transform.orientation), JPH::EActivation::Activate);
+            bodyInterface.MoveKinematic(body.body.id,
+                                        JPH::RVec3(position.GetX(), position.GetY(), position.GetZ()),
+                                        toJolt(transform.orientation), dt);
             if (entity.has<ecs::Velocity>())
             {
                 const auto velocity = entity.get<ecs::Velocity>();
@@ -94,14 +119,74 @@ void syncEcsToPhysics(ecs::Ecs& world, PhysicsWorld& physics, const spatial::Wor
         });
 }
 
+std::uint32_t syncIslandBodies(ecs::Ecs& world, PhysicsWorld& physics, const spatial::WorldPosition& camera,
+                               const ecs::SpatialIndex& index)
+{
+    std::uint32_t attached = 0;
+    for (const auto entity : index.findNeighborhood(camera))
+    {
+        if (!entity.has<ecs::AsteroidTag>() || entity.has<PhysicsBody>() || !entity.has<Collider>())
+        {
+            continue;
+        }
+        if (attachBody(world, entity, physics, camera).isValid())
+        {
+            ++attached;
+        }
+    }
+    return attached;
+}
+
 void detachBody(ecs::Ecs& world, flecs::entity entity, PhysicsWorld& physics)
 {
+    // Remove the component only: the cleanup observer (registered via
+    // registerBodyCleanup) destroys the body on removal. Destroying here
+    // as well would double-destroy.
+    (void)physics;
     if (entity.has<PhysicsBody>())
     {
-        physics.destroyBody(entity.get<PhysicsBody>().body);
         entity.remove<PhysicsBody>();
     }
-    (void)world;
+}
+
+void rebaseIsland(ecs::Ecs& world, PhysicsWorld& physics, const spatial::WorldPosition& oldCamera,
+                  const spatial::WorldPosition& newCamera)
+{
+    const auto delta = spatial::toCameraRelative(newCamera, oldCamera);
+    if (delta.x == 0.0 && delta.y == 0.0 && delta.z == 0.0)
+    {
+        return;
+    }
+    auto& bodyInterface = physics.system().GetBodyInterface();
+    world.world().query<const PhysicsBody>().each([&bodyInterface, &delta](flecs::entity, const PhysicsBody& body) {
+        JPH::RVec3 position;
+        JPH::Quat rotation;
+        bodyInterface.GetPositionAndRotation(body.body.id, position, rotation);
+        bodyInterface.SetPositionAndRotation(
+            body.body.id,
+            JPH::RVec3(position.GetX() - static_cast<float>(delta.x), position.GetY() - static_cast<float>(delta.y),
+                       position.GetZ() - static_cast<float>(delta.z)),
+            rotation, JPH::EActivation::Activate);
+    });
+}
+
+void evictDistantBodies(ecs::Ecs& world, PhysicsWorld& physics, const spatial::WorldPosition& camera,
+                        double maxRadiusMeters)
+{
+    std::vector<flecs::entity> evict;
+    world.world().query<const ecs::Transform, const PhysicsBody>().each(
+        [&evict, &camera, maxRadiusMeters](flecs::entity entity, const ecs::Transform& transform, const PhysicsBody&) {
+            const auto relative = spatial::toCameraRelative(transform.position, camera);
+            const double distance = std::sqrt(relative.x * relative.x + relative.y * relative.y + relative.z * relative.z);
+            if (distance > maxRadiusMeters)
+            {
+                evict.push_back(entity);
+            }
+        });
+    for (const auto entity : evict)
+    {
+        detachBody(world, entity, physics);
+    }
 }
 
 void registerBodyCleanup(ecs::Ecs& world, PhysicsWorld& physics)

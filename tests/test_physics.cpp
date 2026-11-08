@@ -119,7 +119,7 @@ TEST_CASE("Physics bridge: ECS entity falls, rests, and syncs back")
         const auto rotatedBody = attachBody(ecsWorld, rotated, world, *camera);
         REQUIRE(rotatedBody.isValid());
         // Push the ECS orientation into Jolt, then read it back.
-        syncEcsToPhysics(ecsWorld, world, *camera);
+        syncEcsToPhysics(ecsWorld, world, *camera, 1.0f / 60.0f);
         syncPhysicsToEcs(ecsWorld, world, *camera);
 
         const auto readBack = rotated.get<ecs::Transform>().orientation;
@@ -129,15 +129,24 @@ TEST_CASE("Physics bridge: ECS entity falls, rests, and syncs back")
         CHECK(std::abs(readBack.w - 0.5f) < 1.0e-4f);
     }
 
-    // Teleport sync: moving the ECS entity moves the body.
-    auto& mutableTransform = entity.get_mut<ecs::Transform>();
-    auto movedPos = spatial::WorldPosition::fromMeters(3, 2, 0);
+    // Teleport sync: kinematic bodies follow ECS transforms exactly.
+    auto kinematicPos = spatial::WorldPosition::fromMeters(3, 2, 0);
+    REQUIRE(kinematicPos.has_value());
+    const auto kinematic = ecsWorld.createAsteroid(*kinematicPos, {0.0, 0.0, 0.0});
+    kinematic.set<Collider>({.shape = Collider::Shape::Sphere, .radius = 0.5f});
+    const auto kinematicBody = attachBody(ecsWorld, kinematic, world, *camera, MotionType::Kinematic);
+    REQUIRE(kinematicBody.isValid());
+
+    auto& mutableTransform = kinematic.get_mut<ecs::Transform>();
+    auto movedPos = spatial::WorldPosition::fromMeters(4, 2, 0);
     REQUIRE(movedPos.has_value());
     mutableTransform.position = *movedPos;
-    entity.modified<ecs::Transform>();
-    syncEcsToPhysics(ecsWorld, world, *camera);
-    const JPH::Vec3 bodyPos = world.getPosition(body);
-    CHECK(std::abs(bodyPos.GetX() - 3.0f) < 1.0e-3f);
+    kinematic.modified<ecs::Transform>();
+    syncEcsToPhysics(ecsWorld, world, *camera, 1.0f / 60.0f);
+    // MoveKinematic interpolates toward the target over dt; step once.
+    world.step(1.0f / 60.0f);
+    const JPH::Vec3 bodyPos = world.getPosition(kinematicBody);
+    CHECK(std::abs(bodyPos.GetX() - 4.0f) < 1.0e-3f);
     CHECK(std::abs(bodyPos.GetY() - 2.0f) < 1.0e-3f);
 }
 
@@ -176,15 +185,32 @@ TEST_CASE("Physics bridge: collision emits ECS events via the deferred queue")
     CHECK(lower.has<ecs::CollisionEvent>());
 
     const auto data = upper.get<ecs::CollisionData>();
-    REQUIRE(data.other.is_valid());
-    CHECK(data.other.is_alive());
-    CHECK(data.impulse >= 0.0f);
+    REQUIRE(data.count >= 1);
+    REQUIRE(data.contacts[0].other.is_valid());
+    CHECK(data.contacts[0].other.is_alive());
+    CHECK(data.contacts[0].impulse >= 0.0f);
 
-    // Equal-and-opposite normals (Newton's third law).
+    // Equal-and-opposite normals (Newton's third law) for the
+    // upper<->lower contact entries (floor contacts are also recorded).
     const auto lowerData = lower.get<ecs::CollisionData>();
-    CHECK(std::abs(data.normal.x + lowerData.normal.x) < 1.0e-4f);
-    CHECK(std::abs(data.normal.y + lowerData.normal.y) < 1.0e-4f);
-    CHECK(std::abs(data.normal.z + lowerData.normal.z) < 1.0e-4f);
+    REQUIRE(lowerData.count >= 1);
+    const auto findContact = [](const ecs::CollisionData& buffer, flecs::entity other) {
+        for (std::uint32_t i = 0; i < buffer.count; ++i)
+        {
+            if (buffer.contacts[i].other == other)
+            {
+                return &buffer.contacts[i];
+            }
+        }
+        return static_cast<const ecs::CollisionData::Entry*>(nullptr);
+    };
+    const auto* upperEntry = findContact(data, lower);
+    const auto* lowerEntry = findContact(lowerData, upper);
+    REQUIRE(upperEntry != nullptr);
+    REQUIRE(lowerEntry != nullptr);
+    CHECK(std::abs(upperEntry->normal.x + lowerEntry->normal.x) < 1.0e-4f);
+    CHECK(std::abs(upperEntry->normal.y + lowerEntry->normal.y) < 1.0e-4f);
+    CHECK(std::abs(upperEntry->normal.z + lowerEntry->normal.z) < 1.0e-4f);
 
     // Transient lifecycle: after separation, the next flush clears the
     // tags instead of re-triggering damage systems.
@@ -198,7 +224,7 @@ TEST_CASE("Physics bridge: collision emits ECS events via the deferred queue")
     REQUIRE(farPos.has_value());
     upperTransform.position = *farPos;
     upper.modified<ecs::Transform>();
-    syncEcsToPhysics(ecsWorld, world, *camera);
+    syncEcsToPhysics(ecsWorld, world, *camera, 1.0f / 60.0f);
     world.step(1.0f / 60.0f);
     world.flushContacts(ecsWorld, *camera);
     CHECK(!upper.has<ecs::CollisionEvent>());
@@ -269,4 +295,79 @@ TEST_CASE("Physics: raycast hits the expected body and sensors report overlap")
     CHECK(world.contactQueue().size() >= 1);
     world.flushContacts(ecsWorld, *camera);
     CHECK(entity.has<ecs::CollisionEvent>());
+}
+
+TEST_CASE("Physics exit proof: ship through asteroid field within budget (11.5)")
+{
+    jobs::initGlobalScheduler();
+    PhysicsWorld world(PhysicsWorld::Config{});
+    ecs::Ecs ecsWorld;
+
+    const auto camera = spatial::WorldPosition::fromMeters(0, 0, 0);
+    REQUIRE(camera.has_value());
+
+    // Static floor far below (bounce plane, not part of the flythrough).
+    const auto floor = world.createStaticBox(500.0f, 1.0f, 500.0f, 0.0f, -30.0f, 0.0f);
+    REQUIRE(floor.isValid());
+
+    // Ship at the origin, driven purely by Jolt (no ECS velocity).
+    auto shipPos = spatial::WorldPosition::fromMeters(0, 0, 0);
+    REQUIRE(shipPos.has_value());
+    const auto ship = ecsWorld.createShip(*shipPos, {0.0, 0.0, 0.0});
+    ship.set<Collider>({.shape = Collider::Shape::Sphere, .radius = 1.0f});
+    const auto shipBody = attachBody(ecsWorld, ship, world, *camera);
+    REQUIRE(shipBody.isValid());
+    world.setLinearVelocity(shipBody, {30.0f, 0.0f, 0.0f});
+
+    // Asteroid field: 200 deterministic rocks along the ship's path.
+    for (std::uint32_t i = 0; i < 200; ++i)
+    {
+        const float x = 10.0f + static_cast<float>(i) * 2.0f;
+        const float y = std::sin(static_cast<float>(i) * 1.7f) * 8.0f;
+        const float z = std::cos(static_cast<float>(i) * 2.3f) * 8.0f;
+        auto position = spatial::WorldPosition::fromMeters(x, y, z);
+        REQUIRE(position.has_value());
+        const auto asteroid = ecsWorld.createAsteroid(*position, {0.0, 0.0, 0.0});
+        asteroid.set<Collider>({.shape = Collider::Shape::Sphere, .radius = 1.5f});
+    }
+
+    ecs::SpatialIndex index(ecsWorld);
+    bool collided = false;
+
+    constexpr int kFrames = 180;
+    std::vector<double> timings;
+    timings.reserve(kFrames);
+
+    for (int frame = 0; frame < kFrames; ++frame)
+    {
+        const auto frameStart = std::chrono::steady_clock::now();
+
+        // Island activation: bodies only for the local neighborhood.
+        index.rebuild();
+        syncIslandBodies(ecsWorld, world, *camera, index);
+
+        world.step(1.0f / 60.0f);
+        syncPhysicsToEcs(ecsWorld, world, *camera);
+        world.flushContacts(ecsWorld, *camera);
+        if (ship.has<ecs::CollisionEvent>())
+        {
+            collided = true;
+        }
+
+        const auto frameEnd = std::chrono::steady_clock::now();
+        if (frame >= 3)
+        {
+            timings.push_back(std::chrono::duration<double, std::milli>(frameEnd - frameStart).count());
+        }
+    }
+
+    CHECK(collided);
+    CHECK(ecsWorld.world().count<PhysicsBody>() == 201); // Ship + 200 asteroids, all local.
+
+    const auto shipMeters = ship.get<ecs::Transform>().position.toMeters();
+    CHECK(shipMeters.x > 5.0); // Traveled into the field.
+
+    std::sort(timings.begin(), timings.end());
+    const double p95 = timings[(timings.size() * 95) / 100];
+    CHECK(p95 < 2.0); // Physics portion of the ADR-004 frame budget.
 }
