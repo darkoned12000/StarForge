@@ -935,8 +935,35 @@ Recommended tech stack for the game layer:
 - **Goal:** Rigid body dynamics, continuous collision detection for fast
   ships, raycasts, triggers. Jolt Physics integration.
 - **Proof:** Ship collision with asteroid field; no tunneling at 1 km/s.
-- **Tech:** Jolt Physics.
+- **Tech:** Jolt Physics (FetchContent, pinned like Flecs).
 - **Depends on:** M10 (ECS).
+- **Key architectural constraints:**
+  - **Single-precision floating origin**, not `JPH_DOUBLE_PRECISION`:
+    even doubles lose sub-mm precision past ~1e8 m (engine reach is
+    ~1e18 m) and double Jolt costs 15–30% in broad/narrowphase. The
+    physics world is a *camera-relative island* (±5–10 km bubble):
+    bodies are positioned camera-relative (same single-cast rule as
+    rendering) and synced with ECS `Transform` (`WorldPosition`) each
+    step. Jolt never sees interstellar-range coordinates.
+  - **No competing thread pools:** Jolt's default thread pool is not
+    used; a custom `JPH::JobSystem` adapter maps Jolt jobs/barriers
+    onto `starforge::jobs::JobScheduler` to protect the ADR-004 frame
+    budget from core thrashing.
+  - **No Flecs mutation inside Jolt callbacks:** contact callbacks run
+    on worker threads; they push to a deferred, thread-safe chunk
+    queue flushed on the main thread after `PhysicsSystem::Update`.
+  - **Island activation:** distant asteroids stay cheap ECS linear
+    advection; only the `SpatialIndex` neighborhood of active ships
+    gets Jolt bodies (static/sensor until disturbed). Physics cost
+    scales with the local bubble, not the world population.
+
+| Step | Deliverable | Verified by | Done when |
+|------|-------------|-------------|-----------|
+| 11.1 ⬜ | Jolt integration: FetchContent Jolt (pinned), `starforge_physics` library wrapping TempAllocator/PhysicsSystem/BodyInterface; collision layers (NonMoving/Moving/Projectile/Sensor) + broadphase/object/pair filters; custom JobSystem adapter onto `starforge::jobs`; static floor + dynamic sphere with gravity, fixed 60 Hz sub-stepping | T1 | Sphere falls and rests on the floor deterministically; no second OS thread pool spawned; zero validation errors |
+| 11.2 ⬜ | ECS bridge: `PhysicsBody`/`Collider` components (motion type, mass, shape; `BodyID` + `Body::GetUserData()` mapped to the Flecs entity) with pre-sync (ECS→Jolt, kinematic/teleport) and post-sync (Jolt→ECS: position, orientation, velocity) in camera-relative float32 | T1 | Moving an ECS entity moves its body and vice versa; sync round-trip error is float32-scale at camera range |
+| 11.3 ⬜ | Collision events: contact listener → deferred chunk queue → ECS `CollisionEvent` (both entities, point, normal, impulse) flushed after the step; deleted entities deregister from Jolt immediately | T1 | Sphere–asteroid contact emits exactly one event per pair per impact; no Flecs access from worker threads |
+| 11.4 ⬜ | CCD, raycasts, sensors: `LinearCast` motion quality on fast bodies, `castRay(from, dir, maxDist)` query API, sensor triggers (docking zones) | T1 | Body at 1 km/s does not tunnel through a thin wall; raycast hits the expected body; sensors report enter/exit without contact response |
+| 11.5 ⬜ | M11 exit proof: ship vs asteroid field through ECS + physics with island activation, frame budget | T2 | Ship collides in the field (events fire), no tunneling at 1 km/s, physics step ≤ 2 ms of the ADR-004 interval, zero validation errors |
 
 ### M12 – Audio
 
