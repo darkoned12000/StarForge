@@ -24,6 +24,7 @@ Every step also satisfies the Definition of Done in ARCHITECTURE.md.
 | Scalable planetary rendering        | Orbit-to-surface descent, bounded patches            | M7        |
 | Advanced space environments         | Star field, nebula, dust at target frame time        | M8        |
 | Simple developer-facing API         | Sandbox scene built only through the public API      | M9        |
+| Toon / cel-shaded art direction     | Cel-shaded ship, planet, and nebula scene renders through the public API in a toon style | M9.5 |
 
 ## M1 – Present a Frame
 
@@ -859,11 +860,43 @@ the respective milestone residuals, not new milestones.
 | 9.3 ✅ | Backend renderer facade: an opaque renderer object for swapchain creation/recreation, frame recording, render callbacks, clear and depth handling, and presentation | T2+T5 | Done: `starforge::Renderer` owns context/device/surface/swapchain/frame sync behind `Impl`; public `renderClearedFrame(clearColor)` + `recreate()` + `extent()`; backend selects formats and owns fences/semaphores; record callbacks for drawn content deferred to 9.5 domain facades |
 | 9.4 ✅ | Math/world-space public API: expose vectors, matrices, projection helpers, `WorldPosition`, and camera-relative conversion without GLM or Vulkan types | T1 | Done: GLM-free `starforge::math` value types (`Vector`/`Matrix3`/`Matrix4`, `perspectiveVulkan`, `lookAt`) and `starforge::WorldPosition` + camera-relative helpers in `starforge/world.hpp`, bridged to the spatial backend via plain-data `world_bridge` (public and internal math share the `starforge::math` name, so no TU includes both); public convention/precision/large-object tests pass |
 | 9.5 ✅ | Working-slice domain facades: expose only interfaces exercised by an end-to-end public example—initially the starfield plus any planet/environment effects used by that example | T2/T3 | Done: `starforge::Starfield` (starfield + sun billboard) renders through `Renderer::renderFrame` record callbacks; `FrameContext` is opaque and viewport/scissor are backend-set; other environment effects stay internal until exercised by the public example |
-| 9.6 ✅ | Shader/resource encapsulation: the public API loads bundled shader artifacts and owns buffers, pipelines, images, and allocations; callers do not pass Vulkan formats, handles, or device addresses | T1+T2 | Done: `Starfield::create` loads bundled SPIR-V from the build shader directory (overridable via `CreateInfo`), owns pipeline/shader modules behind `Impl`, takes only scene parameters; missing/corrupt shaders surface as `std::expected` API errors (tested) |
+| 9.6 ✅ | Shader/resource encapsulation: the public API loads bundled shader artifacts and owns buffers, pipelines, images, and allocations; callers do not pass Vulkan formats, handles, or device addresses | T1+T2 | Done: `Starfield::create` resolves bundled SPIR-V at runtime (explicit dir → env var → executable-relative → build-tree fallback), owns pipeline/shader modules behind `Impl`, takes only scene parameters; missing/corrupt shaders surface as `std::expected` API errors (tested) |
 | 9.7 ✅ | Sandbox migration: rebuild the sandbox scene using only `include/starforge/` and the public CMake target; remove all internal include paths and direct backend calls | T5 | Done: sandbox rewritten against `starforge_public_api` only (compile line shows `-I include` alone); renders starfield via composable `record()`; zero validation errors after fixing pre-existing depth-barrier aspect and pipeline depth-format bugs |
 | 9.8 ✅ | Leakage and regression gates: a test that compiles an external consumer using only public headers, a scan that rejects `Vk`, `<vulkan/>`, VMA, SDL, and GLM from public headers, plus public API smoke tests | T1+T5 | Done: `public_leakage_scan`, `public_leakage_selftest` (poisoned header is rejected), and `public_consumer_compile` CTests; all 5 suites green |
-| 9.9 ⬜ | Developer documentation and stability policy: public API guide, ownership/threading/error rules, supported configurations, and what may change before 1.0 | Review | README and API docs link to the public example; documented behavior matches the shipped headers |
-| 9.10 ⬜ | M9 exit proof: build the public example from a clean checkout using only `include/starforge/`, run it and the full test suites, and confirm no Vulkan types are visible in the public interface | T1+T5 | Sandbox and test suites pass; the no-Vulkan leakage gate passes; README status reflects the shipped API |
+| 9.9 ✅ | Developer documentation and stability policy: public API guide, ownership/threading/error rules, supported configurations, and what may change before 1.0 | Review | Done: `docs/public-api.md` covers quick start, types, ownership, errors, threading, shader resolution, and pre-1.0 stability; README links it and the public example |
+| 9.10 ✅ | M9 exit proof: build the public example from a clean checkout using only `include/starforge/`, run it and the full test suites, and confirm no Vulkan types are visible in the public interface | T1+T5 | Done: clean-tree build in a fresh directory, sandbox runs with 0 validation errors, CTest 5/5 (including leakage gates), README M9 status marked complete |
+
+## M9.5 – Toon / Cel-Shaded Rendering
+
+- **Goal:** a cel-shaded (toon) art direction available through the
+  public API: quantized lighting bands, rim light, flat color ramps,
+  and dark graphic outlines around ships, stations, and planets.
+- **Proof:** a cel-shaded scene (ship, planet, nebula background)
+  rendered through `include/starforge/` only, with a golden image and
+  a frame-time budget. Target look: the cel-shaded space combat
+  showcase (banded shadows, glowing engine cores, outlined hulls over
+  nebula and planet backdrops).
+- **Depends on:** M9 (public API). Does not block on M17 mesh assets:
+  the proof scene uses procedural placeholder geometry; M17 glTF
+  meshes adopt the same toon material when they land.
+
+### API-shape constraints
+
+- Toon shading is a material/lighting concern, not a new backend:
+  pipelines, formats, fences, and allocations stay backend-owned;
+  callers pass scene-level parameters (band count, rim strength,
+  outline width, ramp colors) through public facades.
+- No Vulkan types in public headers (ADR-0009 holds); shader
+  artifacts are bundled and loaded by the API (M9.6 pattern).
+
+### Remaining work (TODO)
+
+| Step | Deliverable | Verified by | Done when |
+|------|-------------|-------------|-----------|
+| 9.5.1 ⬜ | Toon lighting model: quantized diffuse bands + specular + rim light shader, driven by public material parameters (shadow/highlight colors, band count, rim) | T3 | Headless/offscreen golden of a lit sphere shows 2–4 discrete bands with no smooth gradient; parameters change the look without recompiling app code |
+| 9.5.2 ⬜ | Outline pass: inverted-hull (or stencil) outlines in a dark graphic color, width in scene units | T3 | Golden shows a closed outline around the test mesh at multiple view angles; outline width is a public parameter |
+| 9.5.3 ⬜ | Public toon material facade: `starforge::ToonMaterial` (or equivalent) owning its pipeline/shaders, recording into `FrameContext` like `Starfield::record()` | T2 | Public-header consumer configures and renders the material with scene parameters only; shader failures are API errors |
+| 9.5.4 ⬜ | Cel-shaded proof scene + budgets: ship + planet + nebula in toon style through the public API, golden image, frame-time budget vs ADR-004 | T3+T5 | Golden committed; scene renders at the M8 frame-time budget on target hardware; zero validation errors |
 
 ## Game Layer (M10+)
 
@@ -938,6 +971,8 @@ Recommended tech stack for the game layer:
 ### M16 – UI and HUD
 
 - **Goal:** HUD, menus, maps, inventory screens, interaction prompts.
+  HUD styling follows the M9.5 toon art direction (outlined panels,
+  flat colors, graphic rim accents).
 - **Proof:** Full game loop playable with UI (no console commands needed).
 - **Tech:** Dear ImGui (dev tools) + custom or RmlUi (final UI).
 - **Depends on:** M10 (ECS), M15 (Gameplay).
@@ -948,6 +983,9 @@ Recommended tech stack for the game layer:
   asset management, hot-reloading.
 - **Proof:** Load and render a glTF mesh with textures at 60 fps.
 - **Depends on:** M9 (Public API).
+- **Note:** glTF materials include a toon shading option built on the
+  M9.5 toon lighting model and outline pass, so shipped ships and
+  stations match the cel-shaded art direction.
 
 ### M18 – Persistence
 

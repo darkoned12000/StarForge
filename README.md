@@ -89,7 +89,7 @@ cannot be disabled.
 
 ## Repository Layout
 
-    include/starforge/   Public, developer-facing headers (intentionally minimal until M9)
+    include/starforge/   Public, developer-facing headers (see docs/public-api.md)
     src/core/            Logging, version, foundational utilities
     src/math/            STARFORGE vector/matrix aliases and projection helpers
     src/spatial/         WorldPosition, camera-relative transforms, and render objects
@@ -120,6 +120,9 @@ of Vulkan implementation details.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
 [docs/ROADMAP.md](docs/ROADMAP.md).
+The developer-facing API, its ownership/error rules, and its pre-1.0
+stability policy are documented in [docs/public-api.md](docs/public-api.md);
+the sandbox in `apps/sandbox/` is the public API example.
 Accepted architectural decisions and unresolved decision points are indexed
 in [docs/decisions/](docs/decisions/README.md).
 
@@ -288,21 +291,18 @@ Current limitations recorded in the roadmap: HDR bloom post-processing, true
 volumetric raymarching, depth-texture refraction/occlusion, GPU particle buffers,
 GPU asteroid culling, and additional golden images remain follow-up polish.
 
-Milestone M9: Public API (planned, not yet implemented)
+Milestone M9: Public API (complete)
 
-The public headers under `include/starforge/` intentionally remain minimal while
-M9 is planned. The planned work is tracked in [docs/ROADMAP.md](docs/ROADMAP.md)
-as steps 9.1–9.10:
-
-- API inventory and Vulkan-free contract/ADR
-- Application/window and renderer/frame facades
-- Public math, world-coordinate, and working-slice scene APIs
-- Shader/resource encapsulation
-- Sandbox rebuild using only `include/starforge/`
-- Public API leakage gates, smoke tests, documentation, and stability policy
-- Clean-checkout M9 exit proof
-
-See [docs/ROADMAP.md](docs/ROADMAP.md) for details.
+The public API under `include/starforge/` is shipped: `Application`,
+`Renderer`, `Starfield`, GLM-free math, and `WorldPosition`, all
+backend-neutral per ADR-0009. The sandbox is rebuilt using only the
+public headers and target, and leakage gates keep Vulkan, VMA, SDL,
+and GLM out of the public interface. See
+[docs/public-api.md](docs/public-api.md) for the developer guide,
+ownership/error rules, and the pre-1.0 stability policy, and
+[docs/ROADMAP.md](docs/ROADMAP.md) for the M9 step history.
+The next rendering milestone, M9.5 (toon/cel-shaded art direction),
+is planned in the roadmap.
 
 ## License
 
