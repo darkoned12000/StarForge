@@ -45,6 +45,11 @@ option(STARFORGE_BUILD_TESTS
     ON
 )
 
+option(STARFORGE_USE_FLECS
+    "Fetch and build Flecs for the ECS scene layer (M10)"
+    ON
+)
+
 # --------------------------------------------------
 # Helper modules
 # --------------------------------------------------
@@ -60,6 +65,17 @@ include(StarforgeShaders)
 
 find_package(Vulkan REQUIRED)
 find_package(SDL3 CONFIG REQUIRED)
+
+# Flecs (ECS) — FetchContent, pinned like doctest.
+if(STARFORGE_USE_FLECS)
+    include(FetchContent)
+    FetchContent_Declare(flecs
+        GIT_REPOSITORY https://github.com/SanderMertens/flecs.git
+        GIT_TAG v4.2.0
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(flecs)
+endif()
 
 # GLM (math library) — FetchContent fallback if not installed system-wide.
 find_package(glm CONFIG QUIET)

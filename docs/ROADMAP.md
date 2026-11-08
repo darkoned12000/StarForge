@@ -919,8 +919,16 @@ Recommended tech stack for the game layer:
 - **Goal:** Entity-component system for game objects (ships, asteroids,
   stations, projectiles). Spatial indexing via WorldPosition cell hashes.
 - **Proof:** 10k entities with transforms updated and rendered at 60 fps.
-- **Tech:** Flecs or EnTT.
+- **Tech:** Flecs (chosen over EnTT for prefabs, queries, reflection,
+  and built-in JSON serialization for M18 persistence).
 - **Depends on:** M9 (Public API).
+
+| Step | Deliverable | Verified by | Done when |
+|------|-------------|-------------|-----------|
+| 10.1 ✅ | Flecs integration + ECS core: `starforge_ecs` library wrapping a Flecs world; `Transform` (WorldPosition + velocity), entity tags (Ship/Asteroid/Station/Projectile), precision-preserving movement system | T1 | Done: Flecs v4.2.0 via FetchContent; `starforge::ecs::Ecs` with fixed-step double-precision movement; tests prove interstellar-range precision and tag queries |
+| 10.2 ✅ | Spatial index: per-frame cell-hash index over ECS transforms, lookup by cell and neighborhood | T1 | Done: `SpatialIndex` buckets by `WorldPosition::cellHash()`; tests prove exact cell lookup, 26-neighborhood query, and tracking across cell boundaries |
+| 10.3 ⬜ | ECS → GPU instance stream: transforms collected into the instanced draw path (M5 infrastructure) | T2 | ECS-driven instances render in a headless GPU test |
+| 10.4 ⬜ | M10 exit proof: 10k entities updated + rendered at 60 fps (frame time under the ADR-004 interval), sandbox scene integration | T2+T5 | Benchmark scene with 10k ECS entities meets the frame budget; zero validation errors |
 
 ### M11 – Physics and Collision
 
