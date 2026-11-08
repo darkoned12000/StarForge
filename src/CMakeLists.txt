@@ -22,6 +22,7 @@ add_subdirectory(gpu_resources)
 add_subdirectory(environment)
 add_subdirectory(ecs)
 add_subdirectory(physics)
+add_subdirectory(audio)
 add_subdirectory(public_api)
 
 # starforge_vulkan_core is a dependency of starforge_vulkan, no need to
@@ -44,6 +45,7 @@ target_link_libraries(starforge
         starforge_environment
         starforge_ecs
         starforge_physics
+        starforge_audio
         starforge_public_api
 )
 

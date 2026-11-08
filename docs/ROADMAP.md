@@ -973,6 +973,33 @@ Recommended tech stack for the game layer:
   flyby.
 - **Tech:** miniaudio.
 - **Depends on:** M9 (Public API).
+- **Key architectural constraints:**
+  - **Headless-capable device:** the audio layer works without audio
+    hardware via `ma_backend_null` (null backend). All tests run on
+    the null backend; the sandbox/gemes use the OS default backend.
+  - **Camera-relative spatialization:** emitter/listener positions
+    are camera-relative float32 (same single-cast rule as rendering
+    and physics). miniaudio never sees interstellar-range coordinates
+    (`WorldPosition` → `toCameraRelative` → float32).
+  - **No Flecs mutation on the audio thread:** miniaudio runs its own
+    mixing thread. Triggers flow one-way via a deferred, thread-safe
+    queue flushed on the main thread (same pattern as M11's
+    `ContactQueue`). TLs RNG pitch variation is the only
+    non-deterministic runtime use (M5.5 design notes).
+  - **No miniaudio types in the public API:** `include/starforge/`
+    stays miniaudio-free per ADR-0009 (extended in 12.5); the internal
+    layer exposes `ma_*` types like M11 exposes Jolt types.
+  - **Asset loading deferred to M17:** M12 proves playback with
+    procedurally generated tones; file streaming, hot-reload, and
+    glTF audio belong to M17 (Asset Pipeline).
+
+| Step | Deliverable | Verified by | Done when |
+|------|-------------|-------------|-----------|
+| 12.1 ✅ | miniaudio integration + core context: FetchContent miniaudio (pinned 0.11.26), `STARFORGE_USE_MINIAUDIO` option, `src/audio/` → `starforge_audio` library wrapping `ma_context`/`ma_engine`; RAII `AudioContext` (move-only, `std::expected` factory, master gain); `ma_backend_null` path for headless CI; ADR-0010 | T1 | Done: miniaudio v0.11.26 via FetchContent; `starforge::audio::AudioContext` creates on the null backend with no audio hardware, rejects invalid config as expected errors, destroys cleanly; tests prove move-only RAII and master-volume clamping |
+| 12.2 ✅ | 2D core playback + buses: `SoundBank` (via `SoundBank::create` factory, per the error-handling convention) owning decoded `ma_sound` voices from in-memory bytes (WAV/FLAC/MP3 decoders) with play/stop/loop/volume/pitch; per-bus `ma_sound_group` routing (Master/Music/SFX/UI/Voice) with independent bus gains; retained encoded bytes per sound (decoders read lazily, so caller buffers must not be the lifetime source); one-shot replay rewinds at EOF; UI/Music are non-spatial, SFX/Voice spatial; pure-CPU procedural tone generator (`generateToneWav`) for fixtures — no binary assets committed | T1 | Done: `SoundBank::create` returns expected errors (no zombie banks); `loadFromMemory` decodes WAV, retains bytes (UAF regression tested via source-buffer destruction), rejects malformed/empty data; play/stop/loop/volume/pitch and EOF-rewind replay verified on the null backend; bus gains independent, Master routes to engine gain; UI/Music spatialization disabled (tested); tone generator produces canonical WAV with verified peak and header |
+| 12.3 ⬜ | 3D spatialization: pure-CPU attenuation/pan/Doppler reference math (T1 property tests), then miniaudio listener/emitter (attenuation nodes); listener pose and emitter transforms derived via `toCameraRelative`; Doppler from radial velocity vs speed of sound | T1 | Attenuation monotone with distance and Doppler pitch rise/fall verified (M12 proof, CPU half); large-world-position emitters give sane spatial params |
+| 12.4 ⬜ | ECS bridge + threading: `AudioEmitter`/`AudioListener` components, per-frame sync system (ECS `Transform`/`Velocity` → listener/emitter), event triggers from `CollisionEvent` (impact thump) and ship systems; deferred thread-safe trigger queue (audio thread never mutates Flecs) | T1 | Ships/asteroids emit positioned sounds; collisions trigger sound; ThreadSanitizer clean |
+| 12.5 ⬜ | Public facade + M12 exit proof: `include/starforge/audio.hpp` move-only facade (no miniaudio types leak), extend `public_leakage_scan` to reject `ma_` types, sandbox flyby scene, `docs/public-api.md` + README status | T1+T5 | Flyby heard in sandbox with distance attenuation and Doppler; leakage gates pass |
 
 ### M13 – Procedural Generation Layer
 

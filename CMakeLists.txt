@@ -55,6 +55,11 @@ option(STARFORGE_USE_JOLT
     ON
 )
 
+option(STARFORGE_USE_MINIAUDIO
+    "Fetch and build miniaudio for the audio layer (M12)"
+    ON
+)
+
 # --------------------------------------------------
 # Helper modules
 # --------------------------------------------------
@@ -104,6 +109,22 @@ if(STARFORGE_USE_JOLT)
         SOURCE_SUBDIR Build
     )
     FetchContent_MakeAvailable(JoltPhysics)
+endif()
+
+# miniaudio (audio) — FetchContent, pinned like Flecs/Jolt. The upstream
+# CMakeLists provides a `miniaudio` target; examples/tests/tools stay off.
+if(STARFORGE_USE_MINIAUDIO)
+    include(FetchContent)
+    set(MINIAUDIO_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(MINIAUDIO_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(MINIAUDIO_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+    set(MINIAUDIO_INSTALL OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(miniaudio
+        GIT_REPOSITORY https://github.com/mackron/miniaudio.git
+        GIT_TAG 0.11.26
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(miniaudio)
 endif()
 
 # GLM (math library) — FetchContent fallback if not installed system-wide.
