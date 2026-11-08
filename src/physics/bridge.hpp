@@ -47,4 +47,11 @@ void syncEcsToPhysics(ecs::Ecs& world, PhysicsWorld& physics, const spatial::Wor
 // ECS Transforms (camera-relative -> WorldPosition).
 void syncPhysicsToEcs(ecs::Ecs& world, PhysicsWorld& physics, const spatial::WorldPosition& camera);
 
+// Removes the entity's Jolt body (if any) and its PhysicsBody component.
+void detachBody(ecs::Ecs& world, flecs::entity entity, PhysicsWorld& physics);
+
+// Registers an on_remove observer that destroys Jolt bodies when their
+// ECS entity is destroyed, preventing ghost bodies. Call once per world.
+void registerBodyCleanup(ecs::Ecs& world, PhysicsWorld& physics);
+
 } // namespace starforge::physics

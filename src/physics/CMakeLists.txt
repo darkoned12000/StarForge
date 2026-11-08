@@ -1,6 +1,8 @@
 # Physics layer (M11): Jolt wrapper on the starforge::jobs scheduler.
 
 add_library(starforge_physics STATIC
+    contact_listener.cpp
+    contact_queue.cpp
     job_system_adapter.cpp
     physics_world.cpp
     bridge.cpp

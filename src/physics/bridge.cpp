@@ -67,8 +67,9 @@ BodyHandle attachBody(ecs::Ecs& world, flecs::entity entity, PhysicsWorld& physi
 
     if (body.isValid())
     {
-        // Body user data -> Flecs entity mapping is installed by the
-        // contact-listener setup (M11.3).
+        // Map the Flecs entity into the body user data so contact
+        // callbacks can identify involved entities.
+        physics.system().GetBodyInterface().SetUserData(body.id, entity.id());
         entity.set<PhysicsBody>({body});
     }
     return body;
@@ -91,6 +92,24 @@ void syncEcsToPhysics(ecs::Ecs& world, PhysicsWorld& physics, const spatial::Wor
                                             static_cast<float>(velocity.linear.z)));
             }
         });
+}
+
+void detachBody(ecs::Ecs& world, flecs::entity entity, PhysicsWorld& physics)
+{
+    if (entity.has<PhysicsBody>())
+    {
+        physics.destroyBody(entity.get<PhysicsBody>().body);
+        entity.remove<PhysicsBody>();
+    }
+    (void)world;
+}
+
+void registerBodyCleanup(ecs::Ecs& world, PhysicsWorld& physics)
+{
+    world.world()
+        .observer<const PhysicsBody>()
+        .event(flecs::OnRemove)
+        .each([&physics](flecs::entity, const PhysicsBody& body) { physics.destroyBody(body.body); });
 }
 
 void syncPhysicsToEcs(ecs::Ecs& world, PhysicsWorld& physics, const spatial::WorldPosition& camera)

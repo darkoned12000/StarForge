@@ -140,3 +140,133 @@ TEST_CASE("Physics bridge: ECS entity falls, rests, and syncs back")
     CHECK(std::abs(bodyPos.GetX() - 3.0f) < 1.0e-3f);
     CHECK(std::abs(bodyPos.GetY() - 2.0f) < 1.0e-3f);
 }
+
+TEST_CASE("Physics bridge: collision emits ECS events via the deferred queue")
+{
+    jobs::initGlobalScheduler();
+    PhysicsWorld world(PhysicsWorld::Config{});
+    ecs::Ecs ecsWorld;
+
+    const auto camera = spatial::WorldPosition::fromMeters(0, 0, 0);
+    REQUIRE(camera.has_value());
+
+    const auto floor = world.createStaticBox(50.0f, 1.0f, 50.0f, 0.0f, -1.0f, 0.0f);
+    REQUIRE(floor.isValid());
+
+    auto lowerPos = spatial::WorldPosition::fromMeters(0, 0.6, 0);
+    REQUIRE(lowerPos.has_value());
+    const auto lower = ecsWorld.createAsteroid(*lowerPos, {0.0, 0.0, 0.0});
+    lower.set<Collider>({.shape = Collider::Shape::Sphere, .radius = 0.5f});
+    REQUIRE(attachBody(ecsWorld, lower, world, *camera).isValid());
+
+    auto upperPos = spatial::WorldPosition::fromMeters(0, 3, 0);
+    REQUIRE(upperPos.has_value());
+    const auto upper = ecsWorld.createAsteroid(*upperPos, {0.0, 0.0, 0.0});
+    upper.set<Collider>({.shape = Collider::Shape::Sphere, .radius = 0.5f});
+    REQUIRE(attachBody(ecsWorld, upper, world, *camera).isValid());
+
+    for (int step = 0; step < 240; ++step)
+    {
+        world.step(1.0f / 60.0f);
+    }
+    CHECK(world.contactQueue().size() >= 1);
+
+    world.flushContacts(ecsWorld, *camera);
+    CHECK(upper.has<ecs::CollisionEvent>());
+    CHECK(lower.has<ecs::CollisionEvent>());
+
+    const auto data = upper.get<ecs::CollisionData>();
+    REQUIRE(data.other.is_valid());
+    CHECK(data.other.is_alive());
+    CHECK(data.impulse >= 0.0f);
+
+    // Equal-and-opposite normals (Newton's third law).
+    const auto lowerData = lower.get<ecs::CollisionData>();
+    CHECK(std::abs(data.normal.x + lowerData.normal.x) < 1.0e-4f);
+    CHECK(std::abs(data.normal.y + lowerData.normal.y) < 1.0e-4f);
+    CHECK(std::abs(data.normal.z + lowerData.normal.z) < 1.0e-4f);
+
+    // Transient lifecycle: after separation, the next flush clears the
+    // tags instead of re-triggering damage systems.
+    for (int step = 0; step < 240; ++step)
+    {
+        world.step(1.0f / 60.0f);
+    }
+    // Teleport the upper sphere away so the contact breaks.
+    auto& upperTransform = upper.get_mut<ecs::Transform>();
+    auto farPos = spatial::WorldPosition::fromMeters(100, 100, 100);
+    REQUIRE(farPos.has_value());
+    upperTransform.position = *farPos;
+    upper.modified<ecs::Transform>();
+    syncEcsToPhysics(ecsWorld, world, *camera);
+    world.step(1.0f / 60.0f);
+    world.flushContacts(ecsWorld, *camera);
+    CHECK(!upper.has<ecs::CollisionEvent>());
+    CHECK(!lower.has<ecs::CollisionEvent>());
+}
+
+TEST_CASE("Physics: linear-cast CCD stops a fast body at a thin wall")
+{
+    jobs::initGlobalScheduler();
+    PhysicsWorld world(PhysicsWorld::Config{});
+
+    // Thin wall: 0.1 m thick, top at y = 5.
+    const auto wall = world.createStaticBox(10.0f, 5.05f, 0.05f, 0.0f, 0.0f, 0.0f);
+    REQUIRE(wall.isValid());
+
+    // Fast sphere flying along -Z at 2000 m/s toward the wall.
+    const auto bullet = world.createDynamicSphere(0.1f, 1.0f, 0.0f, 2.5f, 5.0f);
+    REQUIRE(bullet.isValid());
+    world.setMotionQualityLinearCast(bullet);
+    world.setLinearVelocity(bullet, {0.0f, 0.0f, -2000.0f});
+
+    for (int step = 0; step < 120; ++step)
+    {
+        world.step(1.0f / 60.0f);
+    }
+
+    const JPH::Vec3 position = world.getPosition(bullet);
+    // Without CCD the sphere would tunnel to z << 0; it must stop at the
+    // wall's near face (z = 0.05 + radius 0.1).
+    CHECK(position.GetZ() > 0.0f);
+    CHECK(position.GetZ() < 0.5f);
+}
+
+TEST_CASE("Physics: raycast hits the expected body and sensors report overlap")
+{
+    jobs::initGlobalScheduler();
+    PhysicsWorld world(PhysicsWorld::Config{});
+
+    const auto target = world.createDynamicSphere(1.0f, 1.0f, 0.0f, 0.0f, -10.0f);
+    REQUIRE(target.isValid());
+
+    const auto hit = world.castRay({0.0f, 0.0f, 5.0f}, {0.0f, 0.0f, -20.0f});
+    REQUIRE(hit.has_value());
+    CHECK(hit->body == target);
+    CHECK(hit->fraction > 0.0f);
+    CHECK(hit->fraction < 1.0f);
+
+    // A ray missing everything returns nothing.
+    CHECK(!world.castRay({50.0f, 50.0f, 5.0f}, {0.0f, 0.0f, -20.0f}).has_value());
+
+    // Sensor volume around an ECS entity: overlap must produce a
+    // contact event on the entity through the deferred queue.
+    ecs::Ecs ecsWorld;
+    auto entityPos = spatial::WorldPosition::fromMeters(0, 0, -10);
+    REQUIRE(entityPos.has_value());
+    const auto entity = ecsWorld.createAsteroid(*entityPos, {0.0, 0.0, 0.0});
+    entity.set<Collider>({.shape = Collider::Shape::Sphere, .radius = 0.5f});
+    const auto camera = spatial::WorldPosition::fromMeters(0, 0, 0);
+    REQUIRE(camera.has_value());
+    REQUIRE(attachBody(ecsWorld, entity, world, *camera).isValid());
+
+    const auto sensor = world.createSensorBox(2.0f, 2.0f, 2.0f, 0.0f, 0.0f, -10.0f);
+    REQUIRE(sensor.isValid());
+    for (int step = 0; step < 10; ++step)
+    {
+        world.step(1.0f / 60.0f);
+    }
+    CHECK(world.contactQueue().size() >= 1);
+    world.flushContacts(ecsWorld, *camera);
+    CHECK(entity.has<ecs::CollisionEvent>());
+}

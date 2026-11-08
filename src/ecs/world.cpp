@@ -11,6 +11,8 @@ Ecs::Ecs()
 {
     world_.component<Transform>("Transform");
     world_.component<Velocity>("Velocity");
+    world_.component<CollisionEvent>("CollisionEvent");
+    world_.component<CollisionData>("CollisionData");
     world_.component<ShipTag>("ShipTag");
     world_.component<AsteroidTag>("AsteroidTag");
     world_.component<StationTag>("StationTag");
@@ -81,7 +83,9 @@ void Ecs::step(float dt)
             const glm::quat delta = glm::angleAxis(rate * dt, axis);
             glm::quat orientation{transform.orientation.w, transform.orientation.x, transform.orientation.y,
                                   transform.orientation.z};
-            orientation = glm::normalize(delta * orientation);
+            // Local-space integration: angular velocity is authored in
+            // body space (pitch/yaw/roll relative to the cockpit).
+            orientation = glm::normalize(orientation * delta);
             transform.orientation = math::Vec4f{orientation.x, orientation.y, orientation.z, orientation.w};
         }
     });
