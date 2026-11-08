@@ -84,7 +84,9 @@ GraphicsPipeline::create(const GraphicsPipelineConfig& config)
     rasterizer.rasterizerDiscardEnable = VK_FALSE;
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth = 1.0f;
-    rasterizer.cullMode = config.backfaceCulling ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_NONE;
+    rasterizer.cullMode = config.cullFrontFace ? VK_CULL_MODE_FRONT_BIT
+                               : config.backfaceCulling ? VK_CULL_MODE_BACK_BIT
+                                                        : VK_CULL_MODE_NONE;
     rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 
     VkPipelineMultisampleStateCreateInfo multisampling{};

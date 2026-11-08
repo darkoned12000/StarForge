@@ -79,6 +79,7 @@ add_executable(starforge_gpu_tests
     test_mesh_render.cpp
     test_bda_simple.cpp
     test_cube_render.cpp
+    test_toon_render.cpp
     test_gpu_cull_parity.cpp
     test_gpu_driven_benchmark.cpp
     test_depth_ordering.cpp

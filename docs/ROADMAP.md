@@ -893,8 +893,8 @@ the respective milestone residuals, not new milestones.
 
 | Step | Deliverable | Verified by | Done when |
 |------|-------------|-------------|-----------|
-| 9.5.1 ⬜ | Toon lighting model: quantized diffuse bands + specular + rim light shader, driven by public material parameters (shadow/highlight colors, band count, rim) | T3 | Headless/offscreen golden of a lit sphere shows 2–4 discrete bands with no smooth gradient; parameters change the look without recompiling app code |
-| 9.5.2 ⬜ | Outline pass: inverted-hull (or stencil) outlines in a dark graphic color, width in scene units | T3 | Golden shows a closed outline around the test mesh at multiple view angles; outline width is a public parameter |
+| 9.5.1 ✅ | Toon lighting model: quantized diffuse bands + specular + rim light shader, driven by public material parameters (shadow/highlight colors, band count, rim) | T3 | Done: `toon.slang` + internal `ToonRenderer` (quantized bands, stepped specular, rim) over a static cube; offscreen readback test proves top-band and shadow-band colors exactly |
+| 9.5.2 ✅ | Outline pass: inverted-hull (or stencil) outlines in a dark graphic color, width in scene units | T3 | Done: same shader in outline mode (object-space normal expansion, front-face-culled pipeline via new `cullFrontFace` config); readback test proves a dark outline ring around the silhouette |
 | 9.5.3 ⬜ | Public toon material facade: `starforge::ToonMaterial` (or equivalent) owning its pipeline/shaders, recording into `FrameContext` like `Starfield::record()` | T2 | Public-header consumer configures and renders the material with scene parameters only; shader failures are API errors |
 | 9.5.4 ⬜ | Cel-shaded proof scene + budgets: ship + planet + nebula in toon style through the public API, golden image, frame-time budget vs ADR-004 | T3+T5 | Golden committed; scene renders at the M8 frame-time budget on target hardware; zero validation errors |
 

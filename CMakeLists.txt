@@ -158,6 +158,20 @@ starforge_add_shader(
     OUTPUT_NAME test_depth.frag
 )
 
+starforge_add_shader(
+    SOURCE "${PROJECT_SOURCE_DIR}/shaders/graphics/toon.slang"
+    STAGE  vertex
+    ENTRY  vertexMain
+    OUTPUT_NAME toon.vert
+)
+
+starforge_add_shader(
+    SOURCE "${PROJECT_SOURCE_DIR}/shaders/graphics/toon.slang"
+    STAGE  fragment
+    ENTRY  fragmentMain
+    OUTPUT_NAME toon.frag
+)
+
 # Environment shaders for space effects
 
 starforge_add_shader(

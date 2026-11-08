@@ -24,6 +24,9 @@ struct GraphicsPipelineConfig
     bool depthWrite = true;
     VkCompareOp depthCompare = VK_COMPARE_OP_GREATER;
     bool backfaceCulling = true;
+    // Cull front faces instead (inverted-hull outlines). Takes precedence
+    // over backfaceCulling when set.
+    bool cullFrontFace = false;
     // Additive/translucent blending for overlays (default: off, opaque).
     bool blendEnable = false;
     VkBlendFactor blendSrcFactor = VK_BLEND_FACTOR_ONE;

@@ -16,6 +16,7 @@ add_library(starforge_environment STATIC
     storm_effect.cpp
     shield_effect.cpp
     asteroid_field.cpp
+    toon_renderer.cpp
 )
 
 target_include_directories(starforge_environment PUBLIC
