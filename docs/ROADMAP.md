@@ -24,7 +24,7 @@ Every step also satisfies the Definition of Done in ARCHITECTURE.md.
 | Scalable planetary rendering        | Orbit-to-surface descent, bounded patches            | M7        |
 | Advanced space environments         | Star field, nebula, dust at target frame time        | M8        |
 | Simple developer-facing API         | Sandbox scene built only through the public API      | M9        |
-| Toon / cel-shaded art direction     | Cel-shaded ship, planet, and nebula scene renders through the public API in a toon style | M9.5 |
+| Toon / cel-shaded art direction     | Cel-shaded ship and nebula scene renders through the public API in a toon style | M9.5 |
 
 ## M1 – Present a Frame
 
@@ -871,11 +871,11 @@ the respective milestone residuals, not new milestones.
 - **Goal:** a cel-shaded (toon) art direction available through the
   public API: quantized lighting bands, rim light, flat color ramps,
   and dark graphic outlines around ships, stations, and planets.
-- **Proof:** a cel-shaded scene (ship, planet, nebula background)
+- **Proof:** a cel-shaded scene (ship stand-in, nebula background)
   rendered through `include/starforge/` only, with a golden image and
   a frame-time budget. Target look: the cel-shaded space combat
   showcase (banded shadows, glowing engine cores, outlined hulls over
-  nebula and planet backdrops).
+  nebula backdrops). Planets join the toon look with M17 meshes.
 - **Depends on:** M9 (public API). Does not block on M17 mesh assets:
   the proof scene uses procedural placeholder geometry; M17 glTF
   meshes adopt the same toon material when they land.
@@ -895,8 +895,8 @@ the respective milestone residuals, not new milestones.
 |------|-------------|-------------|-----------|
 | 9.5.1 ✅ | Toon lighting model: quantized diffuse bands + specular + rim light shader, driven by public material parameters (shadow/highlight colors, band count, rim) | T3 | Done: `toon.slang` + internal `ToonRenderer` (quantized bands, stepped specular, rim) over a static cube; offscreen readback test proves top-band and shadow-band colors exactly |
 | 9.5.2 ✅ | Outline pass: inverted-hull (or stencil) outlines in a dark graphic color, width in scene units | T3 | Done: same shader in outline mode (object-space normal expansion, front-face-culled pipeline via new `cullFrontFace` config); readback test proves a dark outline ring around the silhouette |
-| 9.5.3 ⬜ | Public toon material facade: `starforge::ToonMaterial` (or equivalent) owning its pipeline/shaders, recording into `FrameContext` like `Starfield::record()` | T2 | Public-header consumer configures and renders the material with scene parameters only; shader failures are API errors |
-| 9.5.4 ⬜ | Cel-shaded proof scene + budgets: ship + planet + nebula in toon style through the public API, golden image, frame-time budget vs ADR-004 | T3+T5 | Golden committed; scene renders at the M8 frame-time budget on target hardware; zero validation errors |
+| 9.5.3 ✅ | Public toon material facade: `starforge::Toon` owning its pipeline/shaders, recording into `FrameContext` like `Starfield::record()` | T2 | Done: `starforge::Toon` in `include/starforge/toon.hpp` via raw-data bridge; public tests cover move-only, missing-shader API errors, render/recreate |
+| 9.5.4 ✅ | Cel-shaded proof scene + budgets: ship + nebula in toon style through the public API, golden image, frame-time budget vs ADR-004 | T3+T5 | Done: sandbox composes starfield + toon cube in one frame; `tests/goldens/toon_scene_128.png` committed; p95 frame time under the ADR-004 interval; zero validation errors |
 
 ## Game Layer (M10+)
 

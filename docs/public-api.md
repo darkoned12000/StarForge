@@ -79,6 +79,10 @@ convenience wrapper around the same path.
   context (exposes only `extent()`).
 - `starforge::Starfield` — procedural starfield and sun billboard.
   Scene-level parameters only; shader artifacts are bundled.
+- `starforge::Toon` — cel-shaded (toon) mesh renderer: quantized
+  diffuse bands, stepped specular, rim light, and an inverted-hull
+  outline pass. `record()`/`render()`/`recreate()` mirror `Starfield`;
+  outline thickness is specified in screen pixels.
 - `starforge::math` — GLM-free `Vec2/3/4f/d`, `Mat3f/d`, `Mat4f/d`,
   arithmetic, `dot`/`cross`/`length`/`normalize`, `perspectiveVulkan`,
   `perspectiveVulkanReverseZ`, `lookAt`, `inverse`, `toFloat32`.

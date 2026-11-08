@@ -44,6 +44,7 @@ add_executable(starforge_tests
     test_public_math_world.cpp
     test_public_renderer.cpp
     test_public_starfield.cpp
+    test_public_toon.cpp
 )
 
 target_link_libraries(starforge_tests
@@ -89,6 +90,7 @@ add_executable(starforge_gpu_tests
     test_asteroid_render.cpp
     test_environment_effects.cpp
     test_golden_starfield.cpp
+    test_golden_toon.cpp
     test_atmosphere_render.cpp
     test_vulkan_retirement.cpp
     test_naive_control.cpp

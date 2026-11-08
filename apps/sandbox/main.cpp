@@ -6,6 +6,7 @@
 #include "starforge/math.hpp"
 #include "starforge/renderer.hpp"
 #include "starforge/starfield.hpp"
+#include "starforge/toon.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -61,6 +62,14 @@ int main()
         return EXIT_FAILURE;
     }
 
+    // Cel-shaded ship stand-in (static cube until M17 mesh assets land).
+    auto toon = starforge::Toon::create(*renderer, {});
+    if (!toon)
+    {
+        logError(toon.error().c_str());
+        return EXIT_FAILURE;
+    }
+
     logInfo("Close the window to exit");
 
     bool needRecreate = false;
@@ -99,6 +108,12 @@ int main()
                     logError(starfieldRecreated.error().c_str());
                     return EXIT_FAILURE;
                 }
+                auto toonRecreated = toon->recreate(*renderer);
+                if (!toonRecreated)
+                {
+                    logError(toonRecreated.error().c_str());
+                    return EXIT_FAILURE;
+                }
             }
             needRecreate = false;
         }
@@ -122,11 +137,28 @@ int main()
         params.radius = 8.0f;
         params.intensity = 1.0f;
 
-        // Composable recording: the starfield records into the frame owned
-        // by the renderer; additional facades can record into the same
-        // frame before the single presentation.
+        // Cel-shaded ship stand-in in the foreground.
+        starforge::Toon::Context toonContext;
+        toonContext.viewProj = context.viewProj;
+        toonContext.modelView = starforge::math::lookAt(
+            starforge::math::Vec3f{0.0f, 0.0f, 5.0f}, starforge::math::Vec3f{0.0f, 0.0f, 0.0f},
+            starforge::math::kUpY);
+        toonContext.lightDirectionView = starforge::math::normalize(
+            starforge::math::Vec3f{0.4f, 0.5f, 0.75f});
+
+        starforge::Toon::Params toonParams;
+        toonParams.baseColor = {0.55f, 0.6f, 0.7f, 1.0f};
+        toonParams.shadowColor = {0.15f, 0.15f, 0.35f, 1.0f};
+        toonParams.bandCount = 3.0f;
+        toonParams.rimStrength = 0.6f;
+        toonParams.outlineWidth = 2.0f;
+
+        // Composable recording: starfield background, then the toon
+        // ship, both into the frame owned by the renderer before the
+        // single presentation.
         auto frame = renderer->renderFrame(context.clearColor, [&](starforge::FrameContext& frameContext) {
             starfield->record(frameContext, context, params);
+            toon->record(frameContext, toonContext, toonParams);
         });
         if (!frame)
         {

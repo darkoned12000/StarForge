@@ -5,6 +5,7 @@
 #include "starforge/math.hpp"
 #include "starforge/renderer.hpp"
 #include "starforge/starfield.hpp"
+#include "starforge/toon.hpp"
 #include "starforge/world.hpp"
 
 #include <type_traits>
@@ -12,8 +13,10 @@
 static_assert(std::is_move_constructible_v<starforge::Application>);
 static_assert(std::is_move_constructible_v<starforge::Renderer>);
 static_assert(std::is_move_constructible_v<starforge::Starfield>);
+static_assert(std::is_move_constructible_v<starforge::Toon>);
 static_assert(!std::is_copy_constructible_v<starforge::Renderer>);
 static_assert(!std::is_copy_constructible_v<starforge::Starfield>);
+static_assert(!std::is_copy_constructible_v<starforge::Toon>);
 
 namespace
 {
