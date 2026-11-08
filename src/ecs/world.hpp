@@ -20,7 +20,9 @@ public:
     ~Ecs() = default;
 
     Ecs(Ecs&& other) noexcept;
-    Ecs& operator=(Ecs&& other) noexcept;
+    // Move assignment is deleted: assigning over a live Flecs world with
+    // registered queries aborts inside Flecs. Move-construct instead.
+    Ecs& operator=(Ecs&& other) noexcept = delete;
     Ecs(const Ecs&) = delete;
     Ecs& operator=(const Ecs&) = delete;
 
@@ -35,11 +37,18 @@ public:
     [[nodiscard]] flecs::world& world() noexcept { return world_; }
     [[nodiscard]] const flecs::world& world() const noexcept { return world_; }
 
+    // Cached asteroid collection query (built once, reused every frame).
+    [[nodiscard]] const flecs::query<const Transform, const AsteroidTag>& asteroidQuery() const noexcept
+    {
+        return asteroidQuery_;
+    }
+
     [[nodiscard]] std::uint64_t entityCount() const;
 
 private:
     flecs::world world_;
     flecs::query<Transform, const Velocity> movementQuery_;
+    flecs::query<const Transform, const AsteroidTag> asteroidQuery_;
 };
 
 } // namespace starforge::ecs

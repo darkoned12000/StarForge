@@ -1,6 +1,7 @@
 // ECS scene layer tests (M10.1/10.2).
 #include <doctest/doctest.h>
 
+#include "ecs/instance_stream.hpp"
 #include "ecs/spatial_index.hpp"
 #include "ecs/world.hpp"
 
@@ -8,6 +9,7 @@
 
 using namespace starforge::ecs;
 using namespace starforge::spatial;
+namespace environment = starforge::environment;
 
 namespace
 {
@@ -69,6 +71,24 @@ TEST_CASE("ECS: movement preserves precision at interstellar range")
     CHECK(near(entity.get<Transform>().position.toMeters().x, 1.0e12 + 1000.0, 1.0e-3));
 }
 
+TEST_CASE("ECS: world moves without losing entities")
+{
+    Ecs world;
+    const auto entity = world.createShip(at(1, 2, 3), {10.0, 0.0, 0.0});
+    (void)entity; // Handles are world-local; re-fetched after moving.
+
+    Ecs moved(std::move(world));
+    CHECK(moved.entityCount() == 1);
+    moved.step(1.0f);
+    // Entity handles are world-local; re-fetch the transform after moving.
+    const auto movedEntity = moved.world().query<const Transform>().first();
+    REQUIRE(movedEntity.is_valid());
+    CHECK(near(movedEntity.get<Transform>().position.toMeters().x, 11.0, 1.0e-3));
+
+    Ecs assigned(std::move(moved));
+    CHECK(assigned.entityCount() == 1);
+}
+
 TEST_CASE("ECS: orientation integrates under angular velocity")
 {
     Ecs world;
@@ -126,4 +146,33 @@ TEST_CASE("ECS: spatial index buckets by exact cell and tracks movement")
 
     (void)nearOrigin;
     (void)alsoNearOrigin;
+}
+
+TEST_CASE("ECS: instance collection is culled by the spatial index")
+{
+    Ecs world;
+    const auto first = world.createAsteroid(at(10, 10, 10));
+    const auto second = world.createAsteroid(at(20, 20, 20));
+    // Far outside the camera neighborhood (cell size ~1e6 m).
+    const auto distant = world.createAsteroid(at(5.0e7, 0, 0));
+    const auto ship = world.createShip(at(15, 15, 15)); // Not an asteroid: never collected.
+    (void)first;
+    (void)second;
+    (void)distant;
+    (void)ship;
+
+    SpatialIndex index(world);
+    index.rebuild();
+
+    const auto camera = at(0, 0, 0);
+    std::vector<environment::AsteroidInstance> culled;
+    const std::uint32_t culledCount = collectAsteroidInstances(world, index, camera, culled);
+    CHECK(culledCount == 2);
+    REQUIRE(culled.size() == 2);
+    const float firstX = culled[0].posScale.x;
+    CHECK((near(firstX, 10.0f, 1.0e-3f) || near(firstX, 20.0f, 1.0e-3f)));
+
+    std::vector<environment::AsteroidInstance> all;
+    const std::uint32_t allCount = collectAsteroidInstances(world, camera, all);
+    CHECK(allCount == 3);
 }

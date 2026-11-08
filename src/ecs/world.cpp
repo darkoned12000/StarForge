@@ -18,20 +18,13 @@ Ecs::Ecs()
 
     // Cached once: only entities with both Transform and Velocity move.
     movementQuery_ = world_.query<Transform, const Velocity>();
+    asteroidQuery_ = world_.query<const Transform, const AsteroidTag>();
 }
 
-Ecs::Ecs(Ecs&& other) noexcept : world_(std::move(other.world_)), movementQuery_(std::move(other.movementQuery_))
+Ecs::Ecs(Ecs&& other) noexcept
+    : world_(std::move(other.world_)), movementQuery_(std::move(other.movementQuery_)),
+      asteroidQuery_(std::move(other.asteroidQuery_))
 {
-}
-
-Ecs& Ecs::operator=(Ecs&& other) noexcept
-{
-    if (this != &other)
-    {
-        world_ = std::move(other.world_);
-        movementQuery_ = std::move(other.movementQuery_);
-    }
-    return *this;
 }
 
 flecs::entity Ecs::createShip(const spatial::WorldPosition& pos, const math::Vec3d& vel)
@@ -96,7 +89,7 @@ void Ecs::step(float dt)
 
 std::uint64_t Ecs::entityCount() const
 {
-    return world_.count<Transform>();
+    return static_cast<std::uint64_t>(world_.count<Transform>());
 }
 
 } // namespace starforge::ecs

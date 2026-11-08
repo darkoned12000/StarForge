@@ -3,6 +3,7 @@
 add_library(starforge_ecs STATIC
     world.cpp
     spatial_index.cpp
+    instance_stream.cpp
 )
 
 target_include_directories(starforge_ecs
@@ -22,10 +23,12 @@ elseif(TARGET flecs)
     )
 endif()
 
+# starforge_environment is PUBLIC: instance_stream.hpp exposes its types.
 target_link_libraries(starforge_ecs
     PUBLIC
         starforge_math
         starforge_spatial
+        starforge_environment
 )
 
 if(NOT TARGET flecs::flecs_static AND NOT TARGET flecs)

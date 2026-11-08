@@ -6,12 +6,13 @@
 namespace starforge::ecs
 {
 
-// Spatial position and orientation in world space. Orientation is a unit
-// quaternion (xyzw).
+// Spatial position, orientation, and uniform scale in world space.
+// Orientation is a unit quaternion (xyzw).
 struct Transform
 {
     spatial::WorldPosition position;
     math::Vec4f orientation{0.0f, 0.0f, 0.0f, 1.0f};
+    float scale = 1.0f;
 };
 
 // Linear and angular kinematics, attached only to moving entities.

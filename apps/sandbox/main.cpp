@@ -133,22 +133,29 @@ int main()
         context.time = time;
 
         starforge::Starfield::Params params;
-        params.worldPosition = {0.0f, 0.0f, -50.0f};
-        params.radius = 8.0f;
+        // Sun offset from the view axis so it is not occluded by the ship.
+        params.worldPosition = {18.0f, 8.0f, -50.0f};
+        params.radius = 10.0f;
         params.intensity = 1.0f;
 
-        // Cel-shaded ship stand-in in the foreground.
-        starforge::Toon::Context toonContext;
-        toonContext.viewProj = context.viewProj;
-        toonContext.modelView = starforge::math::lookAt(
+        // Cel-shaded ship stand-in, offset left of center.
+        const auto view = starforge::math::lookAt(
             starforge::math::Vec3f{0.0f, 0.0f, 5.0f}, starforge::math::Vec3f{0.0f, 0.0f, 0.0f},
             starforge::math::kUpY);
+        starforge::math::Mat4f shipModel(1.0f);
+        shipModel.columns[3][0] = -2.5f;
+        shipModel.columns[3][1] = 0.3f;
+
+        starforge::Toon::Context toonContext;
+        toonContext.viewProj =
+            starforge::math::perspectiveVulkan(kPi / 3.0f, aspect, 0.1f, 1000.0f) * view * shipModel;
+        toonContext.modelView = view * shipModel;
         toonContext.lightDirectionView = starforge::math::normalize(
             starforge::math::Vec3f{0.4f, 0.5f, 0.75f});
 
         starforge::Toon::Params toonParams;
-        toonParams.baseColor = {0.55f, 0.6f, 0.7f, 1.0f};
-        toonParams.shadowColor = {0.15f, 0.15f, 0.35f, 1.0f};
+        toonParams.baseColor = {0.85f, 0.25f, 0.2f, 1.0f};
+        toonParams.shadowColor = {0.2f, 0.05f, 0.3f, 1.0f};
         toonParams.bandCount = 3.0f;
         toonParams.rimStrength = 0.6f;
         toonParams.outlineWidth = 2.0f;

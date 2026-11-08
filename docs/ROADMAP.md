@@ -925,10 +925,10 @@ Recommended tech stack for the game layer:
 
 | Step | Deliverable | Verified by | Done when |
 |------|-------------|-------------|-----------|
-| 10.1 ✅ | Flecs integration + ECS core: `starforge_ecs` library wrapping a Flecs world; `Transform` (WorldPosition + velocity), entity tags (Ship/Asteroid/Station/Projectile), precision-preserving movement system | T1 | Done: Flecs v4.2.0 via FetchContent; `starforge::ecs::Ecs` with fixed-step double-precision movement; tests prove interstellar-range precision and tag queries |
+| 10.1 ✅ | Flecs integration + ECS core: `starforge_ecs` library wrapping a Flecs world; `Transform` (WorldPosition + orientation + scale), separate `Velocity` component (movers only), entity tags (Ship/Asteroid/Station/Projectile), precision-preserving movement system | T1 | Done: Flecs v4.2.0 via FetchContent; `starforge::ecs::Ecs` with fixed-step double-precision movement and quaternion orientation integration; move-constructible (move assignment deleted: Flecs aborts on it); tests prove interstellar-range precision, orientation, and tag queries |
 | 10.2 ✅ | Spatial index: per-frame cell-hash index over ECS transforms, lookup by cell and neighborhood | T1 | Done: `SpatialIndex` buckets by `WorldPosition::cellHash()`; tests prove exact cell lookup, 26-neighborhood query, and tracking across cell boundaries |
-| 10.3 ⬜ | ECS → GPU instance stream: transforms collected into the instanced draw path (M5 infrastructure) | T2 | ECS-driven instances render in a headless GPU test |
-| 10.4 ⬜ | M10 exit proof: 10k entities updated + rendered at 60 fps (frame time under the ADR-004 interval), sandbox scene integration | T2+T5 | Benchmark scene with 10k ECS entities meets the frame budget; zero validation errors |
+| 10.3 ✅ | ECS → GPU instance stream: transforms collected into the instanced draw path (M5 infrastructure) | T2 | Done: `collectAsteroidInstances` converts ECS transforms (camera-relative, double precision) into the instanced asteroid format; headless GPU test renders ECS-driven instances |
+| 10.4 ✅ | M10 exit proof: 10k entities updated + rendered at 60 fps (frame time under the ADR-004 interval), sandbox scene integration | T2+T5 | Done: 10k-entity step+collect+upload+render loop at p95 under the ADR-004 interval, >25% lit pixels, zero validation errors; sandbox remains green |
 
 ### M11 – Physics and Collision
 
