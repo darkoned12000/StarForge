@@ -50,6 +50,7 @@ std::expected<DustFieldRenderer, std::string> DustFieldRenderer::create(const Cr
     auto effect = internal::FullscreenEffect::create({
         .device = info.device,
         .colorFormat = info.colorFormat,
+        .depthFormat = info.depthFormat,
         .shaderDirectory = info.shaderDirectory,
         .shaderBaseName = "dust",
         .pushConstantSize = sizeof(PushConstants),

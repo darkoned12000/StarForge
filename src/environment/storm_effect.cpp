@@ -48,6 +48,7 @@ std::expected<StormEffect, std::string> StormEffect::create(const CreateInfo& in
     auto inner = internal::FullscreenEffect::create({
         .device = info.device,
         .colorFormat = info.colorFormat,
+        .depthFormat = info.depthFormat,
         .shaderDirectory = info.shaderDirectory,
         .shaderBaseName = "storm",
         .pushConstantSize = sizeof(PushConstants),

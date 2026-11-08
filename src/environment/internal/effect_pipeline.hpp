@@ -59,9 +59,14 @@ inline float ndcHalfSize(const math::Mat4f& viewProj, const math::Vec3f& worldPo
     {
         return 1e-4f;
     }
-    // Perspective scaling: P00 = cot(fovX / 2), size = r * P00 / w.
-    // Robust for any camera orientation (no axis sampling).
-    const float projScale = std::abs(viewProj[0][0]);
+    // Perspective scaling: size = r * P00 / w. P00 must be recovered
+    // rotation-invariantly: the length of row 0 of viewProj equals
+    // P00 * |side| = P00 because the view right vector is unit length.
+    // Sampling viewProj[0][0] alone collapses when the camera yaws 90 deg.
+    const float r0 = viewProj[0][0];
+    const float r1 = viewProj[1][0];
+    const float r2 = viewProj[2][0];
+    const float projScale = std::sqrt(r0 * r0 + r1 * r1 + r2 * r2);
     return std::max(1e-4f, (worldRadius * projScale) / clip.w);
 }
 
@@ -70,7 +75,9 @@ inline float projectedAngle(const math::Mat4f& viewProj, const math::Vec3f& orig
 {
     const math::Vec4f c0 = viewProj * math::Vec4f{origin, 1.0f};
     const math::Vec4f c1 = viewProj * math::Vec4f{origin + direction, 1.0f};
-    if (std::abs(c0.w) < 1e-6f || std::abs(c1.w) < 1e-6f)
+    // Points at or behind the near plane have w <= 0 and would mirror the
+    // projected direction if divided through.
+    if (c0.w <= 1e-4f || c1.w <= 1e-4f)
     {
         return 0.0f;
     }
@@ -86,6 +93,7 @@ public:
     {
         VkDevice device = VK_NULL_HANDLE;
         VkFormat colorFormat = VK_FORMAT_UNDEFINED;
+        VkFormat depthFormat = VK_FORMAT_UNDEFINED;
         std::string shaderDirectory;
         std::string shaderBaseName; // e.g. "nebula" -> nebula.vert.spv/nebula.frag.spv
         std::uint32_t pushConstantSize = 0;
@@ -117,6 +125,7 @@ public:
     {
         VkDevice device = VK_NULL_HANDLE;
         VkFormat colorFormat = VK_FORMAT_UNDEFINED;
+        VkFormat depthFormat = VK_FORMAT_UNDEFINED;
         std::string shaderDirectory;
         std::string shaderBaseName; // e.g. "billboard"
         std::uint32_t pushConstantSize = 0;

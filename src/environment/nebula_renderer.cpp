@@ -50,6 +50,7 @@ std::expected<NebulaRenderer, std::string> NebulaRenderer::create(const CreateIn
     auto effect = internal::FullscreenEffect::create({
         .device = info.device,
         .colorFormat = info.colorFormat,
+        .depthFormat = info.depthFormat,
         .shaderDirectory = info.shaderDirectory,
         .shaderBaseName = "nebula",
         .pushConstantSize = sizeof(PushConstants),

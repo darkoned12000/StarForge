@@ -144,7 +144,7 @@ std::expected<StarfieldRenderer, std::string> StarfieldRenderer::create(const Cr
     auto pipeline = vulkan::GraphicsPipeline::create({
         .device = info.device,
         .colorFormat = info.colorFormat,
-        .depthFormat = VK_FORMAT_UNDEFINED,
+        .depthFormat = info.depthFormat,
         .vertexShader = *vertModule,
         .fragmentShader = *fragModule,
         .pipelineLayout = renderer.pipelineLayout_,
@@ -174,6 +174,7 @@ std::expected<StarfieldRenderer, std::string> StarfieldRenderer::create(const Cr
     auto sun = internal::BillboardEffect::create({
         .device = info.device,
         .colorFormat = info.colorFormat,
+        .depthFormat = info.depthFormat,
         .shaderDirectory = info.shaderDirectory,
         .shaderBaseName = "billboard",
         .pushConstantSize = sizeof(internal::BillboardPush),

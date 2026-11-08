@@ -29,6 +29,7 @@ std::expected<ThrusterEffect, std::string> ThrusterEffect::create(const CreateIn
     auto inner = internal::BillboardEffect::create({
         .device = info.device,
         .colorFormat = info.colorFormat,
+        .depthFormat = info.depthFormat,
         .shaderDirectory = info.shaderDirectory,
         .shaderBaseName = "billboard",
         .pushConstantSize = sizeof(internal::BillboardPush),

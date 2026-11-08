@@ -14,7 +14,15 @@ namespace starforge::vulkan
 namespace
 {
 constexpr const char* kTag = "VULKAN";
+
+// Depth-only formats must not carry the stencil aspect in barriers.
+[[nodiscard]] VkImageAspectFlags depthAspectMask(VkFormat depthFormat) noexcept
+{
+    return (depthFormat == VK_FORMAT_D24_UNORM_S8_UINT || depthFormat == VK_FORMAT_D32_SFLOAT_S8_UINT)
+               ? (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)
+               : VK_IMAGE_ASPECT_DEPTH_BIT;
 }
+} // namespace
 
 void recordClearColorImage(VkCommandBuffer cmd,
                            VkImage image,
@@ -26,7 +34,8 @@ void recordClearColorImage(VkCommandBuffer cmd,
                            VkAccessFlags2 dstAccessMask,
                            VkImage depthImage,
                            VkImageView depthView,
-                           float clearDepth)
+                           float clearDepth,
+                           VkFormat depthFormat)
 {
     VkImageMemoryBarrier2 toAttachment{};
     toAttachment.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -81,8 +90,7 @@ void recordClearColorImage(VkCommandBuffer cmd,
         depthToAttachment.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         depthToAttachment.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         depthToAttachment.image = depthImage;
-        depthToAttachment.subresourceRange.aspectMask =
-            VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+        depthToAttachment.subresourceRange.aspectMask = depthAspectMask(depthFormat);
         depthToAttachment.subresourceRange.baseMipLevel = 0;
         depthToAttachment.subresourceRange.levelCount = 1;
         depthToAttachment.subresourceRange.baseArrayLayer = 0;
@@ -132,19 +140,26 @@ void recordClearColorImage(VkCommandBuffer cmd,
 
     if (hasDepth)
     {
+        // The depth image is an offscreen attachment only; it must not be
+        // transitioned to PRESENT_SRC (VUID-VkImageMemoryBarrier2-newLayout-01198).
+        // It stays in DEPTH_ATTACHMENT_OPTIMAL; this barrier only orders
+        // depth writes against later depth consumers. The next frame's
+        // UNDEFINED transition discards the contents as usual.
         VkImageMemoryBarrier2 depthToFinal{};
         depthToFinal.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-        depthToFinal.srcStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT;
+        depthToFinal.srcStageMask =
+            VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
         depthToFinal.srcAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-        depthToFinal.dstStageMask = dstStageMask;
-        depthToFinal.dstAccessMask = dstAccessMask;
+        depthToFinal.dstStageMask =
+            VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+        depthToFinal.dstAccessMask =
+            VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
         depthToFinal.oldLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-        depthToFinal.newLayout = finalLayout;
+        depthToFinal.newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
         depthToFinal.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         depthToFinal.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         depthToFinal.image = depthImage;
-        depthToFinal.subresourceRange.aspectMask =
-            VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+        depthToFinal.subresourceRange.aspectMask = depthAspectMask(depthFormat);
         depthToFinal.subresourceRange.baseMipLevel = 0;
         depthToFinal.subresourceRange.levelCount = 1;
         depthToFinal.subresourceRange.baseArrayLayer = 0;
@@ -445,7 +460,8 @@ FrameRenderer::renderFrameImpl(const VulkanSwapchain& swapchain, VkQueue queue, 
             0,
             depthImage,
             depthView,
-            1.0f);
+            1.0f,
+            swapchain.depthFormat());
     }
     else
     {
@@ -488,8 +504,7 @@ FrameRenderer::renderFrameImpl(const VulkanSwapchain& swapchain, VkQueue queue, 
             depthPre.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             depthPre.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             depthPre.image = depthImage;
-            depthPre.subresourceRange.aspectMask =
-                VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+            depthPre.subresourceRange.aspectMask = depthAspectMask(swapchain.depthFormat());
             depthPre.subresourceRange.baseMipLevel = 0;
             depthPre.subresourceRange.levelCount = 1;
             depthPre.subresourceRange.baseArrayLayer = 0;
@@ -535,17 +550,22 @@ FrameRenderer::renderFrameImpl(const VulkanSwapchain& swapchain, VkQueue queue, 
         {
             VkImageMemoryBarrier2 depthPost{};
             depthPost.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-            depthPost.srcStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT;
+            // Depth is an offscreen attachment: keep it in
+            // DEPTH_ATTACHMENT_OPTIMAL (never PRESENT_SRC) and only order
+            // depth writes against later depth consumers.
+            depthPost.srcStageMask =
+                VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
             depthPost.srcAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-            depthPost.dstStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
-            depthPost.dstAccessMask = 0;
+            depthPost.dstStageMask =
+                VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+            depthPost.dstAccessMask =
+                VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
             depthPost.oldLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-            depthPost.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+            depthPost.newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
             depthPost.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             depthPost.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             depthPost.image = depthImage;
-            depthPost.subresourceRange.aspectMask =
-                VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+            depthPost.subresourceRange.aspectMask = depthAspectMask(swapchain.depthFormat());
             depthPost.subresourceRange.baseMipLevel = 0;
             depthPost.subresourceRange.levelCount = 1;
             depthPost.subresourceRange.baseArrayLayer = 0;

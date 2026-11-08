@@ -71,7 +71,8 @@ struct PipelineBundle
 std::expected<PipelineBundle, std::string> createBundle(
     const std::string& dir, const std::string& base, VkDevice device, VkFormat colorFormat,
     std::uint32_t pushSize, VkShaderStageFlags stages,
-    VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
+    VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+    VkFormat depthFormat = VK_FORMAT_UNDEFINED)
 {
     PipelineBundle bundle;
     auto vertModule = loadShaderModule(device, dir + "/" + base + ".vert.spv");
@@ -111,7 +112,7 @@ std::expected<PipelineBundle, std::string> createBundle(
     auto pipeline = vulkan::GraphicsPipeline::create({
         .device = device,
         .colorFormat = colorFormat,
-        .depthFormat = VK_FORMAT_UNDEFINED,
+        .depthFormat = depthFormat,
         .vertexShader = *vertModule,
         .fragmentShader = *fragModule,
         .pipelineLayout = bundle.layout,
@@ -172,7 +173,8 @@ std::expected<FullscreenEffect, std::string> FullscreenEffect::create(const Crea
     effect.device_ = info.device;
     auto bundle = createBundle(info.shaderDirectory, info.shaderBaseName, info.device,
                                info.colorFormat, info.pushConstantSize,
-                               VK_SHADER_STAGE_FRAGMENT_BIT);
+                               VK_SHADER_STAGE_FRAGMENT_BIT, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+                               info.depthFormat);
     if (!bundle)
     {
         return std::unexpected(std::move(bundle.error()));
@@ -246,7 +248,7 @@ std::expected<BillboardEffect, std::string> BillboardEffect::create(const Create
     auto bundle = createBundle(info.shaderDirectory, info.shaderBaseName, info.device,
                                info.colorFormat, info.pushConstantSize,
                                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                               VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP);
+                               VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP, info.depthFormat);
     if (!bundle)
     {
         return std::unexpected(std::move(bundle.error()));

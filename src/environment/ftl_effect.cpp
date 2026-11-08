@@ -50,6 +50,7 @@ std::expected<FtlEffect, std::string> FtlEffect::create(const CreateInfo& info)
     auto inner = internal::FullscreenEffect::create({
         .device = info.device,
         .colorFormat = info.colorFormat,
+        .depthFormat = info.depthFormat,
         .shaderDirectory = info.shaderDirectory,
         .shaderBaseName = "ftl",
         .pushConstantSize = sizeof(PushConstants),

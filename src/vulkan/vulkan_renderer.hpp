@@ -36,7 +36,8 @@ void recordClearColorImage(VkCommandBuffer cmd,
                            VkAccessFlags2 dstAccessMask,
                            VkImage depthImage = VK_NULL_HANDLE,
                            VkImageView depthView = VK_NULL_HANDLE,
-                           float clearDepth = 1.0f);
+                           float clearDepth = 1.0f,
+                           VkFormat depthFormat = VK_FORMAT_UNDEFINED);
 
 class FrameRenderer
 {

@@ -151,3 +151,19 @@ add_custom_target(check
     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
     DEPENDS starforge_tests starforge_gpu_tests
 )
+
+# M9.8 leakage gates: public headers must stay Vulkan/VMA/SDL/GLM-free,
+# and an external consumer must compile against include/ alone.
+find_program(STARFORGE_PYTHON3 NAMES python3)
+if(STARFORGE_PYTHON3)
+    add_test(NAME public_leakage_scan
+        COMMAND ${STARFORGE_PYTHON3} ${CMAKE_CURRENT_SOURCE_DIR}/check_public_leakage.py
+                ${PROJECT_SOURCE_DIR}/include/starforge)
+    add_test(NAME public_leakage_selftest
+        COMMAND ${STARFORGE_PYTHON3} ${CMAKE_CURRENT_SOURCE_DIR}/check_public_leakage.py --self-test)
+endif()
+
+add_test(NAME public_consumer_compile
+    COMMAND ${CMAKE_CXX_COMPILER} -std=c++26 -fsyntax-only
+            -I${PROJECT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/public_consumer.cpp)

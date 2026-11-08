@@ -29,6 +29,7 @@ std::expected<AfterburnerEffect, std::string> AfterburnerEffect::create(const Cr
     auto inner = internal::BillboardEffect::create({
         .device = info.device,
         .colorFormat = info.colorFormat,
+        .depthFormat = info.depthFormat,
         .shaderDirectory = info.shaderDirectory,
         .shaderBaseName = "billboard",
         .pushConstantSize = sizeof(internal::BillboardPush),

@@ -49,6 +49,7 @@ std::expected<SunDistortionEffect, std::string> SunDistortionEffect::create(cons
     auto inner = internal::FullscreenEffect::create({
         .device = info.device,
         .colorFormat = info.colorFormat,
+        .depthFormat = info.depthFormat,
         .shaderDirectory = info.shaderDirectory,
         .shaderBaseName = "sun_distortion",
         .pushConstantSize = sizeof(PushConstants),

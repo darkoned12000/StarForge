@@ -23,6 +23,27 @@
 
 using namespace starforge::environment;
 using namespace starforge::vulkan;
+namespace math = starforge::math;
+
+TEST_CASE("Environment effects: ndcHalfSize is rotation invariant")
+{
+    // Regression: projScale used to sample viewProj[0][0] alone, collapsing
+    // to zero when the camera yawed 90 degrees (side.x == 0).
+    const auto proj = math::perspectiveVulkan(1.0f, 16.0f / 9.0f, 0.1f, 1000.0f);
+    const auto forward = proj * glm::lookAt(math::Vec3f{0, 0, 5}, math::Vec3f{0, 0, 0}, math::Vec3f{0, 1, 0});
+    const auto yawed = proj * glm::lookAt(math::Vec3f{5, 0, 0}, math::Vec3f{0, 0, 0}, math::Vec3f{0, 1, 0});
+
+    const math::Vec3f target{0, 0, -10};
+    const float forwardSize = internal::ndcHalfSize(forward, target, 2.0f);
+    // Same range (15 m) along the yawed camera's forward axis.
+    const float yawedSize = internal::ndcHalfSize(yawed, math::Vec3f{-10, 0, 0}, 2.0f);
+    CHECK(forwardSize > 1.0e-3f);
+    CHECK(yawedSize > 1.0e-3f);
+    CHECK(std::abs(forwardSize - yawedSize) < 1.0e-3f);
+
+    // Behind the camera must not produce a mirrored angle.
+    CHECK(internal::projectedAngle(forward, math::Vec3f{0, 0, 10}, math::Vec3f{1, 0, 0}) == 0.0f);
+}
 
 TEST_CASE("Environment effects: all create via traditional vertex/fragment path (8.9)")
 {

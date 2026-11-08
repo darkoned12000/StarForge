@@ -42,6 +42,7 @@ std::expected<ParticleSystem, std::string> ParticleSystem::create(const CreateIn
     auto effect = internal::BillboardEffect::create({
         .device = info.device,
         .colorFormat = info.colorFormat,
+        .depthFormat = info.depthFormat,
         .shaderDirectory = info.shaderDirectory,
         .shaderBaseName = "billboard",
         .pushConstantSize = sizeof(internal::BillboardPush),

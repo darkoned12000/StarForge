@@ -49,6 +49,7 @@ std::expected<WormholeEffect, std::string> WormholeEffect::create(const CreateIn
     auto inner = internal::FullscreenEffect::create({
         .device = info.device,
         .colorFormat = info.colorFormat,
+        .depthFormat = info.depthFormat,
         .shaderDirectory = info.shaderDirectory,
         .shaderBaseName = "wormhole",
         .pushConstantSize = sizeof(PushConstants),
