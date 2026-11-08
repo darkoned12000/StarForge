@@ -36,7 +36,24 @@ constexpr std::string_view kTag = "audio";
 
 } // namespace
 
-SoundBank::SoundBank() noexcept = default;
+void MaSoundDeleter::operator()(ma_sound* sound) const noexcept
+{
+    delete sound;
+}
+
+void MaDecoderDeleter::operator()(ma_decoder* decoder) const noexcept
+{
+    delete decoder;
+}
+
+void MaSoundGroupDeleter::operator()(ma_sound_group* group) const noexcept
+{
+    delete group;
+}
+
+SoundBank::SoundBank() noexcept
+{
+}
 
 std::expected<SoundBank, std::string> SoundBank::create(AudioContext& context)
 {
@@ -49,11 +66,14 @@ std::expected<SoundBank, std::string> SoundBank::create(AudioContext& context)
     bank.context_ = &context;
     for (std::size_t i = 0; i < kGroupCount; ++i)
     {
-        bank.groups_[i] = new ma_sound_group;
-        const ma_result result = ma_sound_group_init(context.engineHandle(), 0, nullptr, bank.groups_[i]);
+        bank.groups_[i] = MaSoundGroupHandle(new ma_sound_group);
+        const ma_result result = ma_sound_group_init(context.engineHandle(), 0, nullptr, bank.groups_[i].get());
         if (result != MA_SUCCESS)
         {
             core::logWarning(kTag, "SoundBank: failed to init bus group {}", i);
+            // The failed group was not initialized: drop the allocation
+            // without uninit so teardown only touches initialized groups.
+            bank.groups_[i].reset();
             bank.teardownGroups();
             return std::unexpected<std::string>(
                 std::format("failed to init bus group {}: {}", i, static_cast<int>(result)));
@@ -81,8 +101,7 @@ SoundBank::SoundBank(SoundBank&& other) noexcept
 {
     for (std::size_t i = 0; i < kGroupCount; ++i)
     {
-        groups_[i] = other.groups_[i];
-        other.groups_[i] = nullptr;
+        groups_[i] = std::move(other.groups_[i]);
         busVolumes_[i] = other.busVolumes_[i];
     }
     other.context_ = nullptr;
@@ -105,8 +124,7 @@ SoundBank& SoundBank::operator=(SoundBank&& other) noexcept
         sounds_ = std::move(other.sounds_);
         for (std::size_t i = 0; i < kGroupCount; ++i)
         {
-            groups_[i] = other.groups_[i];
-        other.groups_[i] = nullptr;
+            groups_[i] = std::move(other.groups_[i]);
             busVolumes_[i] = other.busVolumes_[i];
         }
         other.context_ = nullptr;
@@ -137,17 +155,15 @@ void SoundBank::teardownSounds() noexcept
 
 void SoundBank::teardownGroups() noexcept
 {
-    if (!groupsInitialized_ || context_ == nullptr)
-    {
-        return;
-    }
+    // Unconditionally walk the array: groups initialized before a create
+    // failure must be uninited even when groupsInitialized_ is still
+    // false, otherwise create() leaks them.
     for (std::size_t i = 0; i < kGroupCount; ++i)
     {
         if (groups_[i] != nullptr)
         {
-            (void)ma_sound_group_uninit(groups_[i]);
-            delete groups_[i];
-            groups_[i] = nullptr;
+            (void)ma_sound_group_uninit(groups_[i].get());
+            groups_[i].reset();
         }
     }
     groupsInitialized_ = false;
@@ -191,8 +207,8 @@ SoundBank::loadFromMemory(std::span<const std::uint8_t> data, const SoundConfig&
     // Copied BEFORE decoder init and never modified afterwards, so
     // the decoder's pointer stays valid for the Sound's lifetime.
     sound->encodedData.assign(data.begin(), data.end());
-    sound->decoder = std::make_unique<ma_decoder>();
-    sound->voice = std::make_unique<ma_sound>();
+    sound->decoder = MaDecoderHandle(new ma_decoder);
+    sound->voice = MaSoundHandle(new ma_sound);
 
     const ma_result decodeResult =
         ma_decoder_init_memory(sound->encodedData.data(), sound->encodedData.size(), nullptr, sound->decoder.get());
@@ -205,7 +221,7 @@ SoundBank::loadFromMemory(std::span<const std::uint8_t> data, const SoundConfig&
     ma_sound_group* group = nullptr;
     if (config.bus != Bus::Master)
     {
-        group = groups_[groupIndex(config.bus)];
+        group = groups_[groupIndex(config.bus)].get();
     }
     // MA_SOUND_FLAG_DECODE is a resource-manager-only flag and is
     // ignored for data-source sounds: playback streams via the
@@ -243,7 +259,7 @@ SoundBank::loadFromMemory(std::span<const std::uint8_t> data, const SoundConfig&
     return handle;
 }
 
-bool SoundBank::play(SoundHandle handle) noexcept
+bool SoundBank::play(SoundHandle handle, bool restartIfPlaying) noexcept
 {
     Sound* sound = find(handle);
     if (sound == nullptr || sound->voice == nullptr)
@@ -252,8 +268,27 @@ bool SoundBank::play(SoundHandle handle) noexcept
     }
     // A finished one-shot sits at EOF: ma_sound_start() alone would
     // silently "succeed" without producing sound. Rewind first so
-    // one-shots can be replayed.
-    if (ma_sound_at_end(sound->voice.get()))
+    // one-shots can be replayed; restartIfPlaying applies the same
+    // rewind to an in-flight clip (retrigger/cut-in semantics).
+    if (restartIfPlaying || ma_sound_at_end(sound->voice.get()))
+    {
+        (void)ma_sound_seek_to_pcm_frame(sound->voice.get(), 0);
+    }
+    return ma_sound_start(sound->voice.get()) == MA_SUCCESS;
+}
+
+bool SoundBank::playWithVolume(SoundHandle handle, float volume, bool restartIfPlaying) noexcept
+{
+    Sound* sound = find(handle);
+    if (sound == nullptr || sound->voice == nullptr)
+    {
+        return false;
+    }
+    // Transient gain: applies to this playback without overwriting the
+    // configured base volume (sound->config.volume), so triggered
+    // one-shots never permanently clobber an emitter's balance.
+    ma_sound_set_volume(sound->voice.get(), clampGain(volume));
+    if (restartIfPlaying || ma_sound_at_end(sound->voice.get()))
     {
         (void)ma_sound_seek_to_pcm_frame(sound->voice.get(), 0);
     }
@@ -343,6 +378,72 @@ float SoundBank::pitch(SoundHandle handle) const noexcept
     return sound != nullptr ? sound->config.pitch : 0.0f;
 }
 
+bool SoundBank::setEmitterPose(SoundHandle handle, const math::Vec3f& position, const math::Vec3f& velocity,
+                               float dopplerFactor) noexcept
+{
+    Sound* sound = find(handle);
+    if (sound == nullptr || sound->voice == nullptr || isTwoDimensional(sound->config.bus))
+    {
+        return false;
+    }
+    ma_sound_set_position(sound->voice.get(), position.x, position.y, position.z);
+    ma_sound_set_velocity(sound->voice.get(), velocity.x, velocity.y, velocity.z);
+    ma_sound_set_doppler_factor(sound->voice.get(), dopplerFactor);
+    return true;
+}
+
+bool SoundBank::setEmitterAttenuation(SoundHandle handle, float minDistance, float maxDistance, float rolloff) noexcept
+{
+    Sound* sound = find(handle);
+    if (sound == nullptr || sound->voice == nullptr || isTwoDimensional(sound->config.bus))
+    {
+        return false;
+    }
+    ma_sound_set_min_distance(sound->voice.get(), std::max(minDistance, 0.0f));
+    ma_sound_set_max_distance(sound->voice.get(), std::max(maxDistance, minDistance));
+    ma_sound_set_rolloff(sound->voice.get(), std::max(rolloff, 0.0001f));
+    return true;
+}
+
+bool SoundBank::setEmitterDopplerFactor(SoundHandle handle, float dopplerFactor) noexcept
+{
+    Sound* sound = find(handle);
+    if (sound == nullptr || sound->voice == nullptr || isTwoDimensional(sound->config.bus))
+    {
+        return false;
+    }
+    ma_sound_set_doppler_factor(sound->voice.get(), dopplerFactor);
+    return true;
+}
+
+math::Vec3f SoundBank::emitterPosition(SoundHandle handle) const noexcept
+{
+    const Sound* sound = find(handle);
+    if (sound == nullptr || sound->voice == nullptr)
+    {
+        return {};
+    }
+    const ma_vec3f pos = ma_sound_get_position(sound->voice.get());
+    return {pos.x, pos.y, pos.z};
+}
+
+math::Vec3f SoundBank::emitterVelocity(SoundHandle handle) const noexcept
+{
+    const Sound* sound = find(handle);
+    if (sound == nullptr || sound->voice == nullptr)
+    {
+        return {};
+    }
+    const ma_vec3f vel = ma_sound_get_velocity(sound->voice.get());
+    return {vel.x, vel.y, vel.z};
+}
+
+float SoundBank::emitterDopplerFactor(SoundHandle handle) const noexcept
+{
+    const Sound* sound = find(handle);
+    return (sound != nullptr && sound->voice != nullptr) ? ma_sound_get_doppler_factor(sound->voice.get()) : 0.0f;
+}
+
 void SoundBank::setBusVolume(Bus bus, float volume) noexcept
 {
     const float clamped = clampGain(volume);
@@ -358,7 +459,7 @@ void SoundBank::setBusVolume(Bus bus, float volume) noexcept
     busVolumes_[index] = clamped;
     if (groupsInitialized_ && context_ != nullptr && groups_[index] != nullptr)
     {
-        ma_sound_group_set_volume(groups_[index], clamped);
+        ma_sound_group_set_volume(groups_[index].get(), clamped);
     }
 }
 

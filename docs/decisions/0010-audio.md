@@ -26,9 +26,23 @@
     `ma_sound`/`ma_decoder`.
   - UI and Music are non-spatial buses (spatialization explicitly
     disabled per sound); SFX and Voice are spatial.
+  - Spatialization model: engine listener 0 in absolute positioning
+    space; all poses are camera-relative float32 (single-cast rule).
+    The CPU reference model in `src/audio/spatial.hpp` (inverse-
+    distance-clamped gain with a positive floor past max range,
+    stereo pan, Doppler with supersonic saturation at 2.0) is the
+    contract; the miniaudio spatializer must match it (tests assert
+    the round-trip through the engine).
+  - ECS bridge: `AudioEmitter`/`AudioListener` components live in
+    `src/audio/bridge.hpp` (physics-style layering, no audio types in
+    `src/ecs/components.hpp`). One-shot triggers flow through a
+    mutex-guarded `TriggerQueue` flushed on the main thread after the
+    ECS step — the audio thread never mutates Flecs (M11 pattern).
   - Lifetime: a `SoundBank` borrows its `AudioContext` and must be
     destroyed first (declare it after the context). `AudioContext`
-    tracks live banks and asserts none remain at teardown.
+    tracks live banks and asserts none remain at teardown. Moving an
+    `AudioContext` while banks borrow it is asserted (debug) — banks
+    hold a raw pointer to the context object.
 - **Consequences:**
   - Testable in CI without a sound card; real-hardware behaviour is
     proven in the sandbox (T5).

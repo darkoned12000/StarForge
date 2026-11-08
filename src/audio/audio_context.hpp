@@ -13,13 +13,31 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <memory>
 #include <string>
+
+#include "math/math.hpp"
 
 struct ma_context;
 struct ma_engine;
 
 namespace starforge::audio
 {
+
+// Custom deleters for the engine/context: default-constructible
+// (so unique_ptr members default-init cleanly) and defined in
+// audio_context.cpp where the C structs are complete. Using these
+// keeps <miniaudio.h> out of this header (forward-declaration seam).
+struct MaContextDeleter
+{
+    void operator()(ma_context* context) const noexcept;
+};
+struct MaEngineDeleter
+{
+    void operator()(ma_engine* engine) const noexcept;
+};
+using MaContextHandle = std::unique_ptr<ma_context, MaContextDeleter>;
+using MaEngineHandle = std::unique_ptr<ma_engine, MaEngineDeleter>;
 
 // Playback buses. Master is the engine-level gain; the remaining buses
 // each own a ma_sound_group in SoundBank.
@@ -47,6 +65,14 @@ public:
         Backend backend = Backend::Null;
     };
 
+    // Listener 0 (the player). Vectors are camera-relative float32 in
+    // the engine's absolute positioning space.
+    [[nodiscard]] bool setListenerPose(const math::Vec3f& position, const math::Vec3f& velocity,
+                                       const math::Vec3f& forward, const math::Vec3f& up) noexcept;
+    [[nodiscard]] math::Vec3f listenerPosition() const noexcept;
+    [[nodiscard]] math::Vec3f listenerVelocity() const noexcept;
+    [[nodiscard]] math::Vec3f listenerDirection() const noexcept;
+
     [[nodiscard]] static std::expected<AudioContext, std::string> create(const Config& config);
 
     AudioContext() noexcept;
@@ -69,8 +95,8 @@ public:
 
     // Internal handles (this layer only; never exported via include/).
     // Valid only when isValid() is true.
-    [[nodiscard]] ma_engine* engineHandle() noexcept { return engine_; }
-    [[nodiscard]] const ma_engine* engineHandle() const noexcept { return engine_; }
+    [[nodiscard]] ma_engine* engineHandle() noexcept { return engine_.get(); }
+    [[nodiscard]] const ma_engine* engineHandle() const noexcept { return engine_.get(); }
 
     // Lifetime guard (internal): SoundBank registers on create and
     // unregisters on destruction. The context asserts no banks are
@@ -84,12 +110,10 @@ public:
 private:
     void teardown() noexcept;
 
-    // Raw pointers owned manually (constructed/uninited in
-    // audio_context.cpp): structs embed mutexes, so value copies
-    // would be UB (move transfers ownership), and unique_ptr members
-    // would require complete types in every TU including this header.
-    ma_context* context_ = nullptr;
-    ma_engine* engine_ = nullptr;
+    // miniaudio structs embed mutexes and must never be value-copied:
+    // heap-owned, move transfers the pointers.
+    MaContextHandle context_;
+    MaEngineHandle engine_;
     bool initialized_ = false;
     float masterVolume_ = 1.0f;
     Config::Backend backend_ = Config::Backend::Null;

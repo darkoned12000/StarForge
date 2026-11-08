@@ -9,6 +9,7 @@ add_library(starforge_audio STATIC
     audio_context.cpp
     sound.cpp
     tone_generator.cpp
+    bridge.cpp
 )
 
 target_include_directories(starforge_audio
@@ -19,6 +20,9 @@ target_include_directories(starforge_audio
 target_link_libraries(starforge_audio
     PUBLIC
         starforge_core
+        starforge_math
+        starforge_spatial
+        starforge_ecs
         miniaudio
 )
 

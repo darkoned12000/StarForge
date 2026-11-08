@@ -25,6 +25,27 @@ using ma_sound_group = ma_sound;
 namespace starforge::audio
 {
 
+// Same forward-declaration seam as audio_context.hpp: deleters are
+// default-constructible (unique_ptr members default-init cleanly)
+// and defined in sound.cpp where the C structs are complete.
+struct MaSoundDeleter
+{
+    void operator()(ma_sound* sound) const noexcept;
+};
+struct MaDecoderDeleter
+{
+    void operator()(ma_decoder* decoder) const noexcept;
+};
+struct MaSoundGroupDeleter
+{
+    void operator()(ma_sound_group* group) const noexcept;
+};
+using MaSoundHandle = std::unique_ptr<ma_sound, MaSoundDeleter>;
+using MaDecoderHandle = std::unique_ptr<ma_decoder, MaDecoderDeleter>;
+using MaSoundGroupHandle = std::unique_ptr<ma_sound_group, MaSoundGroupDeleter>;
+
+
+
 // Invalid handle: isValid() is false (index == kInvalidIndex).
 struct SoundHandle
 {
@@ -63,7 +84,8 @@ public:
     loadFromMemory(std::span<const std::uint8_t> data, const SoundConfig& config = {});
 
     // Voice control. Invalid handles return false and have no effect.
-    bool play(SoundHandle handle) noexcept;
+    bool play(SoundHandle handle, bool restartIfPlaying = false) noexcept;
+    bool playWithVolume(SoundHandle handle, float volume, bool restartIfPlaying = true) noexcept;
     bool stop(SoundHandle handle) noexcept;
     [[nodiscard]] bool isPlaying(SoundHandle handle) const noexcept;
     [[nodiscard]] bool isLooping(SoundHandle handle) const noexcept;
@@ -75,6 +97,17 @@ public:
     [[nodiscard]] float volume(SoundHandle handle) const noexcept;
     [[nodiscard]] float pitch(SoundHandle handle) const noexcept;
 
+    // 3D emitter pose (camera-relative float32): sets position,
+    // velocity, and the Doppler factor. 2D buses (UI/Music) reject
+    // with false — they have spatialization disabled by design.
+    bool setEmitterPose(SoundHandle handle, const math::Vec3f& position, const math::Vec3f& velocity,
+                        float dopplerFactor = 1.0f) noexcept;
+    bool setEmitterAttenuation(SoundHandle handle, float minDistance, float maxDistance, float rolloff) noexcept;
+    bool setEmitterDopplerFactor(SoundHandle handle, float dopplerFactor) noexcept;
+    [[nodiscard]] math::Vec3f emitterPosition(SoundHandle handle) const noexcept;
+    [[nodiscard]] math::Vec3f emitterVelocity(SoundHandle handle) const noexcept;
+    [[nodiscard]] float emitterDopplerFactor(SoundHandle handle) const noexcept;
+
     // Per-bus gain in [0, 1]; Master routes to the engine master volume.
     void setBusVolume(Bus bus, float volume) noexcept;
     [[nodiscard]] float busVolume(Bus bus) const noexcept;
@@ -84,14 +117,14 @@ public:
 private:
     struct Sound
     {
-        std::unique_ptr<ma_sound> voice;
+        MaSoundHandle voice;
         // Retained encoded bytes: ma_decoder_init_memory keeps a raw
         // pointer and reads lazily, so the caller's buffer must never
         // be the lifetime source for playback.
         std::vector<std::uint8_t> encodedData;
         // Decoder feeding the voice; owned by the bank for the voice's
         // lifetime (ma_decoder_uninit runs after ma_sound_uninit).
-        std::unique_ptr<ma_decoder> decoder;
+        MaDecoderHandle decoder;
         SoundConfig config;
     };
 
@@ -105,11 +138,7 @@ private:
 
     AudioContext* context_ = nullptr;
     // Routable groups indexed by (Bus - Music): Music=0, SFX=1, UI=2, Voice=3.
-    // Raw pointers owned manually (constructed/uninited in sound.cpp):
-    // a unique_ptr<ma_sound_group> member would require the complete
-    // type in every TU including this header, defeating the
-    // forward-declaration seam.
-    ma_sound_group* groups_[kGroupCount]{};
+    MaSoundGroupHandle groups_[kGroupCount]{};
     bool groupsInitialized_ = false;
     std::vector<std::unique_ptr<Sound>> sounds_;
     float busVolumes_[kGroupCount] = {1.0f, 1.0f, 1.0f, 1.0f};
