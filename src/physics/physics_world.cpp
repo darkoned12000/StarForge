@@ -111,7 +111,7 @@ public:
 
     bool ShouldCollide(JPH::ObjectLayer layer) const override
     {
-        return includeSensors_ || layer != Layers::Sensor;
+        return pairFilter_.ShouldCollide(Layers::Moving, layer) && (includeSensors_ || layer != Layers::Sensor);
     }
 
 private:

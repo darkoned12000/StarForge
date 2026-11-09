@@ -112,8 +112,8 @@ TEST_CASE("Physics bridge: ECS entity falls, rests, and syncs back")
         REQUIRE(rotatedPos.has_value());
         const auto rotated = ecsWorld.createAsteroid(*rotatedPos, {0.0, 0.0, 0.0});
         rotated.set<Collider>({.shape = Collider::Shape::Sphere, .radius = 0.5f});
-        auto& transform = rotated.get_mut<ecs::Transform>();
-        transform.orientation = {0.5f, 0.5f, 0.5f, 0.5f}; // unit, non-identity
+        auto& rotatedTransform = rotated.get_mut<ecs::Transform>();
+        rotatedTransform.orientation = {0.5f, 0.5f, 0.5f, 0.5f}; // unit, non-identity
         rotated.modified<ecs::Transform>();
 
         const auto rotatedBody = attachBody(ecsWorld, rotated, world, *camera);
@@ -344,7 +344,11 @@ TEST_CASE("Physics exit proof: ship through asteroid field within budget (11.5)"
 
         // Island activation: bodies only for the local neighborhood.
         index.rebuild();
-        syncIslandBodies(ecsWorld, world, *camera, index);
+        const auto attached = syncIslandBodies(ecsWorld, world, *camera, index);
+        if (frame == 0)
+        {
+            CHECK(attached > 0); // Island activation attached nearby asteroids.
+        }
 
         world.step(1.0f / 60.0f);
         syncPhysicsToEcs(ecsWorld, world, *camera);

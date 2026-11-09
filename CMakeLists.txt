@@ -93,6 +93,9 @@ if(STARFORGE_USE_JOLT)
     include(FetchContent)
     set(TARGET_UNIT_TESTS OFF CACHE BOOL "" FORCE)
     set(TARGET_SAMPLES OFF CACHE BOOL "" FORCE)
+    # STARFORGE does not enable link-time optimization; Jolt would otherwise
+    # warn that IPO has no effect for its target.
+    set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "" FORCE)
     set(USE_ASSERTS ON CACHE BOOL "" FORCE)
     set(CPP_RTTI_ENABLED ON CACHE BOOL "" FORCE)
     set(DOUBLE_PRECISION OFF CACHE BOOL "" FORCE)

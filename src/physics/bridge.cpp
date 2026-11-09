@@ -37,7 +37,7 @@ namespace
 
 } // namespace
 
-BodyHandle attachBody(ecs::Ecs& world, flecs::entity entity, PhysicsWorld& physics, const spatial::WorldPosition& camera,
+BodyHandle attachBody([[maybe_unused]] ecs::Ecs& world, flecs::entity entity, PhysicsWorld& physics, const spatial::WorldPosition& camera,
                       MotionType motionType)
 {
     const auto& transform = entity.get<ecs::Transform>();
@@ -137,7 +137,7 @@ std::uint32_t syncIslandBodies(ecs::Ecs& world, PhysicsWorld& physics, const spa
     return attached;
 }
 
-void detachBody(ecs::Ecs& world, flecs::entity entity, PhysicsWorld& physics)
+void detachBody([[maybe_unused]] ecs::Ecs& world, flecs::entity entity, PhysicsWorld& physics)
 {
     // Remove the component only: the cleanup observer (registered via
     // registerBodyCleanup) destroys the body on removal. Destroying here
