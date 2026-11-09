@@ -1105,6 +1105,32 @@ an end-to-end consumer. The next planned work is M14 (AI and Behavior).
 - **Tech:** Custom (no recommended library; AI is game-specific).
 - **Depends on:** M10 (ECS), M11 (Physics).
 
+### Phase A – behavior model
+
+| Step | Deliverable | Verified by | Done when |
+|------|-------------|-------------|-----------|
+| 14.1 | **Decision and component model (ADR-0013):** fixed-tick AI scheduler, component layout (`AiAgent`, `Faction`, `NavigationTarget`, `Health`), determinism and threading rules | Review | ADR records the component model, think schedule, and the rule that AI decisions are computed on the main/Flecs thread while Jolt callbacks stay deferred |
+| 14.2 | **AI components and spatial queries:** `AiAgent` state/target/speed profile, faction relation lookup, neighborhood pickup through `SpatialIndex`, camera-relative presence checks | T1 | Create 50 agents; nearest hostile and friendly filters return deterministic, expected entities within the configured perception radius |
+| 14.3 | **Steering controller:** seek, arrival braking, orbit/dogfight, separation, heading alignment; writes ECS `Velocity` and orientation only | T1 | A seeker from standstill decelerates before a target and points its ship forward; separation pushes two nearby agents apart |
+
+### Phase B – traffic and movement
+
+| Step | Deliverable | Verified by | Done when |
+|------|-------------|-------------|-----------|
+| 14.4 | **Finite-state behavior:** Patrol, Transit, Docking, Engage, Evade, and Retreat states with hysteresis/timers | T1 | State transitions fire in sequence without rapid oscillation near thresholds |
+| 14.5 | **Navigation and traffic management:** station-to-station routes, waypoint queues, dock slots, separation, priority, and deterministic deconfliction | T1 | A multi-ship traffic test reaches dock markers without collision events and repeats with the same positions |
+| 14.6 | **Physics island coupling:** kinematic NPC ships attach through M11's `PhysicsBody`, synchronize with `syncEcsToPhysics`, and read back through `syncPhysicsToEcs` | T1 + T3 | NPC ships obey AI velocity, collide with asteroids, and keep WorldPosition precision at >1e12 m |
+
+### Phase C – combat and scale
+
+| Step | Deliverable | Verified by | Done when |
+|------|-------------|-------------|-----------|
+| 14.7 | **Combat interaction:** target acquisition, Jolt `castRay` line-of-sight, range checks, weapon cooldown, minimal damage events and audio triggers | T1 | Hostile enters range → acquires and fires; ally enters range → ignored; line-of-sight block prevents a shot |
+| 14.8 | **Schedule and perf guard:** staggered think intervals, per-tick agent budget, and deterministic decision order | T1 + T4 | 50 agents tick every frame at 60 fps in the benchmark harness; rerun produces identical decisions |
+| 14.9 | **M14 exit proof:** 50 NPC ships combining patrol, station transit, combat, and traffic in one simulated run | T1 + T4 | Traffic reaches stations, combat engages and evades, collisions are resolved, p95 AI+physics step stays inside the ADR-004 interval, and results remain deterministic |
+
+Scope note: AI evolves entirely in the game layer (`src/ai` or equivalent) and stays internal until a public consumer justifies a facade (ADR-0009). Gameplay inventory/economy/missions remain M15; toon HUD work is M16; persistence of AI identities is M18.
+
 ### M15 – Gameplay Systems
 
 - **Goal:** Inventory/cargo, trading/economy, missions/contracts, damage/
