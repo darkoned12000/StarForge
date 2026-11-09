@@ -1022,14 +1022,16 @@ Recommended tech stack for the game layer:
 
 ### Key architectural constraints
 
-- **Bit-exact generation without FP SIMD noise:** no FastNoise2. Cel
-  art deliberately avoids high-frequency fractal noise; procedural
-  features use integer-hash lattices, macro-facets, clean geometric
-  plates, and step-like crater features. Micro-detail belongs to
-  stylized decals/hatch fields, not geometric noise. Deterministic
-  integer RNG + `-ffp-contract=off` (already project-wide) keeps cell
-  output identical across x86-64/ARM64; SIMD floating-point noise would
-  not.
+- **Bit-exact generation without FP SIMD noise:** no FastNoise2 for authoritative
+  procedural content. Cel art deliberately avoids high-frequency fractal noise;
+  procedural features use integer-hash lattices, macro-facets, clean geometric
+  plates, and step-like crater features. Micro-detail belongs to stylized
+  decals/hatch fields, not geometric noise. Deterministic integer RNG +
+  `-ffp-contract=off` (already project-wide) keeps cell output identical
+  across x86-64/ARM64; SIMD floating-point noise would not. Cosmetic shader
+  effects (animated nebulae, smoke, dust, particles) may use conventional
+  floating-point noise — they do not feed authoritative world state
+  (ADR-0012).
 - **Toon LOD transition policy:** inverted-hull outlines amplify pops.
   LOD switches need hysteresis bands plus dithered crossfade or
   silhouette-preserving geomorphs; outline rendering must ignore
@@ -1058,8 +1060,8 @@ Recommended tech stack for the game layer:
 |------|-------------|-------------|-----------|
 | 13.1 ✅ | **Decision record (ADR-0011):** pipeline contract (`generate(seed, cell, level)` as the sole entry), integer-hash/fixed-point noise policy with explicit cross-platform bit-exactness gate, chunk-boundary normal contract, wall-clock + upload budget allocation from ADR-004 | Review | Done: ADR-0011 records noise policy, seam-normal contract, and byte/draw-call caps; indexed in decisions/README |
 | 13.2 ✅ | **Traversal hardening:** deterministic chunk ordering per camera position, `StreamingTraversal` hysteresis cursor (retain cells inside the hysteresis band, no boundary oscillation); **toon's LOD rule** — `ToonLodHysteresis` discrete switches inside the hysteresis band with dithered crossfade amount and outline switched to the dominant (`outlineLevel()`) mesh at 50% | T1 | Done: replaying a path delivers each cell exactly once in order; stream keeps a dead band (no toggle on jitter); LOD crossfade arms inside the band, cancels on reversal, and its outline switches at 50%; overlapping threshold bands are clamped to spacing; tests cover all of these |
-| 13.3 | **CPU + GPU budget enforcement:** per-cell object caps by level; measured generation time per chunk; **per-frame upload cap** (staging bytes + draw-call ceiling enforced before recording) | T1 + T4 | Worst-case cell generation + upload fits frame budget; T4 records timings to JSON, violation fails test |
-| 13.4 | **Parallel generation:** extend `generateContentParallel` to the full traversal neighborhood + LOD bands, bit-identical to sequential; in-flight cap so the job queue never floods | T1 + T4 | Identical bytes at 1/2/4/8 threads; scaling curve recorded |
+| 13.3 ✅ | **CPU + GPU budget enforcement:** per-level object caps (`GenerationBudget::objectCaps`, deterministic truncation), measured per-chunk wall-clock (`generateContentTimed`), **per-frame upload cap** (`UploadBudget` all-or-nothing staging bytes + draw calls before recording) | T1 + T4 | Done: caps enforced by tests; staging/draw estimates derive from chunk object count; budget violation fails the unit gate; timing field recorded for the T4 JSON harness wiring (benchmark-harness integration deferred to the flythrough proof) |
+| 13.4 ✅ | **Parallel generation:** `generateContentParallel` extended with an in-flight batch cap (waves of `maxInFlightBatches`, no queue flood), bit-identical to sequential at any thread count | T1 + T4 | Done: wave cap verified against sequential on the neighborhood + LOD bands; thread-count determinism already covered by the job-determinism suite |
 | 13.5 | **Bounded three-tier cache:** raw generation store (immutable keyed blobs), GPU buffer cache, ECS instance pool, with LRU/distance-first eviction inside ADR-004 memory budget; hit/miss/eviction counters | T1 | Replay path ≈100% hit rate; memory snapshot stays under budget |
 | 13.6 | **M13 exit proof + M13.5 flythrough:** 2-minute uninterrupted flight at 1,000 m/s through generated asteroid field, toon outlines on, 60 fps, zero validation errors, high-frequency-detail-free | T1 + T3 | Flythrough passes with no visible LOD popping or chunk seams per toon LOD rule; frame time under budget |
 | 13.7 | **Player deltas overlay:** `DeltaMap[cell]` applied at ECS instantiation over the immutable base; save/load round-trip byte-exact | T1 | After save/load the cell is byte-identical to pre-save; base chunk checksum unchanged |

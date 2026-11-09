@@ -1,6 +1,6 @@
 # ADR-0011: Procedural generation pipeline, determinism, and caching
 
-- **Status:** Accepted (M13.1)
+- **Status:** Accepted (M13.1); noise-scope wording superseded by ADR-0012.
 - **Context:** M13 turns the M6 pure generator into a runtime streaming
   system that survives a moving camera at 60 fps. The project’s
   toon/cel-shaded art direction and M2 precision contract add two
@@ -37,10 +37,15 @@
        by the game layer.
     Eviction policy (LRU/distance-first, budgets) lives in the
     scene/streaming director, not the generator.
-  - **Deltas are a read-time overlay:** `final = ApplyDelta(base, DeltaMap[cell])`
+- **Deltas are a read-time overlay:** `final = ApplyDelta(base, DeltaMap[cell])`
     evaluated when instantiating ECS entities. Base chunks stay
     immutable for byte-checksum tests and reset/respawn debugging;
     saved deltas are stored sparse, never mutated into cached bytes.
+  - **Generation describes state, rendering decides appearance:**
+    `ContentObject` carries type, subtype, position, scale, and orientation,
+    not mesh topology or material styling. Authored/generated geometry and
+    toon materials live in their own layers so a later visual direction can
+    change without rewriting the world generator.
 - **Alternatives considered:**
   - **FastNoise2 (rejected):** fastest quality noise, but SIMD
     floating-point paths (AVX2/AVX-512/NEON) make bit-identical outputs
