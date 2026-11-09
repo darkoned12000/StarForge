@@ -86,6 +86,12 @@ public:
     [[nodiscard]] std::optional<RayHit>
     castRay(const JPH::Vec3& from, const JPH::Vec3& direction, RaycastTarget target = RaycastTarget::SolidOnly) const;
 
+    // Casts a ray that ignores the given body (e.g. the shooter's own body
+    // when firing from inside a large hull). An invalid handle ignores
+    // nothing.
+    [[nodiscard]] std::optional<RayHit> castRay(const JPH::Vec3& from, const JPH::Vec3& direction,
+                                                RaycastTarget target, BodyHandle ignoreBody) const;
+
     [[nodiscard]] JPH::Vec3 getPosition(BodyHandle body) const;
     [[nodiscard]] JPH::Vec3 getLinearVelocity(BodyHandle body) const;
     void setLinearVelocity(BodyHandle body, JPH::Vec3 velocity);

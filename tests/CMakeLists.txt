@@ -52,6 +52,9 @@ add_executable(starforge_tests
     test_ai_perception.cpp
     test_ai_steering.cpp
     test_ai_behavior.cpp
+    test_ai_combat.cpp
+    test_ai_scheduler.cpp
+    test_ai_exit_proof.cpp
     test_ai_traffic.cpp
     test_ai_physics.cpp
     test_physics.cpp

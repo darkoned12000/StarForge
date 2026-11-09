@@ -12,6 +12,8 @@ namespace starforge::ai
 // Inter-faction stance. Same-faction entities are compatible, pirates
 // (faction 0) are hostile to everyone else, and all other distinct
 // factions remain neutral until the Phase C diplomacy layer adds a table.
+// Allies is reserved for that diplomacy table (M15+) and is never
+// returned by classifyFaction yet.
 enum class FactionRelation
 {
     Same,

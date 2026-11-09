@@ -119,17 +119,43 @@ private:
     bool includeSensors_;
 };
 
+// Body filter that skips one body (invalid BodyID skips nothing).
+class IgnoreBodyFilter final : public JPH::BodyFilter
+{
+public:
+    explicit IgnoreBodyFilter(JPH::BodyID ignoreBody) : ignoreBody_(ignoreBody) {}
+
+    bool ShouldCollide(const JPH::BodyID& body) const override
+    {
+        return body != ignoreBody_;
+    }
+
+private:
+    JPH::BodyID ignoreBody_;
+};
+
 } // namespace
 
 std::optional<PhysicsWorld::RayHit>
 PhysicsWorld::castRay(const JPH::Vec3& from, const JPH::Vec3& direction, RaycastTarget target) const
+{
+    return castRay(from, direction, target, BodyHandle{});
+}
+
+std::optional<PhysicsWorld::RayHit>
+PhysicsWorld::castRay(const JPH::Vec3& from, const JPH::Vec3& direction, RaycastTarget target,
+                      BodyHandle ignoreBody) const
 {
     JPH::RRayCast ray(JPH::RVec3(from.GetX(), from.GetY(), from.GetZ()),
                       JPH::RVec3(direction.GetX(), direction.GetY(), direction.GetZ()));
     JPH::RayCastResult hit;
     const JPH::DefaultBroadPhaseLayerFilter broadPhaseFilter(broadPhaseFilter_, Layers::Moving);
     const RaycastObjectLayerFilter objectLayerFilter(objectLayerFilter_, target == RaycastTarget::IncludeSensors);
-    const bool found = system_.GetNarrowPhaseQuery().CastRay(ray, hit, broadPhaseFilter, objectLayerFilter);
+    // Ignore the shooter's body explicitly: ray origins sit at hull
+    // centres, which are inside the shooter's own collider for any ship
+    // larger than a point.
+    const IgnoreBodyFilter bodyFilter(ignoreBody.id);
+    const bool found = system_.GetNarrowPhaseQuery().CastRay(ray, hit, broadPhaseFilter, objectLayerFilter, bodyFilter);
     if (!found)
     {
         return std::nullopt;

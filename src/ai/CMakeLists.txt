@@ -6,8 +6,10 @@
 
 add_library(starforge_ai STATIC
     behavior.cpp
+    combat.cpp
     components.cpp
     perception.cpp
+    scheduler.cpp
     steering.cpp
     traffic.cpp
 )

@@ -28,7 +28,13 @@ TEST_CASE("AI behavior: finite-state transitions honor hysteresis")
     sensors.hasPerceivedTarget = false;
     CHECK(nextBehavior(BehaviorState::Engaging, sensors, params.lostTargetSeconds, params) == BehaviorState::Transit);
 
+    // Recovery hysteresis: at 0.2 health an evading ship must NOT stop
+    // evading just because the attacker left perception — it holds
+    // Evading until repaired to >= 0.5 health. (The old exit rule made
+    // hurt ships bounce Evading -> Transit -> Evading every tick.)
     CHECK(nextBehavior(BehaviorState::Evading, {.hasDestination = true, .hasPerceivedTarget = false, .healthRatio = 0.2},
+                       params.evadeDurationSeconds, params) == BehaviorState::Evading);
+    CHECK(nextBehavior(BehaviorState::Evading, {.hasDestination = true, .hasPerceivedTarget = false, .healthRatio = 0.6},
                        params.evadeDurationSeconds, params) == BehaviorState::Transit);
 
     sensors.hasPerceivedTarget = true;
@@ -88,6 +94,66 @@ TEST_CASE("AI behavior: destination arrival docks and low health evades")
 
     const BehaviorState state = updateBehavior(world, index, ship, 1.0 / 60.0, BehaviorParams{});
     CHECK(state == BehaviorState::Evading);
+}
+
+TEST_CASE("AI behavior: evasion flees at full throttle even under 25 m")
+{
+    Ecs world;
+    registerAiComponents(world);
+
+    const auto origin = starforge::spatial::WorldPosition::fromMeters(0.0, 0.0, 0.0);
+    const auto hostilePos = starforge::spatial::WorldPosition::fromMeters(20.0, 0.0, 0.0);
+    REQUIRE(origin.has_value());
+    REQUIRE(hostilePos.has_value());
+
+    const auto ship = createNpcShip(world, *origin, 1);
+    auto& agent = ship.get_mut<AiAgent>();
+    agent.state = BehaviorState::Transit;
+    agent.maxSpeed = 100.0f;
+    agent.maxAcceleration = 10000.0f;
+    auto& health = ship.get_mut<Health>();
+    health.currentHealth = 20.0f; // < 0.25: evade
+    const auto hostile = createNpcShip(world, *hostilePos, 0);
+
+    SpatialIndex index(world);
+    index.rebuild();
+
+    CHECK(updateBehavior(world, index, ship, 1.0 / 60.0, BehaviorParams{}) == BehaviorState::Evading);
+    REQUIRE(ship.has<starforge::ecs::Velocity>());
+    const auto velocity = ship.get<starforge::ecs::Velocity>().linear;
+    // Fleeing away from the attacker (+X), not braked to a stop by the
+    // arrival radius.
+    CHECK(velocity.x < -1.0);
+    // Re-read through the entity: updateBehavior adds a Velocity
+    // component, which may move the entity to a new table and
+    // invalidate the earlier component reference.
+    CHECK(ship.get<AiAgent>().target == hostile);
+}
+
+TEST_CASE("AI behavior: perception ignores 0-HP wrecks")
+{
+    Ecs world;
+    registerAiComponents(world);
+
+    const auto origin = starforge::spatial::WorldPosition::fromMeters(0.0, 0.0, 0.0);
+    const auto wreckPos = starforge::spatial::WorldPosition::fromMeters(40.0, 0.0, 0.0);
+    const auto threatPos = starforge::spatial::WorldPosition::fromMeters(80.0, 0.0, 0.0);
+    REQUIRE(origin.has_value());
+    REQUIRE(wreckPos.has_value());
+    REQUIRE(threatPos.has_value());
+
+    const auto ship = createNpcShip(world, *origin, 1);
+    const auto wreck = createNpcShip(world, *wreckPos, 0);
+    const auto threat = createNpcShip(world, *threatPos, 0);
+    wreck.get_mut<Health>().currentHealth = 0.0f;
+
+    SpatialIndex index(world);
+    index.rebuild();
+
+    CHECK(updateBehavior(world, index, ship, 1.0 / 60.0, BehaviorParams{}) == BehaviorState::Engaging);
+    // The nearest ship is the wreck at 40 m, but the live threat at 80 m
+    // must be acquired instead.
+    CHECK(ship.get<AiAgent>().target == threat);
 }
 
 TEST_CASE("AI behavior: idle agent does not steer toward world origin")

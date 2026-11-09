@@ -92,7 +92,7 @@ TEST_CASE("AI traffic: multiple ships reserve distinct slots and arrive")
         agent.maxAcceleration = 200.0f;
         const auto slot = traffic.reserveDockSlot(station, ship, 4);
         REQUIRE(slot.has_value());
-        assignRoute(ship, *start, *stationPos, slot.value());
+        assignRoute(ship, *start, *stationPos, slot.value(), station);
         REQUIRE(ship.has<NavigationRoute>());
         ships.push_back(ship);
     }

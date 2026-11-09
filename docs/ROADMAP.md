@@ -1133,11 +1133,30 @@ tested; scheduling/perf and the combat exit proof remain Phase C.
 
 | Step | Deliverable | Verified by | Done when |
 |------|-------------|-------------|-----------|
-| 14.7 | **Combat interaction:** target acquisition, Jolt `castRay` line-of-sight, range checks, weapon cooldown, minimal damage events and audio triggers | T1 | Hostile enters range → acquires and fires; ally enters range → ignored; line-of-sight block prevents a shot |
-| 14.8 | **Schedule and perf guard:** staggered think intervals, per-tick agent budget, and deterministic decision order | T1 + T4 | 50 agents tick every frame at 60 fps in the benchmark harness; rerun produces identical decisions |
-| 14.9 | **M14 exit proof:** 50 NPC ships combining patrol, station transit, combat, and traffic in one simulated run | T1 + T4 | Traffic reaches stations, combat engages and evades, collisions are resolved, p95 AI+physics step stays inside the ADR-004 interval, and results remain deterministic |
+| 14.7 ✅ | **Combat interaction:** target acquisition, Jolt `castRay` line-of-sight, range checks, weapon cooldown, minimal damage events and audio triggers | T1 | Hostile enters range → acquires and fires; ally enters range → ignored; line-of-sight block prevents a shot |
+| 14.8 ✅ | **Schedule and perf guard:** staggered think intervals, per-tick agent budget, and deterministic decision order | T1 + T4 | 50 agents tick every frame at 60 fps in the benchmark harness; rerun produces identical decisions |
+| 14.9 ✅ | **M14 exit proof:** 50 NPC ships combining patrol, station transit, combat, and traffic in one simulated run | T1 + T4 | Traffic reaches stations, combat engages and evades, collisions are resolved, p95 AI+physics step stays inside the ADR-004 interval, and results remain deterministic |
+
+**Status: Phase C complete (14.7/14.8/14.9 ✅); M14 complete.** `src/ai/combat`
+adds `Weapon` cooldown/damage, Jolt `castRay` line-of-sight verified by
+Flecs user data (self-body safe origin, blocker-aware), and
+`DamageEvent`/`CombatFireEvent` for damage and audio triggers.
+`src/ai/scheduler` uses a timer-based due queue with a per-tick budget and
+roll-over (no starvation). `tests/test_ai_exit_proof.cpp` runs two deterministic 600-frame,
+50-ship simulations (25 merchants routing to a station, 25 pirates) to
+identical final positions, with engagements, damage events, and p95 frame
+time inside the 60 fps budget.
 
 Scope note: AI evolves entirely in the game layer (`src/ai` or equivalent) and stays internal until a public consumer justifies a facade (ADR-0009). Gameplay inventory/economy/missions remain M15; toon HUD work is M16; persistence of AI identities is M18.
+
+Known M14 follow-ups for later milestones (intentionally out of scope):
+- 0-HP ships persist as wrecks — M15 needs destruction handling and shields.
+- Patrol holds position (no waypoint loops yet) and weapons are hitscan
+  only — no projectiles/spread/visual tracers.
+- Entity handles inside `AiAgent`, `NavigationTarget`, and `DamageEvent`
+  are runtime-only; M18 persistence must remap them on load.
+- `FactionRelation::Allies` and `AiAgent::trafficPriority` are reserved
+  hooks, not yet wired to behavior.
 
 ### M15 – Gameplay Systems
 

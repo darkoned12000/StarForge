@@ -40,6 +40,13 @@ std::optional<PerceivedTarget> nearestHostile([[maybe_unused]] ecs::Ecs& world, 
             continue;
         }
 
+        // 0-HP ships are wrecks, not threats: never lock onto them or the
+        // agent circles a corpse that tryFire correctly refuses to shoot.
+        if (entity.has<Health>() && entity.get<Health>().currentHealth <= 0.0f)
+        {
+            continue;
+        }
+
         const math::Vec3d relative =
             spatial::toCameraRelative(entity.get<ecs::Transform>().position, agentTransform.position);
         const double distSq = glm::dot(relative, relative);

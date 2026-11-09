@@ -4,6 +4,7 @@
 #include "spatial/world_position.hpp"
 
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace starforge::ai
@@ -16,6 +17,10 @@ struct SteeringParams
     double arrivalRadius = 5.0;
     double separationRadius = 0.0;
     double separationWeight = 1.0;
+    // Maximum yaw rate in radians per second. 0 (the default) snaps
+    // orientation straight to the heading; behavior copies AiAgent::
+    // turnRate here so NPC ships rotate with momentum.
+    double turnRate = 0.0;
 };
 
 // Maximum safe speed for arriving at the target without overshoot.
@@ -29,7 +34,12 @@ struct SteeringParams
 
 // Separation force on the agent from all other nearby entities. Other agents
 // are passed explicitly so the caller can supply whatever local index
-// granularity it already has; Phase B wires in the SpatialIndex.
+// granularity it already has; Phase B wires in the SpatialIndex. The span
+// overload lets per-frame callers pass a stack buffer instead of heap-
+// allocating a vector every think tick.
+[[nodiscard]] math::Vec3d separationVelocity(const math::Vec3d& currentPos,
+                                             std::span<const math::Vec3d> otherPositions,
+                                             const SteeringParams& params) noexcept;
 [[nodiscard]] math::Vec3d separationVelocity(const math::Vec3d& currentPos,
                                              const std::vector<math::Vec3d>& otherPositions,
                                              const SteeringParams& params) noexcept;
@@ -42,6 +52,8 @@ struct SteeringParams
 // neighbours, and writes the result to the entity's Velocity and
 // orientation components. Does not move the entity; Ecs::step does that.
 // Other positions are camera-relative to the agent (zero is the agent).
+void steerEntity(flecs::entity entity, const spatial::WorldPosition& targetPos, double dt,
+                 const SteeringParams& params, std::span<const math::Vec3d> otherPositions);
 void steerEntity(flecs::entity entity, const spatial::WorldPosition& targetPos, double dt,
                  const SteeringParams& params, const std::vector<math::Vec3d>& otherPositions = {});
 

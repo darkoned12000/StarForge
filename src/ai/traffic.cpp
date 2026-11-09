@@ -4,6 +4,8 @@
 #include "spatial/camera_relative.hpp"
 
 #include <algorithm>
+#include <array>
+#include <span>
 
 namespace starforge::ai
 {
@@ -27,11 +29,11 @@ namespace
     return params;
 }
 
-[[nodiscard]] std::vector<math::Vec3d> nearbyPositions(flecs::entity entity, const ecs::SpatialIndex& index,
-                                                        const ecs::Transform& self)
+[[nodiscard]] std::size_t nearbyPositions(flecs::entity entity, const ecs::SpatialIndex& index,
+                                           const ecs::Transform& self,
+                                           std::array<math::Vec3d, 32>& out)
 {
-    std::vector<math::Vec3d> positions;
-    positions.reserve(8);
+    std::size_t count = 0;
     for (const auto other : index.findNeighborhood(self.position))
     {
         if (other == entity || !other.is_alive() || !other.has<ecs::Transform>() ||
@@ -41,12 +43,12 @@ namespace
         }
         const math::Vec3d relative =
             spatial::toCameraRelative(other.get<ecs::Transform>().position, self.position);
-        if (glm::length(relative) <= 100.0)
+        if (glm::length(relative) <= 100.0 && count < out.size())
         {
-            positions.push_back(relative);
+            out[count++] = relative;
         }
     }
-    return positions;
+    return count;
 }
 
 } // namespace
@@ -67,11 +69,27 @@ std::vector<RoutePoint> routeToStation([[maybe_unused]] const spatial::WorldPosi
 }
 
 void assignRoute(flecs::entity entity, const spatial::WorldPosition& from,
-                 const spatial::WorldPosition& station, std::uint8_t dockSlot)
+                 const spatial::WorldPosition& station, std::uint8_t dockSlot,
+                 flecs::entity stationEntity)
 {
     const auto points = routeToStation(from, station, dockSlot);
     NavigationRoute route;
-    route.points = points;
+    route.pointCount = std::min(points.size(), NavigationRoute::kMaxRoutePoints);
+    for (std::size_t i = 0; i < route.pointCount; ++i)
+    {
+        route.points[i] = points[i];
+    }
+    route.station = stationEntity;
+    // Route assignment is transit intent: idle ships start moving now so
+    // advanceRoute's Transit/Docking gate admits them. Combat states are
+    // left untouched — the FSM returns to Transit when the fight ends
+    // because NavigationTarget still has a destination.
+    if (entity.has<AiAgent>() && entity.get<AiAgent>().state == BehaviorState::Patrol)
+    {
+        auto& agent = entity.get_mut<AiAgent>();
+        agent.state = BehaviorState::Transit;
+        entity.modified<AiAgent>();
+    }
     NavigationTarget navigation;
     navigation.positionHint = points.front().position;
     navigation.arrivalRadius = points.front().arrivalRadius;
@@ -80,7 +98,7 @@ void assignRoute(flecs::entity entity, const spatial::WorldPosition& from,
 }
 
 bool advanceRoute(ecs::Ecs& world, flecs::entity entity, double dt,
-                  const ecs::SpatialIndex& index)
+                  const ecs::SpatialIndex& index, TrafficManager* traffic)
 {
     (void)world;
     if (!entity.has<NavigationRoute>() || !entity.has<AiAgent>() || !entity.has<ecs::Transform>())
@@ -94,9 +112,42 @@ bool advanceRoute(ecs::Ecs& world, flecs::entity entity, double dt,
     {
         return true;
     }
-    if (route.points.empty())
+
+    // Combat owns the controls: only civilian states follow the route.
+    // Without this gate, route steering overwrote Engaging/Evading
+    // velocity every tick and ships flew through combat on rails.
+    if (agent.state != BehaviorState::Transit && agent.state != BehaviorState::Docking)
     {
+        return false;
+    }
+
+    // Packet-separation neighbours, stack buffer (no per-tick allocation).
+    std::array<math::Vec3d, 32> neighbours {};
+    const std::size_t neighbourCount = [&] {
+        // transform is read below; fetch it here for the neighbourhood.
+        return nearbyPositions(entity, index, entity.get<ecs::Transform>(), neighbours);
+    }();
+
+    const auto completeRoute = [&] {
         route.complete = true;
+        agent.state = BehaviorState::Stationary;
+        // Drop the destination so the FSM cannot bounce
+        // Stationary -> Docking -> Transit forever on a stale
+        // NavigationTarget (the ship is already parked at the dock).
+        entity.remove<NavigationTarget>();
+        if (traffic != nullptr && route.station.is_alive())
+        {
+            traffic->releaseDockSlot(route.station, entity);
+        }
+        if (entity.has<ecs::Velocity>())
+        {
+            entity.set<ecs::Velocity>({{0.0, 0.0, 0.0}, {0.0f, 0.0f, 0.0f}});
+        }
+    };
+
+    if (route.empty())
+    {
+        completeRoute();
         return true;
     }
 
@@ -104,22 +155,18 @@ bool advanceRoute(ecs::Ecs& world, flecs::entity entity, double dt,
     const RoutePoint& point = route.points[route.currentPoint];
     const math::Vec3d currentToPoint = spatial::toCameraRelative(point.position, transform.position);
     const double distance = glm::length(currentToPoint);
+    const std::span<const math::Vec3d> neighbourSpan(neighbours.data(), neighbourCount);
 
-    if (route.currentPoint + 1 >= route.points.size() && distance <= point.arrivalRadius)
+    if (route.currentPoint + 1 >= route.pointCount && distance <= point.arrivalRadius)
     {
         route.dwellTimer += dt;
         if (route.dwellTimer < route.dwellSeconds)
         {
             steerEntity(entity, point.position, dt, routeSteeringParams(agent, point.arrivalRadius),
-                        nearbyPositions(entity, index, transform));
+                        neighbourSpan);
             return false;
         }
-        route.complete = true;
-        agent.state = BehaviorState::Stationary;
-        if (entity.has<ecs::Velocity>())
-        {
-            entity.set<ecs::Velocity>({{0.0, 0.0, 0.0}, {0.0f, 0.0f, 0.0f}});
-        }
+        completeRoute();
         return true;
     }
 
@@ -127,21 +174,16 @@ bool advanceRoute(ecs::Ecs& world, flecs::entity entity, double dt,
     {
         route.currentPoint += 1;
         route.dwellTimer = 0.0;
-        if (route.currentPoint >= route.points.size())
+        if (route.currentPoint >= route.pointCount)
         {
-            route.complete = true;
-            agent.state = BehaviorState::Stationary;
-            if (entity.has<ecs::Velocity>())
-            {
-                entity.set<ecs::Velocity>({{0.0, 0.0, 0.0}, {0.0f, 0.0f, 0.0f}});
-            }
+            completeRoute();
             return true;
         }
     }
 
     const RoutePoint& activePoint = route.points[route.currentPoint];
     steerEntity(entity, activePoint.position, dt, routeSteeringParams(agent, activePoint.arrivalRadius),
-                nearbyPositions(entity, index, transform));
+                neighbourSpan);
 
     if (entity.has<NavigationTarget>())
     {

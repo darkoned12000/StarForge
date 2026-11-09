@@ -230,6 +230,10 @@ in [docs/decisions/](docs/decisions/README.md).
 - Traffic routes assign deterministic dock slots and lane points.
 - NPC ships couple to the physics island and remain precise beyond
   `10¹² m`.
+- Combat uses range, cooldown, and Jolt raycast line-of-sight checks, and
+  emits damage/fire events.
+- A staggered think schedule bounds per-tick AI cost; a deterministic
+  50-ship, 600-frame exit proof verifies repeatability at 60 fps.
 
 ### Measurement and testing
 
@@ -242,8 +246,6 @@ in [docs/decisions/](docs/decisions/README.md).
 
 ## Current limitations
 
-- M14 Phase C (combat interaction, staggered think scheduling, and the
-  50-NPC exit proof) is not implemented yet.
 - M15 gameplay, M16 HUD/UI, M17 asset loading, and M18 persistence remain
   future work.
 - Planet terrain-height displacement and different-LOD T-junction skirts are

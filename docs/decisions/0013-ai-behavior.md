@@ -1,6 +1,6 @@
 # ADR-0013: AI and behavior architecture
 
-- **Status:** Accepted (M14 Phase A)
+- **Status:** Accepted (M14 complete)
 - **Context:** M14 adds ship behavior on top of the deterministic ECS and
   physics layers. The engine reach and camera-relative transforms mean AI
   must reason in local coordinates, never in astronomical absolute floats.
@@ -26,6 +26,21 @@
   - **Physics coupling:** Phase B drives kinematic NPC bodies through
     M11's existing ECS→Jolt bridge; Dynamic bodies keep their Jolt-owned
     velocity integration.
+  - **Combat (Phase C):** range/cooldown/line-of-sight gating via Jolt
+    `castRay` with the attacker's body filtered out (hull-centre origins
+    sit inside large colliders, so a forward offset is not sound), matched
+    on Flecs user data. `DamageEvent`/`CombatFireEvent` are single-tick
+    payloads accumulated per frame and cleared at frame end.
+  - **Scheduling (Phase C):** timer-based due queue with a per-tick agent
+    budget; agents that miss the budget stay due and roll to later ticks
+    (no starvation). The scheduler's per-tick pass also advances
+    `stateTimer`/`targetLostTimer`, so FSM dwell and lost-target rules
+    run at real simulation speed even though `updateBehavior` only runs
+    on think ticks. Decision order is sorted by entity id with a
+    round-robin cursor, and the snapshot is cached/rebuilt only when the
+    entity population changes, a cached agent dies or loses `AiAgent`,
+    or a 60-tick backstop fires — steady-state ticks pay only an O(N)
+    validity scan, never an O(N log N) sort.
 - **Alternatives considered:**
   - **Behavior trees (deferred):** More flexible, but heavier than the
     finite-state profiles needed for patrol/transit/combat until Phase B.

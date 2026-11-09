@@ -50,7 +50,7 @@ math::Vec3d seekVelocity(const math::Vec3d& currentPos, const math::Vec3d& targe
 }
 
 math::Vec3d separationVelocity(const math::Vec3d& currentPos,
-                               const std::vector<math::Vec3d>& otherPositions,
+                               std::span<const math::Vec3d> otherPositions,
                                const SteeringParams& params) noexcept
 {
     math::Vec3d result{0.0, 0.0, 0.0};
@@ -78,6 +78,13 @@ math::Vec3d separationVelocity(const math::Vec3d& currentPos,
         result += (away / distance) * (falloff * falloff * params.maxSpeed * params.separationWeight);
     }
     return result;
+}
+
+math::Vec3d separationVelocity(const math::Vec3d& currentPos,
+                               const std::vector<math::Vec3d>& otherPositions,
+                               const SteeringParams& params) noexcept
+{
+    return separationVelocity(currentPos, std::span<const math::Vec3d>(otherPositions), params);
 }
 
 math::Vec4f headingForDirection(const math::Vec3d& dir) noexcept
@@ -113,7 +120,7 @@ math::Vec4f headingForDirection(const math::Vec3d& dir) noexcept
 }
 
 void steerEntity(flecs::entity entity, const spatial::WorldPosition& targetPos, double dt,
-                 const SteeringParams& params, const std::vector<math::Vec3d>& otherPositions)
+                 const SteeringParams& params, std::span<const math::Vec3d> otherPositions)
 {
     const auto& transform = entity.get<ecs::Transform>();
     const math::Vec3d targetRelative = spatial::toCameraRelative(targetPos, transform.position);
@@ -149,9 +156,41 @@ void steerEntity(flecs::entity entity, const spatial::WorldPosition& targetPos, 
     auto& mutableTransform = entity.get_mut<ecs::Transform>();
     if (glm::length(targetRelative) > params.arrivalRadius)
     {
-        mutableTransform.orientation = headingForDirection(targetRelative);
+        const auto targetHeading = headingForDirection(targetRelative);
+        if (params.turnRate > 0.0 && dt > 0.0)
+        {
+            // Rate-limit the yaw so ships rotate with momentum instead of
+            // snapping. Slerp from the current orientation toward the
+            // target heading, clamped to turnRate * dt radians.
+            const glm::quat currentQuat{transform.orientation.w, transform.orientation.x,
+                                        transform.orientation.y, transform.orientation.z};
+            const glm::quat targetQuat{targetHeading.w, targetHeading.x, targetHeading.y, targetHeading.z};
+            float cosHalf = std::clamp(std::abs(glm::dot(currentQuat, targetQuat)), 0.0f, 1.0f);
+            const float halfAngle = std::acos(cosHalf);
+            const double maxHalfAngle = params.turnRate * dt * 0.5;
+            if (halfAngle > maxHalfAngle)
+            {
+                const glm::quat stepped = glm::slerp(currentQuat, targetQuat,
+                                                     static_cast<float>(maxHalfAngle / halfAngle));
+                mutableTransform.orientation = {stepped.x, stepped.y, stepped.z, stepped.w};
+            }
+            else
+            {
+                mutableTransform.orientation = targetHeading;
+            }
+        }
+        else
+        {
+            mutableTransform.orientation = targetHeading;
+        }
     }
     entity.modified<ecs::Transform>();
+}
+
+void steerEntity(flecs::entity entity, const spatial::WorldPosition& targetPos, double dt,
+                 const SteeringParams& params, const std::vector<math::Vec3d>& otherPositions)
+{
+    steerEntity(entity, targetPos, dt, params, std::span<const math::Vec3d>(otherPositions));
 }
 
 } // namespace starforge::ai
