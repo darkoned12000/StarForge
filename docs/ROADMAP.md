@@ -1229,6 +1229,27 @@ Known M14 follow-ups for later milestones (intentionally out of scope):
   60 fps at the ADR-004 interval, zero validation errors. Recorded as
   a reproducible sandbox/game-layer scene; screenshots/goldens
   reviewed for visual identity (not just pixel counts).
+- **Where it lives:** new game-layer executable `apps/game/` (not the
+  public-API sandbox). Rendering goes through the public API
+  (`Application`/`Renderer`/`Starfield`/`Toon`/`Audio` + `WorldPosition`);
+  ECS/physics/AI/audio internals are linked as game layer. It is the
+  integration test for a week of engine work: if it does not feel like
+  a game, gaps are filed as deferred items, not as engine redesigns.
+- **Non-goal for this milestone:** economy, missions, trading, stations,
+  persistence. Those keep M15 from becoming a second-engine project.
+
+| Step | Deliverable | Verified by | Done when |
+|------|-------------|-------------|-----------|
+| 15.0.1 | Game shell: `apps/game/` main loop — fixed-step simulation (60 Hz) decoupled from render, resize/minimize handling, clean shutdown | T5 | Window opens, loop runs, close is validation-clean; simulation steps at fixed dt regardless of frame rate |
+| 15.0.2 | Player ship + input + camera: keyboard (thrust/roll/pitch/yaw) + mouse steering, ECS `Transform`/`Velocity` ship, chase camera, all positions via `WorldPosition` → camera-relative | T1+T5 | Ship flies and steers continuously; camera follows without jitter; ship works at >1e12 m from origin |
+| 15.0.3 | Procedural field integration: `StreamingTraversal` + `RawGenerationStore` + `instantiateChunk` driving ECS asteroids, toon/instanced rendering, zero stalls | T1+T3 | Player crosses cell boundaries with no loading screens and no frame pop over the upload budget; distant fields have cheap representation |
+| 15.0.4 | Environment showcase: planet patch + atmosphere shell, nebula backdrop, starfield — all composed in one frame, toon-consistent | T3 | Headless render of the composed scene passes; orbit→approach path renders planet dish + atmosphere limb; zero validation errors |
+| 15.0.5 | Combat slice: one M14 AI hostile (engage/evade), weapon fire, shield hit, health/damage events, audio trigger through M12 facade | T1+T5 | Player can fight and be damaged; hostile engages and evades; hits show stylized effects; no Flecs mutation from physics/audio threads |
+| 15.0.6 | Integration + budgets gate: 5-minute flight proof, frame-time p95 < ADR-004 interval, screenshot/golden review | T4+T5 | 5 minutes continuous play, no loading screens, 0 validation errors, screenshots reviewed for art direction (not pixel counts alone) |
+
+**Exit (M15.0):** a playable demo a stranger can run: fly, explore,
+fight, look at the toon art direction — and a list of gaps filed for
+M15/M17, not silently absorbed.
 
 ### M15 – Gameplay Systems
 
@@ -1246,6 +1267,14 @@ Known M14 follow-ups for later milestones (intentionally out of scope):
   Player modifications to preserve: mined-asteroid depletion, destroyed
   stations, discovered/visited locations, collected resources, ownership
   and faction changes (see M18).
+
+| Step | Deliverable | Verified by | Done when |
+|------|-------------|-------------|-----------|
+| 15.1 | Damage/shields/subsystems + destruction: shield pool, hull, subsystem hits, 0-HP wreck resolution (closes M14 follow-up) | T1 | Ship takes shield→hull damage, 0-HP wrecks stop thinking/moving and stay as wrecks; events drive audio/visuals |
+| 15.2 | Cargo/inventory + stations: shared cargo model, station stock, buy/sell, docking approach + dock slots (extends M14 traffic) | T1+T5 | Player can dock at a station UI, buy cargo; cargo changes are deltas, not base-chunk mutations |
+| 15.3 | Missions/contracts + progression: mission offer/accept/complete, credit reward, one unlock gate (e.g. jump range) | T1+T5 | Full loop completes: accept → fly → dock/complete → credit + unlock persists through M18 |
+| 15.4 | Authored-override layer + jumping: designer-placed station/encounter wins over generated content in its cell; jump to a new system with streaming intact | T1+T3 | Authored content appears at its authored cell and survives regeneration; jump crosses systems with precision held and no loading screen |
+| 15.5 | M15 exit proof: trading loop end-to-end (buy → fly → dock → sell → repeat) in the `apps/game/` demo | T5+T4 | Loop runs on the First Flight build: player flies, docks, trades, earns credits, repeatable; 60 fps, zero validation errors |
 
 ### M16 – UI and HUD
 
