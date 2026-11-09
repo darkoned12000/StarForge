@@ -140,6 +140,10 @@ TEST_CASE("Golden: starfield matches reference image (8.8)")
         vkCmdSetScissor(cmd, 0, 1, &scissor);
 
         StarfieldRenderContext starContext;
+        starContext.viewProj = starforge::math::perspectiveVulkan(glm::radians(60.0f), 1.0f, 0.1f, 100.0f) *
+                               glm::lookAt(starforge::math::Vec3f{0.0f, 0.0f, 5.0f}, starforge::math::Vec3f{0.0f, 0.0f, 0.0f},
+                                           starforge::math::Vec3f{0.0f, 1.0f, 0.0f});
+        starContext.invViewProj = glm::inverse(starContext.viewProj);
         starContext.resolution = {static_cast<float>(kW), static_cast<float>(kH)};
         starContext.time = 1.0f;
         StarfieldParams starParams;
@@ -307,6 +311,10 @@ TEST_CASE("Budget: starfield frame time under ADR-004 interval (8.8)")
         REQUIRE(vkCreateFence(device->device(), &fenceInfo, nullptr, &fence) == VK_SUCCESS);
 
         StarfieldRenderContext starContext;
+        starContext.viewProj = starforge::math::perspectiveVulkan(glm::radians(60.0f), 1.0f, 0.1f, 100.0f) *
+                               glm::lookAt(starforge::math::Vec3f{0.0f, 0.0f, 5.0f}, starforge::math::Vec3f{0.0f, 0.0f, 0.0f},
+                                           starforge::math::Vec3f{0.0f, 1.0f, 0.0f});
+        starContext.invViewProj = glm::inverse(starContext.viewProj);
         starContext.resolution = {static_cast<float>(kW), static_cast<float>(kH)};
         StarfieldParams starParams;
 

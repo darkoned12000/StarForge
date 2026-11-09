@@ -16,18 +16,39 @@ namespace
 {
 
 // Must match the PushConstants struct in shaders/graphics/starfield.slang
-// (std430: time @0, intensity @4, resolution @8, invViewProj @16; 80 bytes).
+// (camera basis + time/intensity/aspect/tanHalfFov; 64 bytes).
 struct PushConstants
 {
-    float time = 0.0f;
-    float intensity = 1.0f;
-    math::Vec2f resolution{1.0f, 1.0f};
-    math::Mat4f invViewProj{1.0f};
+    math::Vec4f right{1.0f, 0.0f, 0.0f, 0.0f};
+    math::Vec4f up{0.0f, 1.0f, 0.0f, 0.0f};
+    math::Vec4f forward{0.0f, 0.0f, -1.0f, 0.0f};
+    math::Vec4f timeIntensityAspectTan{0.0f, 1.0f, 1.0f, 1.0f};
 };
 
-static_assert(sizeof(PushConstants) == 80, "PushConstants size must match Slang std430 layout (80 bytes)");
-static_assert(offsetof(PushConstants, resolution) == 8, "PushConstants resolution offset must be 8");
-static_assert(offsetof(PushConstants, invViewProj) == 16, "PushConstants invViewProj offset must be 16");
+static_assert(sizeof(PushConstants) == 64, "PushConstants size must match Slang layout (64 bytes)");
+static_assert(offsetof(PushConstants, timeIntensityAspectTan) == 48, "Starfield time params offset must be 48");
+
+// Extracts world-space camera axes and the vertical tan(half-FOV) from a
+// view-projection matrix without relying on its translation. The P11
+// factor is rotation-invariant: it is the length of the second row of the
+// full matrix, so it works for any camera orientation.
+[[nodiscard]] PushConstants skyBasis(const math::Mat4f& viewProj, float time, float intensity, float aspect)
+{
+    const math::Mat4f invView = glm::inverse(viewProj);
+    const math::Vec3f right = glm::normalize(math::Vec3f(invView[0]));
+    const math::Vec3f up = glm::normalize(math::Vec3f(invView[1]));
+    const math::Vec3f forward = -glm::normalize(math::Vec3f(invView[2]));
+    const float projRow1Squared = viewProj[0][1] * viewProj[0][1] + viewProj[1][1] * viewProj[1][1] +
+                                  viewProj[2][1] * viewProj[2][1];
+    const float tanHalfFov = projRow1Squared > 0.0f ? 1.0f / std::sqrt(projRow1Squared) : 1.0f;
+
+    PushConstants push;
+    push.right = math::Vec4f{right, 0.0f};
+    push.up = math::Vec4f{up, 0.0f};
+    push.forward = math::Vec4f{forward, 0.0f};
+    push.timeIntensityAspectTan = math::Vec4f{time, intensity, aspect, tanHalfFov};
+    return push;
+}
 
 std::vector<char> readFile(const std::string& path)
 {
@@ -236,12 +257,9 @@ void StarfieldRenderer::render(VkCommandBuffer cmd, const StarfieldRenderContext
         return;
     }
 
-    const PushConstants push{
-        .time = params.time != 0.0f ? params.time : context.time,
-        .intensity = params.intensity,
-        .resolution = context.resolution,
-        .invViewProj = context.invViewProj,
-    };
+    const float skyAspect = context.resolution.x / std::max(context.resolution.y, 1.0f);
+    const PushConstants push = skyBasis(context.viewProj, params.time != 0.0f ? params.time : context.time,
+                                        params.intensity, skyAspect);
 
     vkCmdPushConstants(cmd, pipelineLayout_, VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, static_cast<std::uint32_t>(sizeof(PushConstants)), &push);

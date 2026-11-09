@@ -1,15 +1,18 @@
-// Procedural starfield: position-less fullscreen triangle, push constants only.
-// Stars are pinned to world-space directions (no screen-locked stickers):
-// the fragment shader reconstructs the view direction from invViewProj
-// and hashes 3D direction cells around the view sphere.
-// Push: time, intensity, resolution | invViewProj = 80B.
+// Procedural starfield: position-less fullscreen triangle, camera-basis
+// push constants only. Stars are pinned to world-space directions (no
+// screen-locked stickers): the fragment shader reconstructs the view
+// direction directly from the camera basis so camera translation cannot
+// shift the sky. Alpha stays opaque (1) because this is the base sky pass;
+// the pipeline created for it has blending disabled.
+// Push: camera basis (right/up/forward) + {time, intensity, aspect,
+// tanHalfFov} = 64 bytes.
 
 struct PushConstants
 {
-    float time;
-    float intensity;
-    float2 resolution;
-    float4x4 invViewProj;
+    float4 right;
+    float4 up;
+    float4 forward;
+    float4 timeIntensityAspectTan;
 };
 
 [[vk::push_constant]] PushConstants pc;
@@ -17,18 +20,18 @@ struct PushConstants
 struct VSOutput
 {
     float4 position : SV_Position;
-    float2 uv : TEXCOORD0;
+    float2 ndc : TEXCOORD0;
 };
 
 [shader("vertex")]
 VSOutput vertexMain(uint vertexId : SV_VertexID)
 {
     float2 positions[3] = { float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0) };
-    VSOutput out;
+    VSOutput output;
     float2 pos = positions[vertexId];
-    out.position = float4(pos, 0.0, 1.0);
-    out.uv = pos * 0.5 + 0.5;
-    return out;
+    output.position = float4(pos, 0.0, 1.0);
+    output.ndc = pos;
+    return output;
 }
 
 // 32-bit integer hash for uniform distribution without float precision artifacts
@@ -39,11 +42,11 @@ uint hash32(uint x)
     return x;
 }
 
-float hash31(float3 p)
+float hash31(int3 p)
 {
-    uint u = hash32(uint(asuint(p.x)));
-    u = hash32(u ^ uint(asuint(p.y)));
-    u = hash32(u ^ uint(asuint(p.z)));
+    uint u = hash32(uint(p.x));
+    u = hash32(u ^ uint(p.y));
+    u = hash32(u ^ uint(p.z));
     return float(u) * (1.0 / 4294967296.0);
 }
 
@@ -51,21 +54,24 @@ float hash31(float3 p)
 float4 fragmentMain(VSOutput input) : SV_Target
 {
     // World-space view direction through this pixel.
-    float4 clip = float4(input.uv * 2.0 - 1.0, 1.0, 1.0);
-    float4 worldRay = mul(pc.invViewProj, clip);
-    float3 dir = normalize(worldRay.xyz / max(worldRay.w, 1e-5));
+    float3 dir = normalize(pc.right.xyz * input.ndc.x * pc.timeIntensityAspectTan.z * pc.timeIntensityAspectTan.w +
+                           pc.up.xyz * input.ndc.y * pc.timeIntensityAspectTan.w +
+                           pc.forward.xyz);
 
     // 3D direction cells (pinned to the sky sphere; turning the camera
     // moves stars correctly, unlike screen-space grids). Cell size trades
     // star density against angular core size (visible at test resolution).
     const float cellSize = 12.0;
-    float3 cell = floor(dir * cellSize);
+    int3 cell = int3(floor(dir * cellSize));
 
-    // One star (sometimes) per cell at a hashed direction.
+    // One star (sometimes) per cell, jittered inside its own cell so the
+    // pixel evaluating that cell can actually see it.
     float h = hash31(cell);
-    float3 starDir = normalize(float3(hash31(cell + 19.19), hash31(cell + 7.7), hash31(cell + 13.13)) * 2.0 - 1.0);
+    float3 jitter = float3(hash31(cell + int3(19, 19, 19)), hash31(cell + int3(7, 7, 7)),
+                           hash31(cell + int3(13, 13, 13)));
+    float3 starDir = normalize(float3(cell) + 0.2 + 0.6 * jitter);
     // Power-law brightness: most faint, few bright; drives apparent size.
-    float mag = pow(1.0 - hash31(cell + 31.7), 6.0);
+    float mag = pow(1.0 - hash31(cell + int3(31, 31, 31)), 6.0);
     float starScale = 0.6 + mag * 1.6;
 
     // Chord distance from the view ray to the star direction.
@@ -73,18 +79,18 @@ float4 fragmentMain(VSOutput input) : SV_Target
     float dPhys = length(dir - starDir) * cellSize;
 
     // Sharp core (brightness-scaled) with a halo capped at physical 0.24
-    // so it can never clip into a neighboring cell.
+    // so it stays tightly tied to the star's cell.
     float core = smoothstep(0.08, 0.0, d);
     float halo = smoothstep(0.24, 0.0, dPhys) * 0.25;
 
     // Twinkle (brighter stars twinkle faster).
-    float twinkle = 0.75 + 0.25 * sin(pc.time * (1.0 + h * 3.0 + mag * 4.0) + h * 40.0);
+    float twinkle = 0.75 + 0.25 * sin(pc.timeIntensityAspectTan.x * (1.0 + h * 3.0 + mag * 4.0) + h * 40.0);
 
     // Tint: mix between cool blue-white and warm yellow-white by hash.
-    float3 tint = lerp(float3(0.75, 0.85, 1.0), float3(1.0, 0.9, 0.75), hash31(cell + 3.3));
+    float3 tint = lerp(float3(0.75, 0.85, 1.0), float3(1.0, 0.9, 0.75), hash31(cell + int3(3, 3, 3)));
 
     float starThreshold = step(0.82, h);
-    float3 star = tint * (core + halo) * (0.6 + mag * 2.4) * twinkle * pc.intensity * starThreshold;
+    float3 star = tint * (core + halo) * (0.6 + mag * 2.4) * twinkle * pc.timeIntensityAspectTan.y * starThreshold;
 
     // Deep-space background.
     float3 background = float3(0.008, 0.01, 0.025);

@@ -99,7 +99,7 @@ float aastep(float threshold, float value)
 [shader("vertex")]
 VSOutput vertexMain(uint vertexIndex : SV_VertexID)
 {
-    VSOutput out;
+    VSOutput output;
     uint idx = min(vertexIndex, 35u);
     float3 objectPos = kCubePositions[idx];
     float3 objectNormal = kCubeNormals[idx];
@@ -115,10 +115,10 @@ VSOutput vertexMain(uint vertexIndex : SV_VertexID)
     float4 viewPos = mul(pc.modelView, float4(objectPos, 1.0));
     float3 viewNormal = normalize(mul(pc.modelView, float4(objectNormal, 0.0)).xyz);
 
-    out.position = mul(pc.mvp, float4(objectPos, 1.0));
-    out.normalView = viewNormal;
-    out.positionView = viewPos.xyz;
-    return out;
+    output.position = mul(pc.mvp, float4(objectPos, 1.0));
+    output.normalView = viewNormal;
+    output.positionView = viewPos.xyz;
+    return output;
 }
 
 [shader("fragment")]
@@ -135,11 +135,14 @@ float4 fragmentMain(VSOutput input) : SV_Target
 
     float ndotl = max(dot(normal, lightDir), 0.0);
 
-    // Anti-aliased cel bands.
-    float bandCount = max(pc.params.x, 1.0);
+    // Anti-aliased cel bands. Differentiate the continuous band coordinate
+    // (not frac()) so the AA window stays monotonic at band boundaries.
+    float bandCount = max(pc.params.x, 2.0);
     float rawBand = ndotl * bandCount;
-    float steppedBand = floor(rawBand) + aastep(0.5, frac(rawBand));
-    float banded = clamp(steppedBand / bandCount, 0.0, 1.0);
+    float bandWidth = fwidth(rawBand) * 0.7071;
+    float nearestBand = round(rawBand);
+    float steppedBand = nearestBand - 1.0 + smoothstep(-bandWidth, bandWidth, rawBand - nearestBand);
+    float banded = clamp(steppedBand / max(bandCount - 1.0, 1.0), 0.0, 1.0);
     float3 diffuse = lerp(pc.shadowColor.rgb, pc.baseColor.rgb, banded);
 
     // Stepped specular, masked so highlights never appear in shadow.

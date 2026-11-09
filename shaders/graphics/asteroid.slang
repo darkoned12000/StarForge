@@ -2,7 +2,9 @@
 // transform (position/scale + unit-quaternion orientation), lambert
 // lighting, depth. Hardware indexed drawing supplies the vertex index,
 // so the shader reads vertices directly (no second dereference).
-// Push: viewProj | vertexAddress, instanceAddress | time = 96B.
+// Push: viewProj | vertexAddress, instanceAddress | time + sun direction
+// (112 bytes). Instance positions must already be camera-relative; the
+// shader receives viewProj only and no astronomical origin.
 
 struct InstanceData
 {
@@ -16,9 +18,8 @@ struct PushConstants
     uint64_t vertexBufferAddress;   // BDA: float4 pos / float4 norm (32B stride)
     uint64_t instanceBufferAddress; // BDA: InstanceData[] (32B stride)
     float time;                     // reserved (per-instance rotation is baked)
+    float3 sunDirection;
     uint pad0;
-    uint pad1;
-    uint pad2;
 };
 
 [[vk::push_constant]] PushConstants pc;
@@ -53,16 +54,16 @@ VSOutput vertexMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID
     float3 worldPos = rotateVector(inst.rotation, scaledPos) + inst.posScale.xyz;
     float3 worldNormal = rotateVector(inst.rotation, localNormal);
 
-    VSOutput out;
-    out.position = mul(pc.viewProj, float4(worldPos, 1.0));
-    out.normal = worldNormal;
-    return out;
+    VSOutput output;
+    output.position = mul(pc.viewProj, float4(worldPos, 1.0));
+    output.normal = worldNormal;
+    return output;
 }
 
 [shader("fragment")]
 float4 fragmentMain(VSOutput input) : SV_Target
 {
-    float3 lightDir = normalize(float3(1.0, 0.5, 0.3));
+    float3 lightDir = normalize(pc.sunDirection);
     float3 n = normalize(input.normal);
     float diffuse = max(dot(n, lightDir), 0.0);
     float3 base = float3(0.42, 0.40, 0.38);

@@ -30,11 +30,14 @@ struct AsteroidFieldRenderContext
 {
     math::Mat4f viewProj{};
     math::Vec3f cameraPosition{0.0f, 0.0f, 0.0f};
+    math::Vec3f sunDirection{1.0f, 0.5f, 0.3f};
     math::Vec2f resolution{1.0f, 1.0f};
 };
 
-// Per-instance transform: xyz position, w scale + unit quaternion
-// orientation (multi-axis tumble). Matches InstanceData in asteroid.slang.
+// Per-instance transform: xyz camera-relative position, w scale + unit
+// quaternion orientation (multi-axis tumble). Instance positions must be
+// computed relative to the camera before upload so the shader never needs
+// astronomical-range coordinates. Matches InstanceData in asteroid.slang.
 struct AsteroidInstance
 {
     math::Vec4f posScale{0.0f, 0.0f, 0.0f, 1.0f};

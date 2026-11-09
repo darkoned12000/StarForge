@@ -71,17 +71,21 @@ std::expected<VkShaderModule, std::string> loadShaderModule(VkDevice device, con
     return module;
 }
 
-// Must match PushConstants in asteroid.slang (96 bytes).
+// Must match PushConstants in asteroid.slang (112 bytes).
 struct alignas(16) PushConstants
 {
     float viewProj[16] = {};
     std::uint64_t vertexBufferAddress = 0;
     std::uint64_t instanceBufferAddress = 0;
     float time = 0.0f;
-    std::uint32_t pad[3] = {};
+    alignas(16) float sunDirection[3] = {1.0f, 0.5f, 0.3f};
+    std::uint32_t pad = 0;
 };
 
 static_assert(std::is_standard_layout_v<PushConstants>, "Asteroid PushConstants must be standard layout");
+static_assert(sizeof(PushConstants) == 112, "Asteroid PushConstants must be 112 bytes");
+static_assert(offsetof(PushConstants, sunDirection) == 96, "Asteroid sun direction offset must be 96");
+static_assert(offsetof(PushConstants, pad) == 108, "Asteroid pad offset must be 108");
 
 } // namespace
 
@@ -269,6 +273,9 @@ void AsteroidFieldRenderer::render(VkCommandBuffer cmd, const AsteroidFieldRende
     push.vertexBufferAddress = params.vertexBufferAddress;
     push.instanceBufferAddress = params.instanceBufferAddress;
     push.time = params.time;
+    push.sunDirection[0] = context.sunDirection.x;
+    push.sunDirection[1] = context.sunDirection.y;
+    push.sunDirection[2] = context.sunDirection.z;
 
     vkCmdPushConstants(cmd, pipelineLayout_, VK_SHADER_STAGE_VERTEX_BIT,
                        0, static_cast<std::uint32_t>(sizeof(push)), &push);

@@ -16,6 +16,7 @@ namespace starforge::environment
 // Camera/volumetric context for raymarched dust (mirrors NebulaRenderContext).
 struct DustFieldRenderContext
 {
+    math::Mat4f viewProj{};
     math::Mat4f invViewProj{1.0f};
     math::Vec3f cameraPosition{0.0f, 0.0f, 0.0f};
     float nearPlane = 0.1f;

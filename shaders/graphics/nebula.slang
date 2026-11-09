@@ -1,7 +1,11 @@
 // Volumetric-look nebula: world-locked FBM sampled along the view
-// direction (octahedral mapped), so it stays pinned when rotating.
-// Push: time, density, scattering, absorption | color(vec4) |
-//       resolution | invViewProj = 112B.
+// direction, so it stays pinned when rotating. The view direction is
+// reconstructed from a camera basis, not by unprojecting a world
+// position, so camera translation cannot shift the nebula.
+// Push: time/density/scattering/absorption | color(vec4) | camera basis
+//       (right/up/forward) + {aspect, tanHalfFov} = 96 bytes.
+// Alpha is 0 because this effect is additive (ONE, ONE) with no
+// background term; it must be drawn after the opaque sky/objects.
 
 struct PushConstants
 {
@@ -10,8 +14,10 @@ struct PushConstants
     float scattering;
     float absorption;
     float4 color;
-    float2 resolution;
-    float4x4 invViewProj;
+    float4 right;
+    float4 up;
+    float4 forward;
+    float4 aspectTan;
 };
 
 [[vk::push_constant]] PushConstants pc;
@@ -19,23 +25,30 @@ struct PushConstants
 struct VSOutput
 {
     float4 position : SV_Position;
-    float2 uv : TEXCOORD0;
+    float2 ndc : TEXCOORD0;
 };
 
 [shader("vertex")]
 VSOutput vertexMain(uint vertexId : SV_VertexID)
 {
     float2 positions[3] = { float2(-1.0, -1.0), float2(3.0, -1.0), float2(-1.0, 3.0) };
-    VSOutput out;
+    VSOutput output;
     float2 pos = positions[vertexId];
-    out.position = float4(pos, 0.0, 1.0);
-    out.uv = pos * 0.5 + 0.5;
-    return out;
+    output.position = float4(pos, 0.0, 1.0);
+    output.ndc = pos;
+    return output;
 }
 
-float hash21(float2 p)
+uint hash32(uint x)
 {
-    uint2 u = uint2(asuint(p.x), asuint(p.y));
+    x = x * 1664525u + 1013904223u;
+    x ^= x >> 16u;
+    return x;
+}
+
+float hash21(int2 p)
+{
+    uint2 u = uint2(uint(p.x), uint(p.y));
     u = u * 1664525u + 1013904223u;
     u.x += u.y * 1664525u;
     u.y += u.x * 1664525u;
@@ -46,13 +59,13 @@ float hash21(float2 p)
 
 float valueNoise(float2 p)
 {
-    float2 i = floor(p);
+    int2 i = int2(floor(p));
     float2 f = frac(p);
     f = f * f * (3.0 - 2.0 * f);
     float a = hash21(i);
-    float b = hash21(i + float2(1.0, 0.0));
-    float c = hash21(i + float2(0.0, 1.0));
-    float d = hash21(i + float2(1.0, 1.0));
+    float b = hash21(i + int2(1, 0));
+    float c = hash21(i + int2(0, 1));
+    float d = hash21(i + int2(1, 1));
     return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
 }
 
@@ -83,9 +96,9 @@ float2 octahedral(float3 dir)
 [shader("fragment")]
 float4 fragmentMain(VSOutput input) : SV_Target
 {
-    float4 clip = float4(input.uv * 2.0 - 1.0, 1.0, 1.0);
-    float4 worldRay = mul(pc.invViewProj, clip);
-    float3 dir = normalize(worldRay.xyz / max(worldRay.w, 1e-5));
+    float3 dir = normalize(pc.right.xyz * input.ndc.x * pc.aspectTan.x * pc.aspectTan.y +
+                           pc.up.xyz * input.ndc.y * pc.aspectTan.y +
+                           pc.forward.xyz);
     float2 uv = octahedral(dir);
 
     float t = pc.time * 0.02;

@@ -225,7 +225,8 @@ TEST_CASE("Environment render: all effects on a shared device")
     SUBCASE("nebula")
     {
         NebulaRenderContext ctx;
-        ctx.invViewProj = glm::inverse(testViewProj());
+        ctx.viewProj = testViewProj();
+        ctx.invViewProj = glm::inverse(ctx.viewProj);
         ctx.resolution = {static_cast<float>(kW), static_cast<float>(kH)};
         NebulaParams params;
         params.time = 1.0f;
@@ -244,7 +245,8 @@ TEST_CASE("Environment render: all effects on a shared device")
     SUBCASE("dust field")
     {
         DustFieldRenderContext ctx;
-        ctx.invViewProj = glm::inverse(testViewProj());
+        ctx.viewProj = testViewProj();
+        ctx.invViewProj = glm::inverse(ctx.viewProj);
         ctx.resolution = {static_cast<float>(kW), static_cast<float>(kH)};
         DustFieldParams params;
         params.time = 1.0f;

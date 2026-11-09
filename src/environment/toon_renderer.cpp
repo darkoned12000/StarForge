@@ -2,6 +2,7 @@
 
 #include "vulkan/vulkan_result.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstring>
 #include <fstream>
@@ -260,7 +261,7 @@ void ToonRenderer::render(VkCommandBuffer cmd, const ToonRenderContext& context,
 
     // Base pass first: writes depth, so the outline pass (which runs
     // after without depth writes) only appears beyond the silhouette.
-    push.params = math::Vec4f{params.bandCount, params.rimStrength, outlineObjectWidth, 0.0f};
+    push.params = math::Vec4f{std::max(params.bandCount, 2.0f), params.rimStrength, outlineObjectWidth, 0.0f};
     vkCmdPushConstants(cmd, pipelineLayout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(push), &push);
     toonPipeline_->bindAndDraw(cmd, 36, 0, 1);

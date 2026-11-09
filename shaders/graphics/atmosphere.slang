@@ -36,11 +36,11 @@ VSOutput vertexMain(uint vertexId : SV_VertexID)
     float4 pos = pp.Get();
     float4 normal = np.Get();
 
-    VSOutput out;
-    out.position = mul(pc.viewProj, pos);
-    out.normal = normal.xyz;
-    out.worldPos = pos.xyz;
-    return out;
+    VSOutput output;
+    output.position = mul(pc.viewProj, pos);
+    output.normal = normal.xyz;
+    output.worldPos = pos.xyz;
+    return output;
 }
 
 float3 fetchLut(uint index)
@@ -57,7 +57,10 @@ float4 fragmentMain(VSOutput input) : SV_Target
     float3 l = normalize(pc.sunDir);
 
     float2 mu = float2(dot(n, v), dot(n, l));
-    float2 grid = (mu * 0.5 + 0.5) * float2(float(pc.lutWidth), float(pc.lutHeight)) - 0.5;
+    // The CPU LUT generator samples endpoint-inclusive coordinates
+    // (x / (width - 1)), so map the continuous coordinate to that same
+    // endpoint-inclusive grid rather than texel centers.
+    float2 grid = (mu * 0.5 + 0.5) * float2(float(pc.lutWidth - 1), float(pc.lutHeight - 1));
     grid = clamp(grid, float2(0.0, 0.0), float2(float(pc.lutWidth - 1), float(pc.lutHeight - 1)));
 
     uint x0 = uint(grid.x);
