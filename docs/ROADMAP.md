@@ -13,6 +13,18 @@ Principles:
 
 Every step also satisfies the Definition of Done in ARCHITECTURE.md.
 
+> **Scope and doc authority (review note, 2026-11).** `docs/VISION.md`
+> is the authoritative definition of *what* STARFORGE is (a rendering
+> library, not a full game engine). This `ROADMAP.md` is the
+> authoritative status of *what is done and what remains*. `README.md`
+> and `ARCHITECTURE.md` are summaries and must not maintain competing
+> architectural descriptions: `ARCHITECTURE.md` still says "M1–M2
+> complete" and must be synced (see Doc-sync follow-up at the end of
+> this document). AI / physics / audio are game-layer modules built
+> *on top of* the public API, not part of the rendering library itself.
+> Keep the public API focused — promote an abstraction only after an
+> end-to-end consumer exercises it (ADR-0009).
+
 ## Vision goals and their proofs
 
 | Vision goal                         | Proof                                                | Milestone |
@@ -25,6 +37,8 @@ Every step also satisfies the Definition of Done in ARCHITECTURE.md.
 | Advanced space environments         | Star field, nebula, dust at target frame time        | M8        |
 | Simple developer-facing API         | Sandbox scene built only through the public API      | M9        |
 | Toon / cel-shaded art direction     | Cel-shaded ship and nebula scene renders through the public API in a toon style | M9.5 |
+| Playable space-game proof           | Player-controlled ship flies continuously through generated space, fights, and trades — no loading screens | M15.0, M19 |
+| Production toon showcase            | Authored ship + planet + nebula + asteroids + weapons render in a consistent cel-shaded style (not a cube stand-in) | M17, M19 |
 
 ## M1 – Present a Frame
 
@@ -769,8 +783,13 @@ parameters are implemented; the GPU rendering half of M7 is not.
 ### Status: complete (2026-11-07)
 GPU patch rendering, descent + seam proofs, parallel traversal, and
 atmosphere LUT + shell rendering all pass headless tests (see TODO
-table above). Residual polish (post-M7): T-junction skirts, terrain
-displacement, retirement stress validation, speedup validations.
+table above). Residual polish (post-M7) — **elevated to pre-vertical-slice
+priority (review, 2026-11):** terrain-height displacement (mesh is
+still a smooth sphere), T-junction skirts / LOD seam handling, retirement
+stress validation, speedup validations. Rationale: stepped toon lighting
+and outlines make even small cracks/normal discontinuities obvious, so
+displacement and seam quality gate the final art direction, not just
+realism.
 
 ### Remaining work (TODO)
 
@@ -898,6 +917,18 @@ the respective milestone residuals, not new milestones.
 | 9.5.3 ✅ | Public toon material facade: `starforge::Toon` owning its pipeline/shaders, recording into `FrameContext` like `Starfield::record()` | T2 | Done: `starforge::Toon` in `include/starforge/toon.hpp` via raw-data bridge; public tests cover move-only, missing-shader API errors, render/recreate |
 | 9.5.4 ✅ | Cel-shaded proof scene + budgets: ship + nebula in toon style through the public API, golden image, frame-time budget vs ADR-004 | T3+T5 | Done: sandbox composes starfield + toon cube in one frame; `tests/goldens/toon_scene_128.png` committed; p95 frame time under the ADR-004 interval; zero validation errors |
 | 9.5.5 ✅ | Portability + material ramp: keep push constants below Vulkan's guaranteed 128-byte range and support a three-stop diffuse ramp (shadow/mid/lit colors) | T3 | Done: per-draw data lives in a host-mapped BDA buffer (one slot per frame in flight) instead of push constants; push block is 80 bytes; `midColor` alpha=0 derives the midpoint of shadow/base so existing two-color callers keep their look; custom mid tint renders exactly at the ramp midpoint; GPU and public suites stay green |
+| 9.5.6 ⬜ | **Production toon-showcase acceptance (review follow-up).** M9.5's cube+starfield proof validates the shader but does not prove the game art direction. A separate golden/budget gate is required before M19: authored/placeholder ship with outlined hull + stepped lighting + rim, glowing engine exhaust, nebula background, planet with atmosphere, asteroids with outlines, and a weapon fire/impact effect — all in one composed scene through the public API | T3+T5 | Production scene renders headlessly, golden committed, frame time within ADR-004 interval, zero validation errors. Do not mark M9.5's artistic goal done on the cube proof alone |
+
+### Material architecture (review follow-up — applies to M9.5 and M17)
+
+Do not build seven separate toon shaders for hull/terrain/emissive/shield/
+nebula/asteroid/atmosphere. Build reusable material capabilities that
+combine: quantized diffuse, stepped specular, rim, emissive tint, fresnel
+shield, layered-noise nebula, faceted asteroid, scattering rim gradient.
+Ships and hero objects get strong graphic definition (outlines + bands).
+Backgrounds (nebulae) stay soft with layered transitions and depth so the
+whole frame does not look artificially identical. Planets use stepped
+terrain lighting with atmospheric gradients.
 
 ### Deferred production toon work (not done now)
 
@@ -923,9 +954,12 @@ describe the recommended order for building game systems on top of STARFORGE.
 Recommended tech stack for the game layer:
 - Physics: Jolt Physics
 - Audio: miniaudio
-- ECS: Flecs or EnTT
+- ECS: Flecs (chosen — prefabs, queries, JSON serialization for M18)
 - UI (dev tools): Dear ImGui
-- Noise/Procedural: Custom hash-based + FastNoise2
+- Noise/Procedural: custom integer-hash for authoritative content only;
+  cosmetic shader effects (animated nebulae, smoke, dust turbulence)
+  may use floating-point noise (M13 ADR-0012; FastNoise2 is not used for
+  authoritative world state — see M13 constraints).
 - Serialization: nlohmann/json (debug) + custom binary or FlatBuffers
 - Profiling: Tracy
 - Assets: stb_* family + meshoptimizer
@@ -980,6 +1014,15 @@ Recommended tech stack for the game layer:
 | 11.3 ✅ | Collision events: contact listener → deferred chunk queue → ECS `CollisionEvent` (both entities, point, normal, impulse) flushed after the step; deleted entities deregister from Jolt immediately | T1 | Done: worker threads only push to a mutex-guarded queue; flush emits tag+payload components on both entities (rebased to world space); sphere–sphere test proves events on both sides |
 | 11.4 ✅ | CCD, raycasts, sensors: `LinearCast` motion quality on fast bodies, `castRay(from, dir, maxDist)` query API, sensor triggers (docking zones) | T1 | Done: 2000 m/s sphere stops at a thin wall with LinearCast; raycast hits/misses as expected; sensor overlap fires an ECS event on the intruding entity |
 | 11.5 ✅ | M11 exit proof: ship vs asteroid field through ECS + physics with island activation, frame budget | T2 | Done: ship flies through a 200-rock ECS field; island activation attaches local bodies, collision events fire, traveled > 5 m, p95 step+sync ≤ 2 ms, zero validation errors |
+| 11.6 ⬜ | **Physics-island boundary stress test (review follow-up).** Ship crossing a physics-island boundary while colliding: bodies transfer without position jumps, velocities preserved, contacts not duplicated, no bodies left in the old island, collision events remain valid through the transfer | T1 | Deterministic crossing test passes at boundary; no teleport/jitter, no duplicate contact events |
+
+### Deferred scene-submission API (review follow-up)
+
+The public API today is low-level (each facade records into `FrameContext`
+manually). When a consumer needs hundreds/thousands of objects, introduce
+a scene submission model (`scene.add(ship/planet/asteroidField/station);
+renderer.render(scene, camera)`) — illustrative, not a prescribed API.
+Do not build it until a working example needs it (ADR-0009 rule).
 
 ### M12 – Audio
 
@@ -1162,32 +1205,76 @@ Known M14 follow-ups for later milestones (intentionally out of scope):
 - Station route approach is always the station's +Z side regardless of
   origin; heading has no explicit up vector and can roll over long
   turns. Both are visual polish, deferred past M15.
+- Faction/economic simulation (trader → pirate interception → security
+  response → cargo economy): do not build a galaxy-scale simulation
+  yet. Keep to convinced small-scale simulation first (owner: M15 for
+  the economic hook, M19 for the interconnected proof).
+
+### M15.0 – First Flight (intermediate playable demo, before full M15)
+
+- **Goal:** a complete playable spaceflight demonstration so engine work
+  from M10–M14 is proven as a game, not only as tests and benchmarks.
+  This comes *before* the full trading-loop scope of M15: fly first,
+  economy second.
+- **Proof:** the player can control a spaceship continuously through a
+  procedural asteroid field, approach/orbit a planet with atmosphere,
+  see a nebula backdrop, encounter one AI hostile, fire weapons with
+  stylized impact/shield effects, and experience the full toon art
+  direction — with no loading screens during the demonstration.
+- **Depends on:** M10 (ECS), M11 (Physics), M13 (Streaming), M14 (AI),
+  M9.5 (Toon). May use placeholder ship geometry; the authored-asset
+  upgrade to a Blender/glTF hero ship updates this scene in place.
+- **Acceptance:** mouse/keyboard flight, procedural fields streaming,
+  weapons + shields, toon look (outlined hull + glowing engines),
+  60 fps at the ADR-004 interval, zero validation errors. Recorded as
+  a reproducible sandbox/game-layer scene; screenshots/goldens
+  reviewed for visual identity (not just pixel counts).
 
 ### M15 – Gameplay Systems
 
 - **Goal:** Inventory/cargo, trading/economy, missions/contracts, damage/
   shields/subsystems, progression/unlocks, docking, stations, jumping.
 - **Proof:** Playable trading loop: buy, fly, dock, sell, repeat.
-- **Depends on:** M10 (ECS), M14 (AI).
+- **Depends on:** M10 (ECS), M14 (AI), M15.0 (flight).
+- **Procedural ≠ gameplay-locked (review follow-up, layered generation):**
+  generated systems must also support deliberate placement. Layers, in order:
+  procedural foundation → designer-authored overrides (story locations,
+  unique stations, special encounters, mission objectives) → faction and
+  economic placement → mission-specific additions → persistent player
+  modifications (M13 deltas + M18). Procedural content must never dictate
+  gameplay; authored content must be able to win over generated content.
+  Player modifications to preserve: mined-asteroid depletion, destroyed
+  stations, discovered/visited locations, collected resources, ownership
+  and faction changes (see M18).
 
 ### M16 – UI and HUD
 
-- **Goal:** HUD, menus, maps, inventory screens, interaction prompts.
+- **Goal:** Flight HUD, targeting, navigation, communications, inventory,
+  station interaction, menus, maps, interaction prompts.
   HUD styling follows the M9.5 toon art direction (outlined panels,
   flat colors, graphic rim accents).
 - **Proof:** Full game loop playable with UI (no console commands needed).
 - **Tech:** Dear ImGui (dev tools) + custom or RmlUi (final UI).
-- **Depends on:** M10 (ECS), M15 (Gameplay).
+- **Depends on:** M10 (ECS), M15 (Gameplay), M15.0 (flight HUD is the
+  first consumer; the full HUD expands from it).
 
 ### M17 – Asset Pipeline
 
 - **Goal:** Mesh/material/audio loading (stb, tinygltf, meshoptimizer),
-  asset management, hot-reloading.
+  asset management, hot-reloading, LODs, material variants, texture
+  streaming.
 - **Proof:** Load and render a glTF mesh with textures at 60 fps.
-- **Depends on:** M9 (Public API).
+- **Depends on:** M9 (Public API). **Priority note (review, 2026-11):**
+  bring forward alongside M15/M15.0 — procedural geometry is not a
+  substitute for authored ships, stations, capital ships, weapons,
+  cockpits, and structures. Placeholder cube geometry cannot prove the
+  art direction. Blender + glTF is the starting combination.
 - **Note:** glTF materials include a toon shading option built on the
   M9.5 toon lighting model and outline pass, so shipped ships and
   stations match the cel-shaded art direction.
+- **Deliverables to include:** hero ship mesh, station mesh, LOD chains,
+  material variants per the M9.5 material-capability model, texture
+  streaming, asset hot-reloading, glTF material → toon material mapping.
 
 ### M18 – Persistence
 
@@ -1196,6 +1283,12 @@ Known M14 follow-ups for later milestones (intentionally out of scope):
   for debugging.
 - **Proof:** Save, quit, reload: world state restored exactly.
 - **Depends on:** M10 (ECS), M13 (Procedural Generation).
+- **Must persist (review follow-up):** mined asteroid depletion,
+  destroyed stations, discovered locations, collected resources,
+  mission-related world changes, ownership/faction changes, and the
+  M15 authored-override layer. Implementation order: generated base
+  chunk (M13) + delta overlay + authored overrides + save file. AI
+  entity handles must be remapped on load (see M14 follow-ups).
 
 ### M19 – Vertical Slice
 
@@ -1203,7 +1296,21 @@ Known M14 follow-ups for later milestones (intentionally out of scope):
   basic combat effects + continuous flight with correct precision.
 - **Proof:** 5 minutes of gameplay with no loading screens, zero
   validation errors, stable 60 fps.
-- **Depends on:** M10, M11, M13, M16, M17.
+- **Depends on:** M10, M11, M13, M15, M15.0, M16, M17.
+- **Pre-slice gates (do not close M19 without these):**
+  - Production toon showcase (9.5.6) rendered and reviewed, not the
+    cube proof.
+  - Terrain-height displacement + LOD seam handling (M7 residual)
+    sufficient for orbit-to-surface descent in toon lighting.
+  - HDR / tonemap / bloom decision and pass without flattened bands
+    (M9.5 deferred work).
+  - Perf-profile discipline: budgets split per subsystem (geometry,
+    shadows, outlines, planet, nebula, post, particles, UI) so no
+    single effect consumes the full 6.94 ms ADR-004 interval, and
+    rendering profiles per hardware tier rather than tuning only for
+    the RX 7900 XTX dev machine.
+  - Physics-island boundary stress (11.6) and doc-sync follow-up
+    (below) closed or explicitly deferred with owners.
 
 ### Checkpoint: Asteroid Field Flythrough (superseded by steps 13.6 and 13.8)
 
@@ -1216,4 +1323,43 @@ Known M14 follow-ups for later milestones (intentionally out of scope):
   the headless GPU render suites.
 - **Scope note:** the proofs simulate kinematic flight; player-controlled
   ship handling belongs to the game layer, not the content-streaming
-  milestone.
+  milestone. The player-controlled counterpart is M15.0 (First Flight).
+
+## External review follow-ups (2026-11, prioritised backlog)
+
+Source: ChatGPT repo review (two passes, Nov 2026). Nothing here reopens
+completed milestones; each item names its owner milestone so it is not
+forgotten. Review verdict: architecture, large-world precision, Vulkan
+foundation, public API, and procedural direction are sound — do not
+restart or redesign. The priority is to prove playability and the toon
+art direction.
+
+| Priority | Item | Owner |
+|----------|------|-------|
+| P0 | Doc sync: update `ARCHITECTURE.md` ("M1–M2 complete", renderer/render-graph "roadmap structure for M3+") to describe the current implementation through M14; clarify in `VISION.md`/README that STARFORGE is the rendering library and M10+ is the game layer on top. `VISION.md` = what it is, `ROADMAP.md` = status. | Docs (do before M15) |
+| P0 | First Flight playable demo (M15.0): player ship + asteroid field + planet + nebula + hostile AI + weapons/shields + toon look, no loading screens. Fly before full economy. | Game layer (M15.0) |
+| P0 | Production toon showcase gate (9.5.6): ship with outlines/rim, engine glow, nebula, planet atmosphere, asteroids, weapon effect in one scene — golden + budget + visual review. The cube proof is shim validation only. | M9.5 → M17/M19 gate |
+| P0 | Toon material architecture: reusable capabilities (bands, rim, emissive, fresnel, layered nebula, faceted, scattering) combined per material class, not seven separate systems. Keep backgrounds soft vs. outlined hero objects. | M9.5/M17 |
+| P1 | Planet terrain displacement + LOD seam / T-junction handling (M7 residual) — gates toon look at the surface; small errors are obvious under stepped lighting + outlines. | M7 residual → M19 gate |
+| P1 | Authored system layer on top of procedural generation (M15): designer overrides, faction/economic placement, mission additions. Procedural must not lock out story locations. | M15 (built on M13) |
+| P1 | Asset pipeline brought forward alongside M15 (M17): glTF hero ship/station, LODs, material variants, texture streaming, hot-reloading. | M17 |
+| P1 | HDR / tonemap / bloom + emissive pipeline decision (M9.5 deferred work) before authoring final palettes. | M9.5/M8 → M19 gate |
+| P2 | Physics-island boundary crossing stress test (11.6). | M11 |
+| P2 | Flight HUD + targeting/nav/comms (M16), expanded from M15.0's flight HUD. | M16 |
+| P2 | Performance profiles: per-subsystem budgets + per-hardware-tier rendering profiles, not only the RX 7900 XTX target. | M4.4 / M19 |
+| P2 | Persistence of player world changes (M18): depleted asteroids, destroyed stations, discovered locations, faction/ownership, authored overrides. | M18 |
+| P2 | Scene submission API (M11 deferred note): design only when a consumer needs it. | Post-M19 / when motivated |
+| P3 | Faction/economic simulation at small scale first (trader/pirate/security/cargo) — not a galaxy sim. | M15 → M19 |
+| P3 | AI polish already tracked under M14: patrol waypoints, projectiles/tracers, finer perception grid, station approach side, up-vector roll control. | M14 follow-ups |
+
+**Standing principles from the review (kept, not new):**
+- Generated world = `Generate(seed, location) + PlayerChanges`; base
+  chunks stay byte-identical, player changes are a sparse overlay (M13.7).
+- Floating-point noise is fine for cosmetic shader effects (animated
+  nebulae, smoke, dust); authoritative generation stays integer-hash
+  deterministic (ADR-0012).
+- Resist adding graphics features just because Vulkan supports them;
+  every new system must serve the intended game or solve a demonstrated
+  engine limitation.
+- Every milestone keeps its proof discipline: sandbox scene or test
+  with a measurable pass criterion, build stays green.
