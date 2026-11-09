@@ -33,6 +33,8 @@ add_executable(starforge_tests
     test_benchmark_scene.cpp
     test_cpu_timer.cpp
     test_content_generation.cpp
+    test_content_streaming.cpp
+    test_content_lod_transition.cpp
     test_content_integration.cpp
     test_planets.cpp
     test_planets_new.cpp

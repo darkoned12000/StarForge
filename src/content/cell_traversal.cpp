@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <tuple>
 
 
 namespace starforge::content
@@ -21,6 +22,11 @@ std::int64_t addCellOffset(std::int64_t base, int delta) noexcept
     if (delta < 0 && base < std::numeric_limits<std::int64_t>::min() - delta)
         return std::numeric_limits<std::int64_t>::min();
     return base + delta;
+}
+
+[[nodiscard]] bool cellLess(const CellCoord& a, const CellCoord& b) noexcept
+{
+    return std::tie(a.level, a.x, a.y, a.z) < std::tie(b.level, b.x, b.y, b.z);
 }
 
 } // namespace
@@ -84,8 +90,9 @@ std::vector<CellCoord> traverseCells(
                 const double hiD = std::floor((inCell + radiusMetres) / cellSize);
 
                 // Cap the neighbourhood to keep traversal bounded.
-                lo = static_cast<int>(std::max(-4.0, std::min(0.0, loD)));
-                hi = static_cast<int>(std::max(0.0, std::min(4.0, hiD)));
+                constexpr double kCap = static_cast<double>(kMaxTraversalCellRadius);
+                lo = static_cast<int>(std::max(-kCap, std::min(0.0, loD)));
+                hi = static_cast<int>(std::max(0.0, std::min(kCap, hiD)));
             };
 
             axisRange(cameraPos.cellX, cameraPos.offsetX, loX, hiX);
@@ -112,7 +119,77 @@ std::vector<CellCoord> traverseCells(
         }
     }
 
-    return result;
-}
+    std::sort(result.begin(), result.end(), cellLess);
+        result.erase(std::unique(result.begin(), result.end(),
+                                 [](const CellCoord& a, const CellCoord& b) { return a == b; }),
+                     result.end());
+
+        return result;
+    }
+
+    bool StreamingTraversal::contains(const CellCoord& cell) const
+    {
+        return std::find(cells_.begin(), cells_.end(), cell) != cells_.end();
+    }
+
+    StreamingTraversal::Update StreamingTraversal::advance(
+        const starforge::spatial::WorldPosition& cameraPos,
+        int minLevel,
+        int maxLevel,
+        double radiusMetres)
+    {
+        // Invalid radius: leave the cache unchanged rather than tearing
+        // down every loaded cell on a caller bug.
+        if (!(radiusMetres >= 0.0) || !std::isfinite(radiusMetres))
+        {
+            return {};
+        }
+
+        const std::vector<CellCoord> desired = traverseCells(cameraPos, minLevel, maxLevel, radiusMetres);
+
+        std::vector<CellCoord> active = desired;
+        std::vector<CellCoord> loaded;
+        std::vector<CellCoord> unloaded;
+
+        const double expandMetres = radiusMetres + hysteresisMetres_;
+        const std::vector<CellCoord> expanded =
+            hysteresisMetres_ <= 0.0 ? desired : traverseCells(cameraPos, minLevel, maxLevel, expandMetres);
+
+        for (const CellCoord& cell : cells_)
+        {
+            const bool inDesired = std::binary_search(desired.begin(), desired.end(), cell, cellLess);
+            if (!inDesired)
+            {
+                // Stays only inside the expanded radius; otherwise it
+                // leaves the active set.
+                const bool inExpanded = hysteresisMetres_ > 0.0 &&
+                                        std::binary_search(expanded.begin(), expanded.end(), cell, cellLess);
+                if (inExpanded)
+                {
+                    active.push_back(cell);
+                }
+                else
+                {
+                    unloaded.push_back(cell);
+                }
+            }
+        }
+
+        for (const CellCoord& cell : desired)
+        {
+            if (!std::binary_search(cells_.begin(), cells_.end(), cell, cellLess))
+            {
+                loaded.push_back(cell);
+            }
+        }
+
+        std::sort(active.begin(), active.end(), cellLess);
+        active.erase(std::unique(active.begin(), active.end()), active.end());
+        std::sort(loaded.begin(), loaded.end(), cellLess);
+        std::sort(unloaded.begin(), unloaded.end(), cellLess);
+
+        cells_ = active;
+        return Update{loaded, unloaded};
+    }
 
 } // namespace starforge::content

@@ -1,6 +1,7 @@
 add_library(starforge_content STATIC
     content_generation.cpp
     cell_traversal.cpp
+    lod_transition.cpp
     player_delta.cpp
 )
 
@@ -26,7 +27,7 @@ if(MSVC)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         target_compile_options(starforge_content PRIVATE -ffp-contract=off)
     else()
-        target_compile_options(starforge_content PRIVATE /fp:contract-)
+        target_compile_options(starforge_content PRIVATE /fp:precise)
     endif()
 else()
     target_compile_options(starforge_content PRIVATE -ffp-contract=off)
