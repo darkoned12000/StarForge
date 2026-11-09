@@ -5,9 +5,11 @@
 # justifies a facade (ADR-0009).
 
 add_library(starforge_ai STATIC
+    behavior.cpp
     components.cpp
     perception.cpp
     steering.cpp
+    traffic.cpp
 )
 
 target_include_directories(starforge_ai
@@ -19,6 +21,7 @@ target_link_libraries(starforge_ai
     PUBLIC
         starforge_ecs
         starforge_math
+        starforge_physics
         starforge_spatial
 )
 

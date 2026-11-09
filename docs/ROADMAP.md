@@ -1121,9 +1121,13 @@ proof remain phases B and C.
 
 | Step | Deliverable | Verified by | Done when |
 |------|-------------|-------------|-----------|
-| 14.4 | **Finite-state behavior:** Patrol, Transit, Docking, Engage, Evade, and Retreat states with hysteresis/timers | T1 | State transitions fire in sequence without rapid oscillation near thresholds |
-| 14.5 | **Navigation and traffic management:** station-to-station routes, waypoint queues, dock slots, separation, priority, and deterministic deconfliction | T1 | A multi-ship traffic test reaches dock markers without collision events and repeats with the same positions |
-| 14.6 | **Physics island coupling:** kinematic NPC ships attach through M11's `PhysicsBody`, synchronize with `syncEcsToPhysics`, and read back through `syncPhysicsToEcs` | T1 + T3 | NPC ships obey AI velocity, collide with asteroids, and keep WorldPosition precision at >1e12 m |
+| 14.4 ✅ | **Finite-state behavior:** Patrol, Transit, Docking, Engage, Evade, and Retreat states with hysteresis/timers | T1 | State transitions fire in sequence without rapid oscillation near thresholds |
+| 14.5 ✅ | **Navigation and traffic management:** station-to-station routes, waypoint queues, dock slots, separation, priority, and deterministic deconfliction | T1 | A multi-ship traffic test reaches dock markers without collision events and repeats with the same positions |
+| 14.6 ✅ | **Physics island coupling:** kinematic NPC ships attach through M11's `PhysicsBody`, synchronize with `syncEcsToPhysics`, and read back through `syncPhysicsToEcs` | T1 + T3 | NPC ships obey AI velocity, collide with asteroids, and keep WorldPosition precision at >1e12 m |
+
+**Status: Phase B complete (14.4/14.5/14.6 ✅).** Behavior FSM, station
+routes/traffic slots, and kinematic physics coupling are implemented and
+tested; scheduling/perf and the combat exit proof remain Phase C.
 
 ### Phase C – combat and scale
 
