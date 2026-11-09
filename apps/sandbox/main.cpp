@@ -172,7 +172,7 @@ int main()
         starforge::Starfield::Params params;
         // Sun offset from the view axis so it is not occluded by the ship.
         params.worldPosition = {18.0f, 8.0f, -50.0f};
-        params.radius = 10.0f;
+        params.radius = 3.0f;
         params.intensity = 1.0f;
 
         // Cel-shaded ship stand-in, offset left of center.
@@ -180,7 +180,7 @@ int main()
             starforge::math::Vec3f{0.0f, 0.0f, 5.0f}, starforge::math::Vec3f{0.0f, 0.0f, 0.0f},
             starforge::math::kUpY);
         starforge::math::Mat4f shipModel(1.0f);
-        shipModel.columns[3][0] = -2.5f;
+        shipModel.columns[3][0] = -1.5f;
         shipModel.columns[3][1] = 0.3f;
 
         starforge::Toon::Context toonContext;
