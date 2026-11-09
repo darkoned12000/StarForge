@@ -2,6 +2,8 @@
 
 add_library(starforge_public_api STATIC
     application.cpp
+    audio.cpp
+    audio_bridge.cpp
     renderer.cpp
     starfield.cpp
     starfield_bridge.cpp
@@ -29,6 +31,7 @@ target_link_libraries(starforge_public_api
         starforge_vulkan
         starforge_spatial
         starforge_environment
+        starforge_audio
 )
 
 starforge_set_warnings(starforge_public_api)

@@ -46,6 +46,7 @@ add_executable(starforge_tests
     test_audio_spatial.cpp
     test_audio_bridge.cpp
     test_public_application.cpp
+    test_public_audio.cpp
     test_public_math_world.cpp
     test_public_renderer.cpp
     test_public_starfield.cpp

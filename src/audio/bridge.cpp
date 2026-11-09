@@ -44,6 +44,12 @@ void registerAudioComponents(ecs::Ecs& world)
     world.world().component<AudioListener>("AudioListener");
 }
 
+void registerAudioEmitterCleanup(ecs::Ecs& world, SoundBank& bank)
+{
+    world.world().observer<const AudioEmitter>().event(flecs::OnRemove).each(
+        [&bank](flecs::entity, const AudioEmitter& emitter) { (void)bank.stop(emitter.sound); });
+}
+
 void attachEmitter(ecs::Ecs& world, flecs::entity entity, const AudioEmitter& emitter, SoundBank& bank)
 {
     (void)world;
@@ -129,7 +135,7 @@ void pushCollisionTriggers(ecs::Ecs& world, TriggerQueue& queue)
     constexpr float kMinImpulse = 1.0f;
     constexpr float kMaxImpulse = 100.0f;
     world.world().query<ecs::CollisionEvent>().each(
-        [&world, &queue](flecs::entity entity, const ecs::CollisionEvent&) {
+        [&queue](flecs::entity entity, const ecs::CollisionEvent&) {
             float maxImpulse = 0.0f;
             if (entity.has<ecs::CollisionData>())
             {

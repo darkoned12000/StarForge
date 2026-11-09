@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <expected>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -97,11 +98,12 @@ public:
     [[nodiscard]] float volume(SoundHandle handle) const noexcept;
     [[nodiscard]] float pitch(SoundHandle handle) const noexcept;
 
-    // 3D emitter pose (camera-relative float32): sets position,
-    // velocity, and the Doppler factor. 2D buses (UI/Music) reject
-    // with false — they have spatialization disabled by design.
+    // 3D emitter pose (camera-relative float32): sets position and
+    // velocity. An omitted Doppler factor leaves the voice's
+    // configured factor untouched. 2D buses (UI/Music) reject with
+    // false — they have spatialization disabled by design.
     bool setEmitterPose(SoundHandle handle, const math::Vec3f& position, const math::Vec3f& velocity,
-                        float dopplerFactor = 1.0f) noexcept;
+                        std::optional<float> dopplerFactor = std::nullopt) noexcept;
     bool setEmitterAttenuation(SoundHandle handle, float minDistance, float maxDistance, float rolloff) noexcept;
     bool setEmitterDopplerFactor(SoundHandle handle, float dopplerFactor) noexcept;
     [[nodiscard]] math::Vec3f emitterPosition(SoundHandle handle) const noexcept;

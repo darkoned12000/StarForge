@@ -302,7 +302,11 @@ bool SoundBank::stop(SoundHandle handle) noexcept
     {
         return false;
     }
-    return ma_sound_stop(sound->voice.get()) == MA_SUCCESS;
+    // Conventional stop semantics: halt AND rewind. A later play()
+    // starts from the beginning instead of resuming mid-clip.
+    const ma_result result = ma_sound_stop(sound->voice.get());
+    (void)ma_sound_seek_to_pcm_frame(sound->voice.get(), 0);
+    return result == MA_SUCCESS;
 }
 
 bool SoundBank::isPlaying(SoundHandle handle) const noexcept
@@ -379,7 +383,7 @@ float SoundBank::pitch(SoundHandle handle) const noexcept
 }
 
 bool SoundBank::setEmitterPose(SoundHandle handle, const math::Vec3f& position, const math::Vec3f& velocity,
-                               float dopplerFactor) noexcept
+                                std::optional<float> dopplerFactor) noexcept
 {
     Sound* sound = find(handle);
     if (sound == nullptr || sound->voice == nullptr || isTwoDimensional(sound->config.bus))
@@ -388,7 +392,10 @@ bool SoundBank::setEmitterPose(SoundHandle handle, const math::Vec3f& position, 
     }
     ma_sound_set_position(sound->voice.get(), position.x, position.y, position.z);
     ma_sound_set_velocity(sound->voice.get(), velocity.x, velocity.y, velocity.z);
-    ma_sound_set_doppler_factor(sound->voice.get(), dopplerFactor);
+    if (dopplerFactor.has_value())
+    {
+        ma_sound_set_doppler_factor(sound->voice.get(), *dopplerFactor);
+    }
     return true;
 }
 

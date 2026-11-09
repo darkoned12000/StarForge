@@ -24,6 +24,13 @@
     public facade arrives in M12.5). `miniaudio.h` is included only
     in `.cpp` files; headers forward-declare `ma_context`/`ma_engine`/
     `ma_sound`/`ma_decoder`.
+  - Public facade: `starforge::Audio` in `include/starforge/audio.hpp`
+    (move-only, `std::expected` factory, camera-relative
+    listener/emitter, per-voice volume/pitch/loop). The bridge
+    (`src/public_api/audio_bridge`) uses plain data because public
+    (`starforge/math.hpp`, GLM-free) and internal (`src/math/math.hpp`,
+    GLM) math headers cannot coexist in one translation unit; the
+    internal types are confined to the bridge implementation file.
   - UI and Music are non-spatial buses (spatialization explicitly
     disabled per sound); SFX and Voice are spatial.
   - Spatialization model: engine listener 0 in absolute positioning

@@ -3,10 +3,12 @@
 // types are visible here.
 
 #include "starforge/application.hpp"
+#include "starforge/audio.hpp"
 #include "starforge/math.hpp"
 #include "starforge/renderer.hpp"
 #include "starforge/starfield.hpp"
 #include "starforge/toon.hpp"
+#include "starforge/world.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -68,6 +70,41 @@ int main()
     {
         logError(toon.error().c_str());
         return EXIT_FAILURE;
+    }
+
+    // M12 flyby: a looped test tone whose emitter crosses in front of
+    // the listener, so distance attenuation and the Doppler sweep are
+    // audible. Falls back to silence (no audio device) without failing.
+    std::optional<starforge::Audio> audio;
+    std::optional<starforge::Audio::VoiceHandle> flyby;
+    {
+        starforge::Audio::CreateInfo audioInfo;
+        audioInfo.backend = starforge::Audio::CreateInfo::Backend::Default;
+        auto created = starforge::Audio::create(audioInfo);
+        if (!created)
+        {
+            logError("Audio unavailable (continuing silent)");
+        }
+        else
+        {
+            audio = std::move(*created);
+            starforge::Audio::SoundParams params;
+            params.bus = starforge::Audio::Bus::SFX;
+            params.loop = true;
+            const auto wav = starforge::generateToneWav(48000, 2, 440.0f, 0.5f, 0.5f);
+            auto handle = audio->loadFromMemory(wav, params);
+            if (!handle)
+            {
+                logError(handle.error().c_str());
+                audio.reset();
+            }
+            else
+            {
+                flyby = *handle;
+                (void)audio->play(*handle);
+                logInfo("M12 flyby: tone loop audible (flyby passing)");
+            }
+        }
     }
 
     logInfo("Close the window to exit");
@@ -175,6 +212,31 @@ int main()
         if (*frame == starforge::Renderer::FrameResult::SwapchainOutOfDate)
         {
             needRecreate = true;
+        }
+
+        // M12 flyby motion: emitter sweeps across the view, crossing
+        // closest approach roughly every 10 seconds (16 s period).
+        if (audio.has_value() && flyby.has_value())
+        {
+            constexpr float kPeriodSeconds = 16.0f;
+            const float phase = std::fmod(time, kPeriodSeconds) / kPeriodSeconds;
+            const float sweep = (phase * 2.0f - 1.0f) * 30.0f; // -30..+30 m/s
+            const float closestFactor = std::cos(phase * 2.0f * kPi) * 0.5f + 0.5f;
+
+            if (const auto cameraCow = starforge::WorldPosition::fromMeters(0.0, 0.0, 0.0))
+            {
+                const auto emitterPos = cameraCow->translated({sweep, 3.0f + closestFactor * 4.0f, -8.0f});
+                starforge::Audio::ListenerState listener;
+                listener.position = *cameraCow;
+                audio->setListener(listener, *cameraCow);
+
+                starforge::Audio::EmitterState emitter;
+                emitter.position = emitterPos.value_or(*cameraCow);
+                const float dx = 60.0f / kPeriodSeconds; // d(sweep)/dt
+                const float dy = -(kPi / 4.0f) * std::sin(2.0f * kPi * phase);
+                emitter.velocity = {dx, dy, 0.0};
+                audio->setEmitter(*flyby, emitter, *cameraCow, 1.0f);
+            }
         }
 
         // No sleep here: the swapchain present paces the loop. The

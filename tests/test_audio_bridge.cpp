@@ -143,6 +143,35 @@ TEST_CASE("Bridge: collision trigger plays the entity's sound")
     REQUIRE(bank.stop(*handle));
 }
 
+TEST_CASE("Bridge: entity destruction stops its emitter voice")
+{
+    using namespace starforge::ecs;
+    using namespace starforge::spatial;
+
+    auto context = createNullContext();
+    REQUIRE(context.has_value());
+    auto bankOrError = SoundBank::create(*context);
+    REQUIRE(bankOrError.has_value());
+    SoundBank& bank = *bankOrError;
+
+    Ecs world;
+    registerAudioComponents(world);
+    registerAudioEmitterCleanup(world, bank);
+    const auto pos = WorldPosition::fromMeters(0.0, 0.0, 0.0);
+    REQUIRE(pos.has_value());
+    const auto rock = world.createAsteroid(*pos, {});
+    SoundConfig config;
+    config.loop = true;
+    auto handle = bank.loadFromMemory(generateToneWav({}), config);
+    REQUIRE(handle.has_value());
+    attachEmitter(world, rock, {.sound = *handle}, bank);
+    REQUIRE(bank.play(*handle));
+    CHECK(bank.isPlaying(*handle));
+
+    rock.destruct();
+    CHECK(!bank.isPlaying(*handle));
+}
+
 TEST_CASE("Bridge: sub-threshold impulse is silent (feather touch)")
 {
     using namespace starforge::ecs;

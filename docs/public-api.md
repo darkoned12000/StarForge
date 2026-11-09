@@ -83,6 +83,13 @@ convenience wrapper around the same path.
   diffuse bands, stepped specular, rim light, and an inverted-hull
   outline pass. `record()`/`render()`/`recreate()` mirror `Starfield`;
   outline thickness is specified in screen pixels.
+- `starforge::Audio` — backend-neutral audio: `create`, `loadFromMemory`
+  (WAV/FLAC/MP3 bytes), `play`/`stop`/`isPlaying`, per-bus gain
+  (`setBusVolume`), `setListener`, `setEmitter` (3D positional audio with
+  Doppler factor), `setEmitterAttenuation`, master volume. `Backend::Silent`
+  needs no audio hardware (headless tests); `Backend::Default` uses OS
+  devices (sandbox flyby). `generateToneWav` provides placeholder sine
+  WAVs without binary assets.
 - `starforge::math` — GLM-free `Vec2/3/4f/d`, `Mat3f/d`, `Mat4f/d`,
   arithmetic, `dot`/`cross`/`length`/`normalize`, `perspectiveVulkan`,
   `perspectiveVulkanReverseZ`, `lookAt`, `inverse`, `toFloat32`.
@@ -95,7 +102,9 @@ convenience wrapper around the same path.
 ## Ownership and lifetime
 
 - `Application`, `Renderer`, and `Starfield` are **move-only**; copying
-  is deleted. Destruction releases all owned resources.
+  is deleted. Destruction releases all owned resources. `Audio` is
+  move-only for the same reason; a moved-from `Audio` is inert (queries
+  return safe defaults, operations return false or an expected error).
 - A `Renderer` borrows its `Application`; a `Starfield` borrows its
   `Renderer`. The borrowed object must outlive the borrower.
 - Call `Renderer::waitIdle()` before destroying or move-assigning a
@@ -149,6 +158,6 @@ added only when exercised by the public example, so expect growth
 (new effects, resources) more than churn, but do not pin against
 internal build details. Breaking changes will be noted in the
 roadmap when they land. The backend-neutrality guarantee (no Vulkan,
-VMA, SDL, or GLM in public headers) and the ownership/error rules
-above are the stable contract; the leakage gate in the test suite
-enforces them.
+VMA, SDL, GLM, or miniaudio symbols in public headers) and the
+ownership/error rules above are the stable contract; the leakage gate
+in the test suite enforces them.

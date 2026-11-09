@@ -148,6 +148,15 @@ TEST_CASE("Spatial: listener pose round-trips through miniaudio")
     CHECK(pos.z == doctest::Approx(-4.0f));
     CHECK(context->listenerVelocity().x == doctest::Approx(0.5f));
     CHECK(context->listenerDirection().z == doctest::Approx(-1.0f));
+
+    // Degenerate orientations fall back to canonical axes instead of NaNs.
+    REQUIRE(context->setListenerPose({0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f},
+                                     {0.0f, 0.0f, 0.0f}));
+    const auto fallback = context->listenerDirection();
+    CHECK(std::isfinite(fallback.x));
+    CHECK(std::isfinite(fallback.y));
+    CHECK(std::isfinite(fallback.z));
+    CHECK(fallback.z == doctest::Approx(-1.0f));
 }
 
 TEST_CASE("Spatial: far world position gives sane camera-relative params")

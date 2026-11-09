@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <format>
 #include <utility>
 
@@ -226,10 +227,32 @@ bool AudioContext::setListenerPose(const math::Vec3f& position, const math::Vec3
 {
     if (initialized_ && engine_ != nullptr)
     {
+        // miniaudio requires unit, orthogonal orientation vectors; fall
+        // back to canonical axes for degenerate input rather than push
+        // garbage into the spatializer.
+        auto normalizedOr = [](const math::Vec3f& value, const math::Vec3f& fallback) noexcept {
+            const float length = std::sqrt(value.x * value.x + value.y * value.y + value.z * value.z);
+            if (length < 0.0001f || !std::isfinite(length))
+            {
+                return fallback;
+            }
+            return value / length;
+        };
+        const auto safeForward = normalizedOr(forward, math::Vec3f{0.0f, 0.0f, -1.0f});
+        auto safeUp = normalizedOr(up, math::Vec3f{0.0f, 1.0f, 0.0f});
+        const float crossX = safeForward.y * safeUp.z - safeForward.z * safeUp.y;
+        const float crossY = safeForward.z * safeUp.x - safeForward.x * safeUp.z;
+        const float crossZ = safeForward.x * safeUp.y - safeForward.y * safeUp.x;
+        const float crossLength = std::sqrt(crossX * crossX + crossY * crossY + crossZ * crossZ);
+        if (crossLength < 0.0001f || !std::isfinite(crossLength))
+        {
+            safeUp = std::abs(safeForward.y) > 0.99f ? math::Vec3f{1.0f, 0.0f, 0.0f} : math::Vec3f{0.0f, 1.0f, 0.0f};
+        }
+
         ma_engine_listener_set_position(engine_.get(), 0, position.x, position.y, position.z);
-        ma_engine_listener_set_direction(engine_.get(), 0, forward.x, forward.y, forward.z);
+        ma_engine_listener_set_direction(engine_.get(), 0, safeForward.x, safeForward.y, safeForward.z);
         ma_engine_listener_set_velocity(engine_.get(), 0, velocity.x, velocity.y, velocity.z);
-        ma_engine_listener_set_world_up(engine_.get(), 0, up.x, up.y, up.z);
+        ma_engine_listener_set_world_up(engine_.get(), 0, safeUp.x, safeUp.y, safeUp.z);
         return true;
     }
     return false;

@@ -27,15 +27,16 @@ namespace starforge::audio
 
 // A spatial voice attached to an entity. `sound` is a SoundBank handle
 // loaded by the caller (see attachEmitter). Distance parameters map to
-// the miniaudio inverse-distance attenuation model; `maxDistance` is
-// where the CPU reference gain reaches zero.
+// the miniaudio inverse-distance attenuation model: maxDistance clamps
+// the model to a positive floor gain (it does not silence the voice;
+// silence is a game-layer decision).
 struct AudioEmitter
 {
     SoundHandle sound;
-    float rolloff = 1.0f;      // Attenuation aggressiveness (>= 0.1).
-    float minDistance = 1.0f;  // Full gain within this radius (m).
-    float maxDistance = 1000.0f; // Silence past this range (m).
-    float dopplerFactor = 1.0f; // Doppler strength (0 disables).
+    float rolloff = 1.0f;        // Attenuation aggressiveness (>= 0.1).
+    float minDistance = 1.0f;    // Full gain within this radius (m).
+    float maxDistance = 1000.0f; // Gain floor past this range (m).
+    float dopplerFactor = 1.0f;  // Doppler strength (0 disables).
 };
 
 // Marks the listener entity (typically the ship). Its Transform and
@@ -47,6 +48,11 @@ struct AudioListener
 // Registers AudioEmitter/AudioListener component IDs with the world.
 // Call once per Ecs world before attaching audio components.
 void registerAudioComponents(ecs::Ecs& world);
+
+// Registers removal cleanup for AudioEmitter: destroying or removing the
+// component stops its voice so looped emitters don't become ghosts.
+// The bank must outlive the world.
+void registerAudioEmitterCleanup(ecs::Ecs& world, SoundBank& bank);
 
 // Attaches an AudioEmitter component for a voice that must already be
 // loaded in the bank, and forwards its attenuation parameters

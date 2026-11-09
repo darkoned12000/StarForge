@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Leakage gate for the public API headers (M9.8).
+"""Leakage gate for the public API headers (M9.8, extended in M12.5).
 
 Scans public headers (recursively) for backend symbols (Vulkan, VMA, SDL,
 GLM) and internal include paths. Public headers must be self-contained and
@@ -18,12 +18,13 @@ import tempfile
 from pathlib import Path
 
 FORBIDDEN = [
-    (re.compile(r'#\s*include\s*[<"][^>"]*(vulkan|SDL|glm|vma)', re.IGNORECASE), "backend include"),
+    (re.compile(r'#\s*include\s*[<"][^>"]*(vulkan|SDL|glm|vma|miniaudio)', re.IGNORECASE), "backend include"),
     (re.compile(r'\b(Vk[A-Z][A-Za-z0-9]+|VK_[A-Z0-9_]+)\b'), "Vulkan symbol"),
     (re.compile(r'\bVMA_[A-Z0-9_]+\b|\bVma[A-Z]'), "VMA reference"),
     (re.compile(r'\bSDL_[A-Za-z0-9_]+\b'), "SDL symbol"),
     (re.compile(r'\bglm::'), "GLM type"),
-    (re.compile(r'#\s*include\s*"[^"]*(platform/|environment/|spatial/|gpu_resources/|vulkan/|core/|math/math)'),
+    (re.compile(r'\bma_[a-zA-Z0-9_]+'), "miniaudio symbol"),
+    (re.compile(r'#\s*include\s*"[^"]*(platform/|environment/|spatial/|gpu_resources/|vulkan/|core/|math/math|audio/)'),
      "internal include"),
     (re.compile(r'\bsrc/'), "internal path reference"),
 ]

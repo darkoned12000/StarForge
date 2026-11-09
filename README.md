@@ -304,6 +304,15 @@ ownership/error rules, and the pre-1.0 stability policy, and
 The next rendering milestone, M9.5 (toon/cel-shaded art direction),
 is planned in the roadmap.
 
+Milestone M12: Audio (complete)
+
+miniaudio (v0.11.26) integration, behind the public `starforge::Audio`
+facade: per-bus playback, 3D positional audio with Doppler, ECS
+emitter/listener sync, and deferred one-shot triggers over a thread-safe
+queue — all camera-relative. `Backend::Silent` runs headless on the null
+backend. M12 exit proof: spatial audio attenuates with distance and
+Doppler sweeps the flyby, both exercised by the sandbox.
+
 ## License
 
 Copyright (c) 2026 Ray Hague. All rights reserved.
