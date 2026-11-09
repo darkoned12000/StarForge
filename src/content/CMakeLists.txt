@@ -1,6 +1,7 @@
 add_library(starforge_content STATIC
     content_generation.cpp
     cell_traversal.cpp
+    chunk_cache.cpp
     lod_transition.cpp
     upload_budget.cpp
     player_delta.cpp
