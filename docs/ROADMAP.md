@@ -1013,6 +1013,61 @@ Recommended tech stack for the game layer:
 - **Depends on:** M6 (Deterministic Exploration), M2 (WorldPosition).
 - **Priority:** Elevated — core to project vision; start as soon as M9
   is complete, ahead of physics and audio.
+- **Design stance:** M13 is not another generator algorithm milestone. The
+  pure generator exists (M6); M13 is the operational streaming layer
+  that makes a moving camera survivable at 60 fps: traversal, budgets,
+  GPU-ingestion caps, and a bounded multi-tier cache. Toon/cel art
+  direction is a first-class constraint, not a styling pass applied
+  after generation.
+
+### Key architectural constraints
+
+- **Bit-exact generation without FP SIMD noise:** no FastNoise2. Cel
+  art deliberately avoids high-frequency fractal noise; procedural
+  features use integer-hash lattices, macro-facets, clean geometric
+  plates, and step-like crater features. Micro-detail belongs to
+  stylized decals/hatch fields, not geometric noise. Deterministic
+  integer RNG + `-ffp-contract=off` (already project-wide) keeps cell
+  output identical across x86-64/ARM64; SIMD floating-point noise would
+  not.
+- **Toon LOD transition policy:** inverted-hull outlines amplify pops.
+  LOD switches need hysteresis bands plus dithered crossfade or
+  silhouette-preserving geomorphs; outline rendering must ignore
+  fading-in duplicate geometry (otherwise thick ink lines double/ghost).
+- **Chunk-seam lighting:** cel quantization makes small normal errors
+  visible as hard seams. Neighboring cells must share boundary normals
+  via analytic derivatives or unified boundary stencils — seam normals
+  are a bit-exact contract, not a rendering tune.
+- **GPU ingestion budget:** background CPU buffers are useless if the
+  main thread blows the 6.94 ms interval on staging and descriptor
+  writes. Per-frame upload gets a hard cap (≤ 2 MB staging or ≤ 32
+  registered draw calls per frame, whichever the benchmark says);
+  queuing never defers into the measured frame.
+- **Three-tier cache, owned separately:**
+  `Seed/Descriptor` (transforms, seeds, bounds) → `GPU buffer`
+  (vertex/index) → `ECS instance pool` (ephemeral simulation entities).
+  The generator owns an immutable, keyed raw store; the scene/streaming
+  director (game layer) owns `Evicted → Loaded in RAM → Mounted in
+  Flecs/Vulkan` transitions. No layer knows another's eviction policy.
+- **Deltas are a sparse overlay, never a mutation:** final world state
+  is `ApplyDelta(BaseChunkContent, DeltaMap[cell])` evaluated at
+  instance time. Base chunks stay byte-identical for checksum tests and
+  reset/respawn debugging; writer-side mutation would poison that.
+
+| Step | Deliverable | Verified by | Done when |
+|------|-------------|-------------|-----------|
+| 13.1 | **Decision record (ADR-00NN):** pipeline contract (`generate(seed, cell, level)` as the sole entry), integer-hash/fixed-point noise policy with explicit cross-platform bit-exactness gate, chunk-boundary normal contract, wall-clock + upload budget allocation from ADR-004 | Review | ADR accepted; noise policy, seam-normal contract, and byte/draw-call caps are written down |
+| 13.2 | **Traversal hardening:** deterministic chunk ordering per camera position, with hysteresis so cells don't oscillate at boundaries; **toon's LOD rule** — discrete switches only inside the hysteresis band, with dithered crossfade (outline pass ignores the fading mesh) | T1 | Replaying a camera path produces each chunk exactly once in order; boundary oscillation impossible |
+| 13.3 | **CPU + GPU budget enforcement:** per-cell object caps by level; measured generation time per chunk; **per-frame upload cap** (staging bytes + draw-call ceiling enforced before recording) | T1 + T4 | Worst-case cell generation + upload fits frame budget; T4 records timings to JSON, violation fails test |
+| 13.4 | **Parallel generation:** extend `generateContentParallel` to the full traversal neighborhood + LOD bands, bit-identical to sequential; in-flight cap so the job queue never floods | T1 + T4 | Identical bytes at 1/2/4/8 threads; scaling curve recorded |
+| 13.5 | **Bounded three-tier cache:** raw generation store (immutable keyed blobs), GPU buffer cache, ECS instance pool, with LRU/distance-first eviction inside ADR-004 memory budget; hit/miss/eviction counters | T1 | Replay path ≈100% hit rate; memory snapshot stays under budget |
+| 13.6 | **M13 exit proof + M13.5 flythrough:** 2-minute uninterrupted flight at 1,000 m/s through generated asteroid field, toon outlines on, 60 fps, zero validation errors, high-frequency-detail-free | T1 + T3 | Flythrough passes with no visible LOD popping or chunk seams per toon LOD rule; frame time under budget |
+| 13.7 | **Player deltas overlay:** `DeltaMap[cell]` applied at ECS instantiation over the immutable base; save/load round-trip byte-exact | T1 | After save/load the cell is byte-identical to pre-save; base chunk checksum unchanged |
+| 13.8 | **M13 full exit:** simulated long flight reaches generated content with precision intact at interstellar range (1e12 m anchoring per M2/M6 proofs) | T1 + T3 | Flight reaches generated content; translation invariance holds at max extent |
+
+Order note: 13.6/13.7 (deltas + full exit) deliberately follow the 13.5
+flythrough — the vertical slice M19 needs the field to stream flawlessly
+first, persistence second.
 
 ### M14 – AI and Behavior
 

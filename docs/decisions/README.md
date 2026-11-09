@@ -17,6 +17,7 @@ is already implemented. Open questions remain open until a record is accepted.
 | [0006](0006-world-position.md) | World position representation (int64 cell + double offset) | Accepted |
 | [0009](0009-public-api-contract.md) | Public API contract, opaque resource ownership, and Vulkan-free boundary | Accepted for M9 implementation |
 | [0010](0010-audio.md) | Audio layer choice (miniaudio) and headless null-backend strategy | Accepted |
+| [0011](0011-procedural-generation.md) | Procedural generation determinism, toon LOD policy, and three-tier cache | Accepted |
 | [002](002-m3-geometry-decisions.md) | M3 geometry and precision decisions (push constants + BDA, image format, golden policy, etc.) | Accepted |
 | [004](004-performance-budgets.md) | Performance budgets (144 fps target, CPU/GPU/memory budgets, hardware scope) | Accepted |
 
