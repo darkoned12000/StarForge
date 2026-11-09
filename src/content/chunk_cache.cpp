@@ -22,24 +22,41 @@ RawGenerationStore::RawGenerationStore(Config config) noexcept : config_(config)
 std::shared_ptr<const ContentChunk> RawGenerationStore::get(std::uint64_t seed, const CellCoord& cell,
                                                             const GenerationBudget& budget)
 {
-    std::lock_guard lock(mutex_);
-    ++stats_.lookups;
     const Key key{seed, cell.x, cell.y, cell.z, cell.level};
-    const auto found = entries_.find(key);
-    if (found != entries_.end())
     {
-        ++stats_.hits;
-        if (found->second.orderIt != order_.begin())
+        std::lock_guard lock(mutex_);
+        ++stats_.lookups;
+        const auto found = entries_.find(key);
+        if (found != entries_.end())
         {
-            order_.splice(order_.begin(), order_, found->second.orderIt);
+            ++stats_.hits;
+            if (found->second.orderIt != order_.begin())
+            {
+                order_.splice(order_.begin(), order_, found->second.orderIt);
+            }
+            return found->second.chunk;
         }
-        return found->second.chunk;
+        ++stats_.misses;
     }
 
-    ++stats_.misses;
+    // Generate without the lock so concurrent workers don't serialize.
     const ContentChunk generated = generateContentBudgeted(seed, cell.x, cell.y, cell.z, cell.level, budget);
     const std::size_t bytes = estimatedBytes(generated);
     auto chunk = std::make_shared<const ContentChunk>(std::move(generated));
+
+    std::lock_guard lock(mutex_);
+    const auto inserted = entries_.find(key);
+    if (inserted != entries_.end())
+    {
+        // Another worker won the race; return the resident chunk.
+        ++stats_.hits;
+        if (inserted->second.orderIt != order_.begin())
+        {
+            order_.splice(order_.begin(), order_, inserted->second.orderIt);
+        }
+        return inserted->second.chunk;
+    }
+
     if (bytes <= config_.maxBytes)
     {
         order_.push_front(key);

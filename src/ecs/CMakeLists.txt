@@ -5,6 +5,7 @@ add_library(starforge_ecs STATIC
     world.cpp
     spatial_index.cpp
     instance_stream.cpp
+    content_instantiation.cpp
 )
 
 target_include_directories(starforge_ecs
@@ -30,6 +31,7 @@ target_link_libraries(starforge_ecs
         starforge_math
         starforge_spatial
         starforge_environment
+        starforge_content
 )
 
 if(NOT TARGET flecs::flecs_static AND NOT TARGET flecs)

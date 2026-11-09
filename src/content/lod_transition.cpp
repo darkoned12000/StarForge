@@ -75,13 +75,6 @@ LodTransition ToonLodHysteresis::update(double distance)
         return state;
     }
 
-    const bool hadLastDistance = hasLastDistance_;
-    const double previousDistance = lastDistance_;
-    (void)hadLastDistance;
-    (void)previousDistance;
-    lastDistance_ = distance;
-    hasLastDistance_ = true;
-
     const int target = desiredLevel(distance);
 
     if (!transitioning_)

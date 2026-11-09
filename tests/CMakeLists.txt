@@ -38,6 +38,8 @@ add_executable(starforge_tests
     test_content_budget.cpp
     test_content_cache.cpp
     test_content_flythrough.cpp
+    test_content_overlay.cpp
+    test_content_interstellar_flight.cpp
     test_content_integration.cpp
     test_planets.cpp
     test_planets_new.cpp

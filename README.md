@@ -93,7 +93,8 @@ cannot be disabled.
     src/core/            Logging, version, foundational utilities
     src/math/            STARFORGE vector/matrix aliases and projection helpers
     src/spatial/         WorldPosition, camera-relative transforms, and render objects
-    src/content/         Deterministic procedural content generation and deltas
+    src/content/         Deterministic procedural content generation, streaming,
+                         bounded cache, LOD, budgets, and player deltas
     src/jobs/            Job scheduler, dependencies, scratch memory, deferred deletion
     src/stats/           Shared statistics helpers
     src/platform/        SDL3 window, surface, and event handling
@@ -312,6 +313,22 @@ emitter/listener sync, and deferred one-shot triggers over a thread-safe
 queue — all camera-relative. `Backend::Silent` runs headless on the null
 backend. M12 exit proof: spatial audio attenuates with distance and
 Doppler sweeps the flyby, both exercised by the sandbox.
+
+Milestone M13: Procedural Generation (complete)
+
+The runtime streaming layer around the deterministic M6 generator:
+cell traversal with hysteresis, budgeted generation (including parallel
+generation), a bounded process-level `RawGenerationStore` cache,
+per-frame upload budgets, toon LOD hysteresis, and player deltas applied
+as a read-time overlay. The M13 exit proof is a 7,200-frame simulated
+flight at 1,000 m/s that crosses a level-0 cell boundary more than
+`1e12 m` from the origin while keeping generated content deterministic
+and positioning precise. This milestone intentionally did not add a
+public content-streaming facade; the streaming layer remains internal
+pending an end-to-end public consumer (ADR-0009), and disk persistence
+is deferred to M18. See [docs/ROADMAP.md](docs/ROADMAP.md),
+[ADR-0011](docs/decisions/0011-procedural-generation.md), and
+[ADR-0012](docs/decisions/0012-content-vs-effect-noise.md).
 
 ## License
 

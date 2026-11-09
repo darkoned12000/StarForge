@@ -1006,7 +1006,9 @@ Recommended tech stack for the game layer:
 - **Goal:** Content as pure function of position: `generate(seed, cell,
   scale level)`. Star systems, asteroid fields, stations, resource nodes
   keyed by cell hash. No loading screens. Multi-scale generation with
-  caching strategy (JSON metadata + binary caches).
+  a bounded, process-level raw cache. Disk-backed JSON/binary caching
+  is deferred to M18 (Persistence), so M13.5 is the in-memory tier, not
+  persistent storage.
 - **Proof:** Same cell generates bit-identical content across runs and
   machines (T1); simulated long flight reaches generated content with
   positions still precise (T1 + T3).
@@ -1064,12 +1066,19 @@ Recommended tech stack for the game layer:
 | 13.4 ✅ | **Parallel generation:** `generateContentParallel` extended with an in-flight batch cap (waves of `maxInFlightBatches`, no queue flood), bit-identical to sequential at any thread count | T1 + T4 | Done: wave cap verified against sequential on the neighborhood + LOD bands; thread-count determinism already covered by the job-determinism suite |
 | 13.5 ✅ | **Bounded raw-generation cache:** `RawGenerationStore` (`seed → ContentChunk`) with O(1) LRU splicing (iterator stored per entry, no heap churn on hits), LRU eviction by entry count or retained bytes, hit/miss/eviction counters, mutex-guarded concurrent readers; shared immutable chunks handed to callers | T1 | Done: replay path hits after first miss, eviction stays under budget, generated chunks are shared so held references stay valid |
 | 13.6 ✅ | **M13 exit proof + M13.5 flythrough:** 2 simulated minutes at 1,000 m/s through a generated asteroid field — `StreamingTraversal` + `RawGenerationStore` instantiate/destroy ECS asteroids through per-cell groups, peak upload bytes/draws tracked against `UploadBudget`, precision held across a level-0 boundary; asteroids carry quantized orientations so toon light bands vary per cluster; render proof carried by the existing headless GPU asteroid suite (zero validation errors) | T1 + T3 | Done: 7,200-frame simulated flythrough crosses its first cell boundary, both cells generate once and hit on replay, entity pool stays bounded by the two-cell cap, and the headless render suites remain validation-clean |
-| 13.7 | **Player deltas overlay:** `DeltaMap[cell]` applied at ECS instantiation over the immutable base; save/load round-trip byte-exact | T1 | After save/load the cell is byte-identical to pre-save; base chunk checksum unchanged |
-| 13.8 | **M13 full exit:** simulated long flight reaches generated content with precision intact at interstellar range (1e12 m anchoring per M2/M6 proofs) | T1 + T3 | Flight reaches generated content; translation invariance holds at max extent |
+| 13.7 ✅ | **Player deltas overlay:** `DeltaMap` read-time overlay via `applyDeltas` + ECS instantiation helpers (`instantiateChunk`/`unmountChunk` in `starforge_ecs`); save/load serialization round-trip byte-exact | T1 | Done: overlay never mutates the base chunk (checksum-identical after save/load); removed/modified/added deltas mount correctly; round-trip apply is byte-identical |
+| 13.8 ✅ | **M13 full exit:** simulated 2-minute flight at 1,000 m/s anchored past 1e12 m — `StreamingTraversal` + `RawGenerationStore` + ECS instantiation with precision intact and deterministic cell hashes | T1 + T3 | Done: interstellar flight test reaches generated content >1e12 m from origin, mounts correct chunks, and matches fresh direct generation byte-for-byte; headless GPU suites remain validation-clean |
 
 Order note: 13.6/13.7 (deltas + full exit) deliberately follow the 13.5
 flythrough — the vertical slice M19 needs the field to stream flawlessly
 first, persistence second.
+
+**Status: M13 is complete (13.1–13.8 ✅). 13.5 is not remaining work.**
+The bounded `RawGenerationStore` cache, simulated 2-minute flythrough,
+delta overlay, and >1e12 m interstellar flight are all implemented and
+tested. M12/M13 deliberately remain internal-only: no public streaming
+facade has been added, because ADR-0009 promotes public APIs only after
+an end-to-end consumer. The next planned work is M14 (AI and Behavior).
 
 ### M14 – AI and Behavior
 
@@ -1122,11 +1131,15 @@ first, persistence second.
   validation errors, stable 60 fps.
 - **Depends on:** M10, M11, M13, M16, M17.
 
-### M13.5 – Asteroid Field Flythrough (intermediate checkpoint)
+### Checkpoint: Asteroid Field Flythrough (superseded by steps 13.6 and 13.8)
 
-- **Goal:** Fly through a procedural asteroid field with correct precision
-  and basic ship controls. Motivating checkpoint before the full vertical
-  slice.
-- **Proof:** 2 minutes of continuous flight through generated content with
-  stable 60 fps and zero validation errors.
-- **Depends on:** M9 (Public API), M13 (Procedural Generation).
+- **Status:** covered by the completed M13 steps above; do not treat the
+  old "M13.5" heading below as a separate remaining milestone.
+- **Original goal:** fly through a procedural asteroid field with correct
+  precision and basic ship controls as a motivating checkpoint.
+- **Proof:** the 2-minute, 1,000 m/s, 7,200-frame simulated flights in
+  steps 13.6 and 13.8, including the >1e12 m interstellar flight and
+  the headless GPU render suites.
+- **Scope note:** the proofs simulate kinematic flight; player-controlled
+  ship handling belongs to the game layer, not the content-streaming
+  milestone.

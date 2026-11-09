@@ -54,8 +54,6 @@ private:
     bool transitioning_ = false;
     int fromLevel_ = 0;
     int toLevel_ = 0;
-    double lastDistance_ = 0.0;
-    bool hasLastDistance_ = false;
 };
 
 } // namespace starforge::content
