@@ -1,0 +1,157 @@
+#include "ai/steering.hpp"
+
+#include "spatial/camera_relative.hpp"
+
+#include <glm/gtc/quaternion.hpp>
+
+#include <algorithm>
+#include <cmath>
+
+namespace starforge::ai
+{
+
+double arrivalSpeed(double distance, const SteeringParams& params) noexcept
+{
+    if (distance <= params.arrivalRadius || params.maxAcceleration <= 0.0 || params.maxSpeed <= 0.0)
+    {
+        return 0.0;
+    }
+
+    const double brakingDistance = std::max(0.0, distance - params.arrivalRadius);
+    const double brakingSpeed = std::sqrt(2.0 * params.maxAcceleration * brakingDistance);
+    return std::min(params.maxSpeed, brakingSpeed);
+}
+
+math::Vec3d seekVelocity(const math::Vec3d& currentPos, const math::Vec3d& targetPos,
+                         const math::Vec3d& currentVelocity, const SteeringParams& params,
+                         double dt) noexcept
+{
+    const math::Vec3d toTarget = targetPos - currentPos;
+    const double distance = glm::length(toTarget);
+    math::Vec3d desired{0.0, 0.0, 0.0};
+    if (distance > params.arrivalRadius && dt > 0.0)
+    {
+        const math::Vec3d direction = toTarget / distance;
+        const double speed = arrivalSpeed(distance, params);
+        desired = direction * speed;
+    }
+
+    const double accelerationLimit = params.maxAcceleration * dt;
+    if (accelerationLimit > 0.0)
+    {
+        const math::Vec3d delta = desired - currentVelocity;
+        const double deltaLength = glm::length(delta);
+        if (deltaLength > accelerationLimit)
+        {
+            desired = currentVelocity + delta * (accelerationLimit / deltaLength);
+        }
+    }
+    return desired;
+}
+
+math::Vec3d separationVelocity(const math::Vec3d& currentPos,
+                               const std::vector<math::Vec3d>& otherPositions,
+                               const SteeringParams& params) noexcept
+{
+    math::Vec3d result{0.0, 0.0, 0.0};
+    if (params.separationRadius <= 0.0)
+    {
+        return result;
+    }
+
+    for (const auto& other : otherPositions)
+    {
+        const math::Vec3d away = currentPos - other;
+        const double distance = glm::length(away);
+        if (distance < 1.0e-6)
+        {
+            // Exact overlap: break the symmetry with a deterministic push.
+            result.x += params.maxSpeed * params.separationWeight;
+            continue;
+        }
+        if (distance >= params.separationRadius)
+        {
+            continue;
+        }
+
+        const double falloff = 1.0 - (distance / params.separationRadius);
+        result += (away / distance) * (falloff * falloff * params.maxSpeed * params.separationWeight);
+    }
+    return result;
+}
+
+math::Vec4f headingForDirection(const math::Vec3d& dir) noexcept
+{
+    if (glm::length(dir) <= 1.0e-12)
+    {
+        return {0.0f, 0.0f, 0.0f, 1.0f};
+    }
+
+    const glm::vec3 direction = glm::normalize(glm::vec3{static_cast<float>(dir.x),
+                                                          static_cast<float>(dir.y),
+                                                          static_cast<float>(dir.z)});
+    const glm::vec3 forward{0.0f, 0.0f, -1.0f};
+
+    glm::quat rotation;
+    const float alignment = glm::dot(forward, direction);
+    if (alignment > 0.999999f)
+    {
+        rotation = glm::identity<glm::quat>();
+    }
+    else if (alignment < -0.999999f)
+    {
+        rotation = glm::angleAxis(glm::pi<float>(), glm::vec3{0.0f, 1.0f, 0.0f});
+    }
+    else
+    {
+        const glm::vec3 axis = glm::normalize(glm::cross(forward, direction));
+        const float angle = std::acos(glm::clamp(glm::dot(forward, direction), -1.0f, 1.0f));
+        rotation = glm::angleAxis(angle, axis);
+    }
+
+    return math::Vec4f{rotation.x, rotation.y, rotation.z, rotation.w};
+}
+
+void steerEntity(flecs::entity entity, const spatial::WorldPosition& targetPos, double dt,
+                 const SteeringParams& params, const std::vector<math::Vec3d>& otherPositions)
+{
+    const auto& transform = entity.get<ecs::Transform>();
+    const math::Vec3d targetRelative = spatial::toCameraRelative(targetPos, transform.position);
+
+    math::Vec3d currentVelocity{0.0, 0.0, 0.0};
+    if (entity.has<ecs::Velocity>())
+    {
+        currentVelocity = entity.get<ecs::Velocity>().linear;
+    }
+
+    math::Vec3d desired = seekVelocity({0.0, 0.0, 0.0}, targetRelative, currentVelocity, params, dt);
+    desired += separationVelocity({0.0, 0.0, 0.0}, otherPositions, params);
+
+    // Re-clamp the composite command so separation cannot bypass the speed
+    // and acceleration budgets.
+    if (params.maxSpeed > 0.0 && glm::length(desired) > params.maxSpeed)
+    {
+        desired = glm::normalize(desired) * params.maxSpeed;
+    }
+    const double accelerationStep = params.maxAcceleration * dt;
+    if (accelerationStep > 0.0)
+    {
+        const math::Vec3d delta = desired - currentVelocity;
+        const double deltaLength = glm::length(delta);
+        if (deltaLength > accelerationStep)
+        {
+            desired = currentVelocity + delta * (accelerationStep / deltaLength);
+        }
+    }
+
+    entity.set<ecs::Velocity>({desired, {0.0f, 0.0f, 0.0f}});
+
+    auto& mutableTransform = entity.get_mut<ecs::Transform>();
+    if (glm::length(targetRelative) > params.arrivalRadius)
+    {
+        mutableTransform.orientation = headingForDirection(targetRelative);
+    }
+    entity.modified<ecs::Transform>();
+}
+
+} // namespace starforge::ai

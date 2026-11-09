@@ -19,6 +19,7 @@ is already implemented. Open questions remain open until a record is accepted.
 | [0010](0010-audio.md) | Audio layer choice (miniaudio) and headless null-backend strategy | Accepted |
 | [0011](0011-procedural-generation.md) | Procedural generation determinism, toon LOD policy, and three-tier cache | Accepted; noise wording amended by ADR-0012 |
 | [0012](0012-content-vs-effect-noise.md) | Deterministic content vs cosmetic effect noise | Accepted |
+| [0013](0013-ai-behavior.md) | AI and behavior architecture | Accepted |
 | [002](002-m3-geometry-decisions.md) | M3 geometry and precision decisions (push constants + BDA, image format, golden policy, etc.) | Accepted |
 | [004](004-performance-budgets.md) | Performance budgets (144 fps target, CPU/GPU/memory budgets, hardware scope) | Accepted |
 

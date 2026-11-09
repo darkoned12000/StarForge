@@ -48,6 +48,9 @@ add_executable(starforge_tests
     test_instance_data.cpp
     test_instance_data_update.cpp
     test_ecs.cpp
+    test_ai_components.cpp
+    test_ai_perception.cpp
+    test_ai_steering.cpp
     test_physics.cpp
     test_audio.cpp
     test_audio_spatial.cpp
@@ -74,6 +77,7 @@ target_link_libraries(starforge_tests
         starforge_gpu
         starforge_environment
         starforge_ecs
+        starforge_ai
         starforge_physics
         starforge_audio
         starforge_public_api

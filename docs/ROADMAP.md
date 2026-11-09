@@ -1109,9 +1109,13 @@ an end-to-end consumer. The next planned work is M14 (AI and Behavior).
 
 | Step | Deliverable | Verified by | Done when |
 |------|-------------|-------------|-----------|
-| 14.1 | **Decision and component model (ADR-0013):** fixed-tick AI scheduler, component layout (`AiAgent`, `Faction`, `NavigationTarget`, `Health`), determinism and threading rules | Review | ADR records the component model, think schedule, and the rule that AI decisions are computed on the main/Flecs thread while Jolt callbacks stay deferred |
-| 14.2 | **AI components and spatial queries:** `AiAgent` state/target/speed profile, faction relation lookup, neighborhood pickup through `SpatialIndex`, camera-relative presence checks | T1 | Create 50 agents; nearest hostile and friendly filters return deterministic, expected entities within the configured perception radius |
-| 14.3 | **Steering controller:** seek, arrival braking, orbit/dogfight, separation, heading alignment; writes ECS `Velocity` and orientation only | T1 | A seeker from standstill decelerates before a target and points its ship forward; separation pushes two nearby agents apart |
+| 14.1 ✅ | **Decision and component model (ADR-0013):** fixed-tick AI scheduler, component layout (`AiAgent`, `Faction`, `NavigationTarget`, `Health`), determinism and threading rules | Review | ADR records the component model, think schedule, and the rule that AI decisions are computed on the main/Flecs thread while Jolt callbacks stay deferred |
+| 14.2 ✅ | **AI components and spatial queries:** `AiAgent` state/target/speed profile, faction relation lookup, neighborhood pickup through `SpatialIndex`, camera-relative presence checks | T1 | Create 50 agents; nearest hostile and friendly filters return deterministic, expected entities within the configured perception radius |
+| 14.3 ✅ | **Steering controller:** seek, arrival braking, orbit/dogfight, separation, heading alignment; writes ECS `Velocity` and orientation only | T1 | A seeker from standstill decelerates before a target and points its ship forward; separation pushes two nearby agents apart |
+
+**Status: Phase A complete (14.1/14.2/14.3 ✅).** Component model, perception,
+and steering are implemented and tested; the FSM, traffic, combat, and scale
+proof remain phases B and C.
 
 ### Phase B – traffic and movement
 
