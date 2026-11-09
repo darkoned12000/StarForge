@@ -82,7 +82,9 @@ convenience wrapper around the same path.
 - `starforge::Toon` — cel-shaded (toon) mesh renderer: quantized
   diffuse bands, stepped specular, rim light, and an inverted-hull
   outline pass. `record()`/`render()`/`recreate()` mirror `Starfield`;
-  outline thickness is specified in screen pixels.
+  outline thickness is specified in screen pixels. Diffuse color can use a
+  three-stop ramp (`shadowColor` → `midColor` → `baseColor`); a `midColor`
+  with alpha 0 uses the midpoint of the shadow and base colors.
 - `starforge::Audio` — backend-neutral audio: `create`, `loadFromMemory`
   (WAV/FLAC/MP3 bytes), `play`/`stop`/`isPlaying`, per-bus gain
   (`setBusVolume`), `setListener`, `setEmitter` (3D positional audio with

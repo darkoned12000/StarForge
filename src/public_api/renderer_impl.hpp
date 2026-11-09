@@ -58,6 +58,10 @@ struct RendererInternalAccess
         return renderer.impl_ && renderer.impl_->device && renderer.impl_->swapchain && renderer.impl_->frameRenderer;
     }
 
+    [[nodiscard]] static VkInstance instance(Renderer& renderer) noexcept
+    {
+        return renderer.impl_->context->instance();
+    }
     [[nodiscard]] static VkDevice device(Renderer& renderer) noexcept
     {
         return renderer.impl_->device->device();
@@ -69,6 +73,10 @@ struct RendererInternalAccess
     [[nodiscard]] static std::uint32_t queueFamily(Renderer& renderer) noexcept
     {
         return renderer.impl_->device->graphicsQueueFamily();
+    }
+    [[nodiscard]] static std::uint32_t framesInFlight(Renderer& renderer) noexcept
+    {
+        return renderer.impl_->frameRenderer->framesInFlight();
     }
     [[nodiscard]] static VkFormat colorFormat(Renderer& renderer) noexcept
     {

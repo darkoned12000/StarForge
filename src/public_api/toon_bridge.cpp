@@ -39,6 +39,7 @@ namespace
     result.baseColor = ::starforge::math::Vec4f{value.baseColor.x, value.baseColor.y, value.baseColor.z, value.baseColor.w};
     result.shadowColor = ::starforge::math::Vec4f{value.shadowColor.x, value.shadowColor.y, value.shadowColor.z,
                                                   value.shadowColor.w};
+    result.midColor = ::starforge::math::Vec4f{value.midColor.x, value.midColor.y, value.midColor.z, value.midColor.w};
     result.bandCount = value.bandCount;
     result.rimStrength = value.rimStrength;
     result.outlineWidth = value.outlineWidth;
@@ -68,9 +69,11 @@ RawToon& RawToon::operator=(RawToon&& other) noexcept
 std::expected<std::unique_ptr<RawToon>, std::string> RawToon::create(const CreateInfo& info)
 {
     auto backend = environment::ToonRenderer::create({
+        .instance = info.instance,
         .device = info.device,
         .physicalDevice = info.physicalDevice,
         .queueFamily = info.queueFamily,
+        .framesInFlight = info.framesInFlight,
         .colorFormat = info.colorFormat,
         .depthFormat = info.depthFormat,
         .shaderDirectory = info.shaderDirectory,

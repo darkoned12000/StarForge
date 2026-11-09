@@ -53,6 +53,7 @@ struct RawToonParams
 {
     RawVec4f baseColor;
     RawVec4f shadowColor;
+    RawVec4f midColor; // alpha=0 means the midpoint of shadow/base
     float bandCount = 3.0f;
     float rimStrength = 0.5f;
     float outlineWidth = 2.0f;
@@ -64,9 +65,11 @@ class RawToon
 public:
     struct CreateInfo
     {
+        VkInstance instance = VK_NULL_HANDLE;
         VkDevice device = VK_NULL_HANDLE;
         VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
         std::uint32_t queueFamily = 0;
+        std::uint32_t framesInFlight = 2;
         VkFormat colorFormat = VK_FORMAT_UNDEFINED;
         VkFormat depthFormat = VK_FORMAT_UNDEFINED;
         std::string shaderDirectory;

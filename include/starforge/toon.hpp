@@ -45,6 +45,9 @@ public:
     {
         math::Vec4f baseColor{1.0f, 0.25f, 0.2f, 1.0f};
         math::Vec4f shadowColor{0.25f, 0.05f, 0.1f, 1.0f};
+        // Optional middle color of the diffuse ramp. Alpha == 0 means the
+        // midpoint of shadowColor and baseColor.
+        math::Vec4f midColor{0.0f, 0.0f, 0.0f, 0.0f};
         float bandCount = 3.0f;
         float rimStrength = 0.5f;
         float outlineWidth = 2.0f; // pixels

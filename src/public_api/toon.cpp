@@ -47,9 +47,11 @@ namespace bridge = public_api_bridge;
 [[nodiscard]] bridge::RawToon::CreateInfo makeBackendInfo(Renderer& renderer, const std::string& shaderDirectory)
 {
     return bridge::RawToon::CreateInfo{
+        .instance = RendererInternalAccess::instance(renderer),
         .device = RendererInternalAccess::device(renderer),
         .physicalDevice = RendererInternalAccess::physicalDevice(renderer),
         .queueFamily = RendererInternalAccess::queueFamily(renderer),
+        .framesInFlight = RendererInternalAccess::framesInFlight(renderer),
         .colorFormat = RendererInternalAccess::colorFormat(renderer),
         .depthFormat = RendererInternalAccess::depthFormat(renderer),
         .shaderDirectory = shaderDirectory,
@@ -127,6 +129,7 @@ void Toon::record(FrameContext& frameContext, const Context& context, const Para
     bridge::RawToonParams rawParams;
     rawParams.baseColor = toRaw(params.baseColor);
     rawParams.shadowColor = toRaw(params.shadowColor);
+    rawParams.midColor = toRaw(params.midColor);
     rawParams.bandCount = params.bandCount;
     rawParams.rimStrength = params.rimStrength;
     rawParams.outlineWidth = params.outlineWidth;

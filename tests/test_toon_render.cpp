@@ -40,7 +40,8 @@ struct Pixel
 
 // Renders the toon cube once with the given view-space light direction and
 // returns the 64x64 readback pixels (row-major).
-[[nodiscard]] std::vector<Pixel> renderToonCube(const math::Vec3f& lightDirectionView)
+[[nodiscard]] std::vector<Pixel> renderToonCube(const math::Vec3f& lightDirectionView,
+                                               const math::Vec4f& midColor = {0.0f, 0.0f, 0.0f, 0.0f})
 {
     constexpr std::uint32_t kW = 64;
     constexpr std::uint32_t kH = 64;
@@ -92,9 +93,11 @@ struct Pixel
     REQUIRE(readback.has_value());
 
     auto toon = ToonRenderer::create({
+        .instance = context->instance(),
         .device = device->device(),
         .physicalDevice = context->physicalDevice(),
         .queueFamily = device->graphicsQueueFamily(),
+        .framesInFlight = 2,
         .colorFormat = VK_FORMAT_R8G8B8A8_UNORM,
         .depthFormat = depthFormat,
         .shaderDirectory = std::string(STARFORGE_SHADER_DIR),
@@ -183,6 +186,7 @@ struct Pixel
     ToonParams params;
     params.baseColor = math::Vec4f{0.5f, 0.25f, 0.2f, 1.0f};
     params.shadowColor = math::Vec4f{0.25f, 0.05f, 0.1f, 1.0f};
+    params.midColor = midColor;
     params.bandCount = 3.0f;
     params.rimStrength = 0.0f; // keep band assertions exact
     params.outlineWidth = 2.0f; // pixels
@@ -321,4 +325,13 @@ TEST_CASE("Toon rendering: quantized bands and inverted-hull outline")
     CHECK(nearChannel(shadowed.r, 0.25f));
     CHECK(nearChannel(shadowed.g, 0.05f));
     CHECK(nearChannel(shadowed.b, 0.1f));
+
+    // A light at 60 degrees to the front normal lands on the middle of
+    // the three-stop ramp, proving the custom mid color is honored.
+    const auto middle = renderToonCube(math::Vec3f{std::sqrt(3.0f), 0.0f, 1.0f},
+                                       math::Vec4f{0.35f, 0.15f, 0.4f, 1.0f});
+    const Pixel midTone = at(middle, 32, 32);
+    CHECK(nearChannel(midTone.r, 0.35f));
+    CHECK(nearChannel(midTone.g, 0.15f));
+    CHECK(nearChannel(midTone.b, 0.4f));
 }

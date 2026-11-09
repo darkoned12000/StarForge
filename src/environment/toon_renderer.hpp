@@ -7,8 +7,15 @@
 
 #include <cstdint>
 #include <expected>
+#include <memory>
 #include <optional>
 #include <string>
+
+namespace starforge::gpu_resources
+{
+class Allocator;
+class Buffer;
+} // namespace starforge::gpu_resources
 
 namespace starforge::environment
 {
@@ -31,6 +38,10 @@ struct ToonParams
 {
     math::Vec4f baseColor{1.0f, 0.25f, 0.2f, 1.0f};
     math::Vec4f shadowColor{0.25f, 0.05f, 0.1f, 1.0f};
+    // Optional middle color of the diffuse ramp. Alpha == 0 means the
+    // midpoint of shadowColor and baseColor; set alpha to 1 when using a
+    // custom middle tint.
+    math::Vec4f midColor{0.0f, 0.0f, 0.0f, 0.0f};
     float bandCount = 3.0f;
     float rimStrength = 0.5f;
     // Outline thickness in screen pixels (converted to view units per
@@ -48,9 +59,11 @@ class ToonRenderer
 public:
     struct CreateInfo
     {
+        VkInstance instance = VK_NULL_HANDLE;
         VkDevice device = VK_NULL_HANDLE;
         VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
         std::uint32_t queueFamily = 0;
+        std::uint32_t framesInFlight = 2;
         VkFormat colorFormat = VK_FORMAT_UNDEFINED;
         VkFormat depthFormat = VK_FORMAT_UNDEFINED;
         std::string shaderDirectory{};
@@ -77,6 +90,10 @@ private:
 
     VkDevice device_ = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
+    std::uint32_t framesInFlight_ = 2;
+    std::uint32_t currentDrawSlot_ = 0;
+    std::unique_ptr<gpu_resources::Allocator> allocator_;
+    std::unique_ptr<gpu_resources::Buffer> drawDataBuffer_;
     std::optional<vulkan::GraphicsPipeline> toonPipeline_;
     std::optional<vulkan::GraphicsPipeline> outlinePipeline_;
 };

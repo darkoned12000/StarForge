@@ -897,6 +897,22 @@ the respective milestone residuals, not new milestones.
 | 9.5.2 ✅ | Outline pass: inverted-hull (or stencil) outlines in a dark graphic color, width in scene units | T3 | Done: same shader in outline mode (object-space normal expansion, front-face-culled pipeline via new `cullFrontFace` config); readback test proves a dark outline ring around the silhouette |
 | 9.5.3 ✅ | Public toon material facade: `starforge::Toon` owning its pipeline/shaders, recording into `FrameContext` like `Starfield::record()` | T2 | Done: `starforge::Toon` in `include/starforge/toon.hpp` via raw-data bridge; public tests cover move-only, missing-shader API errors, render/recreate |
 | 9.5.4 ✅ | Cel-shaded proof scene + budgets: ship + nebula in toon style through the public API, golden image, frame-time budget vs ADR-004 | T3+T5 | Done: sandbox composes starfield + toon cube in one frame; `tests/goldens/toon_scene_128.png` committed; p95 frame time under the ADR-004 interval; zero validation errors |
+| 9.5.5 ✅ | Portability + material ramp: keep push constants below Vulkan's guaranteed 128-byte range and support a three-stop diffuse ramp (shadow/mid/lit colors) | T3 | Done: per-draw data lives in a host-mapped BDA buffer (one slot per frame in flight) instead of push constants; push block is 80 bytes; `midColor` alpha=0 derives the midpoint of shadow/base so existing two-color callers keep their look; custom mid tint renders exactly at the ramp midpoint; GPU and public suites stay green |
+
+### Deferred production toon work (not done now)
+
+These follow-ups are intentionally postponed because they need later
+architecture. Record them here so they are not lost:
+
+| Item | Why later | Done when |
+|------|-----------|-----------|
+| Arbitrary/authored geometry | The current shader still uses the cube placeholder. Real mesh input, UVs/tangents, baked outline normals, textures/decals, and glTF material mapping belong to the M17 asset pipeline. | M17 step renders a glTF ship/station with the toon material |
+| Multi-stop palette textures, emissive regions, and patterned decals | M17 authored assets should supply ramps/material layers; the current 3-stop data path is the bridge, not the final material format. | Material defines at least four ramp stops plus emissive tint |
+| Screen-space crease/outline pass | Current inverted hull only draws outer silhouettes. Interior panel lines need a G-buffer/post pass with object ID, normals, and depth, including reverse-Z depth linearization. | Edge pass shows panel/crease lines without breaking inverted-hull silhouettes |
+| Shadows and richer light response | The shader currently has no shadow term, no light attenuation, and no UV/detail modulation. | A shadowed band renders correctly on ships/stations |
+| HDR/tonemap/bloom and sRGB policy | UNORM output clamps current palette colors; bloom is needed for engine glow. Decide the color-space pipeline before authoring final palette values. | HDR toon scene passes a golden/budget test without flattened highlight bands |
+| Stylized environment variants | Current starfield/nebula/dust are largely photoreal. Decide per-material vs global toon direction, then add cel styling to space backgrounds. | A toon-styled nebula/sky proof renders in the same golden test |
+| Toon HUD/panels/portraits and hero assets | UI toon styling is M16; authored hero meshes ship in M17. | Toon HUD + one authored hero mesh render with consistent outline/rim rules |
 
 ## Game Layer (M10+)
 

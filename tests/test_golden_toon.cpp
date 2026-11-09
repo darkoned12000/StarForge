@@ -263,9 +263,11 @@ void submitAndWait(Scene& scene)
     scene.starRenderer = std::move(*starRenderer);
 
     auto toonRenderer = ToonRenderer::create({
+        .instance = scene.context->instance(),
         .device = scene.device->device(),
         .physicalDevice = scene.context->physicalDevice(),
         .queueFamily = scene.device->graphicsQueueFamily(),
+        .framesInFlight = 2,
         .colorFormat = VK_FORMAT_R8G8B8A8_UNORM,
         .depthFormat = depthFormat,
         .shaderDirectory = std::string(STARFORGE_SHADER_DIR),

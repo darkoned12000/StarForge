@@ -26,6 +26,7 @@ target_include_directories(starforge_environment PUBLIC
 target_link_libraries(starforge_environment PRIVATE
     starforge_core
     starforge_math
+    starforge_gpu
     starforge_vulkan
 )
 

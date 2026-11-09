@@ -81,6 +81,7 @@ public:
     [[nodiscard]] VkCommandBuffer currentCommandBuffer() const;
     [[nodiscard]] VkFence currentFence() const;
     void nextFrame();
+    [[nodiscard]] std::uint32_t framesInFlight() const noexcept { return framesInFlight_; }
 
 private:
     FrameRenderer() = default;
