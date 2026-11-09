@@ -1237,11 +1237,26 @@ Known M14 follow-ups for later milestones (intentionally out of scope):
   a game, gaps are filed as deferred items, not as engine redesigns.
 - **Non-goal for this milestone:** economy, missions, trading, stations,
   persistence. Those keep M15 from becoming a second-engine project.
+- **Control scheme (Freelancer-style, fixed for M15.0):**
+  - `W` — set/increase thruster power. Speed *persists*; you do **not**
+    need to hold `W` to keep moving. Thruster setting is a state value
+    (e.g. 0–100%), changed by discrete `W`/`S` taps.
+  - `S` — set/decrease thruster power; speed falls toward 0.
+  - `A` — barrel roll left (roll about forward axis).
+  - `D` — barrel roll right.
+  - Mouse move — steer: push forward (up) = nose up (pitch up), pull
+    back (down) = nose down (pitch down), left/right = yaw left/right.
+    Mouse is *steering*, not camera-orbit. Camera is a chase camera.
+  - Left mouse button — fire primary guns (hold to keep firing).
+  - Right mouse button — fire secondary weapon (per-press trigger).
+  - `Space` — toggle flight mode ↔ UI mode. In UI mode the mouse cursor
+    is free to click UI elements; in flight mode the mouse steers.
+  - `P` or `Esc` — pause; shows a menu overlay.
 
 | Step | Deliverable | Verified by | Done when |
 |------|-------------|-------------|-----------|
-| 15.0.1 | Game shell: `apps/game/` main loop — fixed-step simulation (60 Hz) decoupled from render, resize/minimize handling, clean shutdown | T5 | Window opens, loop runs, close is validation-clean; simulation steps at fixed dt regardless of frame rate |
-| 15.0.2 | Player ship + input + camera: keyboard (thrust/roll/pitch/yaw) + mouse steering, ECS `Transform`/`Velocity` ship, chase camera, all positions via `WorldPosition` → camera-relative | T1+T5 | Ship flies and steers continuously; camera follows without jitter; ship works at >1e12 m from origin |
+| 15.0.1 ✅ | Game shell: `apps/game/` main loop — fixed-step simulation (60 Hz) decoupled from render, resize/minimize handling, clean shutdown | T5 | Done: `starforge_game` target, 60 Hz accumulator with 5-step cap, resize/format-changed recreate, minimize sleep, `waitIdle` shutdown; committed on `gamedemo` |
+| 15.0.2 ✅ | Player ship + input + camera: Freelancer scheme above (`W`/`S` persistent throttle set-points, `A`/`D` barrel roll, mouse steer, LMB/RMB weapons, `Space` flight/UI toggle, `P`/`Esc` pause menu), ECS `Transform`/`Velocity` ship, chase camera, all positions via `WorldPosition` → camera-relative | T1+T5 | Done: public input facade (`Key`/`MouseButton`/`MouseMotion` on `Application`, SDL polling in `platform::Window`); `apps/game/ship_controller.hpp` (persistent throttle, steer, roll, mode/pause, weapon states) + `game_bridge` (raw ECS bridge, no TU mixes public+internal math); `test_game_controls.cpp` (6 T1 cases) passes; manual window run still to be confirmed by the user |
 | 15.0.3 | Procedural field integration: `StreamingTraversal` + `RawGenerationStore` + `instantiateChunk` driving ECS asteroids, toon/instanced rendering, zero stalls | T1+T3 | Player crosses cell boundaries with no loading screens and no frame pop over the upload budget; distant fields have cheap representation |
 | 15.0.4 | Environment showcase: planet patch + atmosphere shell, nebula backdrop, starfield — all composed in one frame, toon-consistent | T3 | Headless render of the composed scene passes; orbit→approach path renders planet dish + atmosphere limb; zero validation errors |
 | 15.0.5 | Combat slice: one M14 AI hostile (engage/evade), weapon fire, shield hit, health/damage events, audio trigger through M12 facade | T1+T5 | Player can fight and be damaged; hostile engages and evades; hits show stylized effects; no Flecs mutation from physics/audio threads |

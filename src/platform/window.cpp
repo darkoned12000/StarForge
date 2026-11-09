@@ -65,6 +65,16 @@ Window::Window(Window&& other) noexcept
       shouldClose_(other.shouldClose_),
       resized_(other.resized_)
 {
+    for (std::size_t i = 0; i < keyCount; ++i)
+    {
+        keyDown_[i] = other.keyDown_[i];
+    }
+    for (std::size_t i = 0; i < 3; ++i)
+    {
+        mouseButtonDown_[i] = other.mouseButtonDown_[i];
+    }
+    mouseMotionX_ = other.mouseMotionX_;
+    mouseMotionY_ = other.mouseMotionY_;
 }
 
 Window& Window::operator=(Window&& other) noexcept
@@ -75,6 +85,16 @@ Window& Window::operator=(Window&& other) noexcept
         window_ = std::exchange(other.window_, nullptr);
         shouldClose_ = other.shouldClose_;
         resized_ = other.resized_;
+        for (std::size_t i = 0; i < keyCount; ++i)
+        {
+            keyDown_[i] = other.keyDown_[i];
+        }
+        for (std::size_t i = 0; i < 3; ++i)
+        {
+            mouseButtonDown_[i] = other.mouseButtonDown_[i];
+        }
+        mouseMotionX_ = other.mouseMotionX_;
+        mouseMotionY_ = other.mouseMotionY_;
     }
     return *this;
 }
@@ -111,15 +131,111 @@ void Window::pollEvents()
         case SDL_EVENT_WINDOW_SHOWN:
             resized_ = true;
             break;
+        case SDL_EVENT_KEY_DOWN:
+        case SDL_EVENT_KEY_UP:
+        {
+            const bool down = event.type == SDL_EVENT_KEY_DOWN;
+            switch (event.key.scancode)
+            {
+            case SDL_SCANCODE_W:
+                keyDown_[static_cast<std::size_t>(PlatformKey::W)] = down;
+                break;
+            case SDL_SCANCODE_A:
+                keyDown_[static_cast<std::size_t>(PlatformKey::A)] = down;
+                break;
+            case SDL_SCANCODE_S:
+                keyDown_[static_cast<std::size_t>(PlatformKey::S)] = down;
+                break;
+            case SDL_SCANCODE_D:
+                keyDown_[static_cast<std::size_t>(PlatformKey::D)] = down;
+                break;
+            case SDL_SCANCODE_SPACE:
+                keyDown_[static_cast<std::size_t>(PlatformKey::Space)] = down;
+                break;
+            case SDL_SCANCODE_P:
+                keyDown_[static_cast<std::size_t>(PlatformKey::P)] = down;
+                break;
+            case SDL_SCANCODE_ESCAPE:
+                keyDown_[static_cast<std::size_t>(PlatformKey::Escape)] = down;
+                break;
+            default:
+                break;
+            }
+            break;
+        }
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        case SDL_EVENT_MOUSE_BUTTON_UP:
+        {
+            const bool down = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+            switch (event.button.button)
+            {
+            case SDL_BUTTON_LEFT:
+                mouseButtonDown_[0] = down;
+                break;
+            case SDL_BUTTON_RIGHT:
+                mouseButtonDown_[1] = down;
+                break;
+            case SDL_BUTTON_MIDDLE:
+                mouseButtonDown_[2] = down;
+                break;
+            default:
+                break;
+            }
+            break;
+        }
+        case SDL_EVENT_MOUSE_MOTION:
+            mouseMotionX_ += event.motion.xrel;
+            mouseMotionY_ += event.motion.yrel;
+            break;
+        case SDL_EVENT_WINDOW_FOCUS_LOST:
+        {
+            // Alt+Tab away can skip KEY_UP events; clear all held state
+            // so keys don't stick.
+            for (std::size_t i = 0; i < keyCount; ++i)
+            {
+                keyDown_[i] = false;
+            }
+            for (std::size_t i = 0; i < 3; ++i)
+            {
+                mouseButtonDown_[i] = false;
+            }
+            break;
+        }
         default:
             break;
         }
     }
 }
 
+void Window::setRelativeMouseMode(bool enabled) noexcept
+{
+    if (window_)
+    {
+        SDL_SetWindowRelativeMouseMode(window_, enabled);
+    }
+}
+
 bool Window::takeResized() noexcept
 {
     return std::exchange(resized_, false);
+}
+
+bool Window::isKeyDown(PlatformKey key) const noexcept
+{
+    const auto idx = static_cast<std::size_t>(key);
+    return idx < keyCount && keyDown_[idx];
+}
+
+bool Window::isMouseButtonDown(PlatformMouseButton button) const noexcept
+{
+    const auto idx = static_cast<std::size_t>(button);
+    return idx < 3 && mouseButtonDown_[idx];
+}
+
+void Window::takeMouseMotion(float& dxOut, float& dyOut) noexcept
+{
+    dxOut = std::exchange(mouseMotionX_, 0.0f);
+    dyOut = std::exchange(mouseMotionY_, 0.0f);
 }
 
 Extent2D Window::framebufferSize() const

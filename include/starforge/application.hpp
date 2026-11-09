@@ -1,5 +1,7 @@
 #pragma once
 
+#include "starforge/input.hpp"
+
 #include <cstdint>
 #include <expected>
 #include <memory>
@@ -44,6 +46,12 @@ public:
     [[nodiscard]] Size2D framebufferSize() const noexcept;
     [[nodiscard]] bool isMinimized() const noexcept;
     [[nodiscard]] const std::string& title() const noexcept;
+
+    // Input snapshot for this frame (no SDL types exposed).
+    [[nodiscard]] bool isKeyDown(Key key) const noexcept;
+    [[nodiscard]] bool isMouseButtonDown(MouseButton button) const noexcept;
+    [[nodiscard]] MouseMotion takeMouseMotion() noexcept;
+    void setRelativeMouseMode(bool enabled) noexcept;
 
 private:
     struct Impl;

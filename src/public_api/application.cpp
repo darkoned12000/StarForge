@@ -92,4 +92,83 @@ const std::string& Application::title() const noexcept
     return impl_ ? impl_->title : kEmpty;
 }
 
+bool Application::isKeyDown(Key key) const noexcept
+{
+    if (!impl_)
+    {
+        return false;
+    }
+    platform::PlatformKey platformKey = platform::PlatformKey::Unknown;
+    switch (key)
+    {
+    case Key::W:
+        platformKey = platform::PlatformKey::W;
+        break;
+    case Key::A:
+        platformKey = platform::PlatformKey::A;
+        break;
+    case Key::S:
+        platformKey = platform::PlatformKey::S;
+        break;
+    case Key::D:
+        platformKey = platform::PlatformKey::D;
+        break;
+    case Key::Space:
+        platformKey = platform::PlatformKey::Space;
+        break;
+    case Key::P:
+        platformKey = platform::PlatformKey::P;
+        break;
+    case Key::Escape:
+        platformKey = platform::PlatformKey::Escape;
+        break;
+    default:
+        return false;
+    }
+    return impl_->window.isKeyDown(platformKey);
+}
+
+bool Application::isMouseButtonDown(MouseButton button) const noexcept
+{
+    if (!impl_)
+    {
+        return false;
+    }
+    platform::PlatformMouseButton platformButton = platform::PlatformMouseButton::Left;
+    switch (button)
+    {
+    case MouseButton::Left:
+        platformButton = platform::PlatformMouseButton::Left;
+        break;
+    case MouseButton::Right:
+        platformButton = platform::PlatformMouseButton::Right;
+        break;
+    case MouseButton::Middle:
+        platformButton = platform::PlatformMouseButton::Middle;
+        break;
+    default:
+        return false;
+    }
+    return impl_->window.isMouseButtonDown(platformButton);
+}
+
+MouseMotion Application::takeMouseMotion() noexcept
+{
+    float dx = 0.0f;
+    float dy = 0.0f;
+    if (impl_)
+    {
+        impl_->window.takeMouseMotion(dx, dy);
+    }
+    return MouseMotion{.dx = dx, .dy = dy};
+}
+
+void Application::setRelativeMouseMode(bool enabled) noexcept
+{
+    if (impl_)
+    {
+        impl_->window.setRelativeMouseMode(enabled);
+    }
+}
+
 } // namespace starforge

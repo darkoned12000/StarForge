@@ -40,6 +40,11 @@ option(STARFORGE_BUILD_SANDBOX
     ON
 )
 
+option(STARFORGE_BUILD_GAME
+    "Build the First Flight game application"
+    ON
+)
+
 option(STARFORGE_BUILD_TESTS
     "Build unit tests"
     ON
@@ -308,6 +313,10 @@ endforeach()
 
 if(STARFORGE_BUILD_SANDBOX)
     add_subdirectory(apps/sandbox)
+endif()
+
+if(STARFORGE_BUILD_GAME)
+    add_subdirectory(apps/game)
 endif()
 
 if(STARFORGE_BUILD_TESTS)

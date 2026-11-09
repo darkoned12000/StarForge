@@ -67,6 +67,7 @@ add_executable(starforge_tests
     test_public_renderer.cpp
     test_public_starfield.cpp
     test_public_toon.cpp
+    test_game_controls.cpp
 )
 
 target_link_libraries(starforge_tests
@@ -91,6 +92,8 @@ target_link_libraries(starforge_tests
 )
 
 starforge_set_warnings(starforge_tests)
+
+target_include_directories(starforge_tests PRIVATE ${PROJECT_SOURCE_DIR}/apps/game)
 
 add_test(NAME starforge_tests COMMAND starforge_tests)
 
