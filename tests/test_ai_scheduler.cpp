@@ -179,6 +179,38 @@ TEST_CASE("AI schedule: FSM timers run at real simulation speed")
     CHECK(ship.get<AiAgent>().stateTimer == doctest::Approx(1.0).epsilon(0.02));
 }
 
+TEST_CASE("AI schedule: steering integrates over think interval, not tick dt")
+{
+    Ecs world;
+    registerAiComponents(world);
+
+    const auto origin = starforge::spatial::WorldPosition::fromMeters(0.0, 0.0, 0.0);
+    const auto hostilePos = starforge::spatial::WorldPosition::fromMeters(200.0, 0.0, 0.0);
+    REQUIRE(origin.has_value());
+    REQUIRE(hostilePos.has_value());
+
+    const auto ship = createNpcShip(world, *origin, 1);
+    auto& agent = ship.get_mut<AiAgent>();
+    agent.maxSpeed = 100.0f;
+    agent.maxAcceleration = 50.0f;
+    (void)createNpcShip(world, *hostilePos, 0);
+
+    SpatialIndex index(world);
+    index.rebuild();
+
+    AiThinkSchedule schedule;
+    schedule.maxAgentsPerTick = 100;
+    schedule.thinkIntervalSeconds = 0.1;
+
+    tickAiThink(world, index, 1.0 / 60.0, schedule, BehaviorParams{});
+    REQUIRE(ship.has<starforge::ecs::Velocity>());
+    const auto velocity = ship.get<starforge::ecs::Velocity>().linear;
+    // First think integrates the full 0.1 s think interval of
+    // acceleration (50 m/s^2 * 0.1 s = 5 m/s). Passing the single-tick
+    // dt (1/60) would give ~0.83 m/s instead.
+    CHECK(velocity.x == doctest::Approx(5.0).epsilon(0.05));
+}
+
 TEST_CASE("AI schedule: snapshot invalidates when agents are added or destroyed")
 {
     Ecs world;

@@ -13,7 +13,7 @@ namespace starforge::ai
 
 [[nodiscard]] std::vector<RoutePoint> routeToStation(const spatial::WorldPosition& from,
                                                        const spatial::WorldPosition& station,
-                                                       std::uint8_t dockSlot = 0) noexcept;
+                                                       std::uint8_t dockSlot = 0);
 
 // Assign a route and the first navigation target to the entity. The points
 // are deterministic: approach on a lateral slot offset, then final dock.

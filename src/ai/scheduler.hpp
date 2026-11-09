@@ -13,8 +13,9 @@ namespace starforge::ai
 // every tick; agents whose timer has expired are "due". Due agents are
 // processed in deterministic entity-id order up to maxAgentsPerTick per
 // tick, and any remainder stay due for later ticks — they are never
-// dropped, so no agent can starve. Once an agent thinks it rests for
-// thinkIntervalSeconds before becoming due again.
+// dropped, so no agent can starve. Once an agent thinks, thinkTimer is
+// incremented by thinkIntervalSeconds (not reset) so its cadence phase
+// is preserved across thinks instead of drifting.
 struct AiThinkSchedule
 {
     std::uint32_t maxAgentsPerTick = 12;
@@ -31,8 +32,12 @@ struct AiThinkSchedule
     std::uint32_t ticksSinceRebuild = 0;
     // Round-robin start index into agentBuffer. Without it, a fleet
     // larger than budget-per-think-cycle would let low entity ids consume
-    // the budget every cycle and high ids would starve.
+    // the budget every cycle and high ids would starve. The cursor is
+    // preserved across snapshot rebuilds via lastProcessedId so rebuild
+    // churn (e.g. projectile spawns changing entityCount) cannot reset
+    // fairness.
     std::size_t cursor = 0;
+    std::uint64_t lastProcessedId = 0;
 };
 
 void tickAiThink(ecs::Ecs& world, const ecs::SpatialIndex& index, double dt, AiThinkSchedule& schedule,

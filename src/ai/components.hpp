@@ -41,6 +41,10 @@ struct AiAgent
     // Reserved for M15 traffic priority/deconfliction; currently unused.
     float trafficPriority = 0.0f;
     double targetLostTimer = 0.0;
+    // Latched collision-threat window, fed by the scheduler's per-tick
+    // pass from CollisionEvent. Per-frame events would otherwise be
+    // invisible to a brain that only thinks every few ticks.
+    double threatTimer = 0.0;
 };
 
 // Faction membership for the perception/decision systems. Stations, ships,

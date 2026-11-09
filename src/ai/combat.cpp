@@ -30,20 +30,24 @@ void clearCombatEvents(ecs::Ecs& world) noexcept
 {
     // Structural removal inside a query callback is illegal in Flecs
     // (locked table), so collect first, then remove outside iteration.
-    std::vector<flecs::entity> damaged;
-    world.world().query<DamageEvent>().each([&damaged](flecs::entity entity, DamageEvent&) {
-        damaged.push_back(entity);
-    });
-    for (const auto entity : damaged)
+    // Scratch storage is reused across calls (capacity retained) so the
+    // per-frame cleanup does not allocate.
+    static thread_local std::vector<flecs::entity> damagedStorage;
+    auto* damaged = &damagedStorage;
+    damaged->clear();
+    world.world().query<DamageEvent>().each(
+        [damaged](flecs::entity entity, DamageEvent&) { damaged->push_back(entity); });
+    for (const auto entity : *damaged)
     {
         entity.remove<DamageEvent>();
     }
 
-    std::vector<flecs::entity> fired;
-    world.world().query<CombatFireEvent>().each([&fired](flecs::entity entity, CombatFireEvent&) {
-        fired.push_back(entity);
-    });
-    for (const auto entity : fired)
+    static thread_local std::vector<flecs::entity> firedStorage;
+    auto* fired = &firedStorage;
+    fired->clear();
+    world.world().query<CombatFireEvent>().each(
+        [fired](flecs::entity entity, CombatFireEvent&) { fired->push_back(entity); });
+    for (const auto entity : *fired)
     {
         entity.remove<CombatFireEvent>();
     }
@@ -94,7 +98,8 @@ CombatShotResult tryFire([[maybe_unused]] ecs::Ecs& world, physics::PhysicsWorld
     CombatShotResult result;
     if (!attacker.is_alive() || !target.is_alive() || attacker == target ||
         !attacker.has<ecs::Transform>() || !target.has<ecs::Transform>() ||
-        !attacker.has<Weapon>() || !target.has<Health>() || !attacker.has<Faction>() || !target.has<Faction>())
+        !attacker.has<Weapon>() || !target.has<Health>() || !attacker.has<Health>() ||
+        !attacker.has<Faction>() || !target.has<Faction>())
     {
         return result;
     }

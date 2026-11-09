@@ -20,16 +20,14 @@ FactionRelation classifyFaction(std::uint32_t selfFaction, std::uint32_t otherFa
     return FactionRelation::Neutral;
 }
 
-std::optional<PerceivedTarget> nearestHostile([[maybe_unused]] ecs::Ecs& world, const ecs::SpatialIndex& index,
-                                              flecs::entity agentEntity,
-                                              const ecs::Transform& agentTransform,
-                                              const AiAgent& agent, std::uint32_t selfFaction)
+std::optional<PerceivedTarget> nearestHostile([[maybe_unused]] ecs::Ecs& world,
+                                               const std::vector<flecs::entity>& candidates,
+                                               flecs::entity agentEntity,
+                                               const ecs::Transform& agentTransform,
+                                               const AiAgent& agent, std::uint32_t selfFaction)
 {
-    // The index is bucketed by WorldPosition cell; local flight areas are
-    // tiny compared to a 2^20 m cell, so the current and neighbouring cells
-    // cover any realistic perception radius for Phase A targets.
-    const auto candidates = index.findNeighborhood(agentTransform.position);
     std::optional<PerceivedTarget> best;
+    double bestDistanceSq = 0.0;
 
     const double radiusSq = static_cast<double>(agent.perceptionRadius) * static_cast<double>(agent.perceptionRadius);
     for (const auto entity : candidates)
@@ -62,10 +60,10 @@ std::optional<PerceivedTarget> nearestHostile([[maybe_unused]] ecs::Ecs& world, 
             continue;
         }
 
-        const double distance = std::sqrt(distSq);
-        if (!best.has_value() || distSq < best->distance * best->distance)
+        if (!best.has_value() || distSq < bestDistanceSq)
         {
-            best = PerceivedTarget{entity, candidateFaction, distance};
+            best = PerceivedTarget{entity, candidateFaction, std::sqrt(distSq), distSq};
+            bestDistanceSq = distSq;
         }
     }
 

@@ -19,12 +19,9 @@ void registerAiComponents(ecs::Ecs& world)
 flecs::entity createNpcShip(ecs::Ecs& world, const spatial::WorldPosition& position,
                             std::uint32_t factionId, const AiAgent& agent)
 {
-    const auto entity = world.createShip(position);
-    entity.set<Faction>({factionId});
-    entity.set<AiAgent>(agent);
-    entity.set<Health>({100.0f, 100.0f});
-    entity.set<Weapon>({500.0f, 5.0f, 1.0f, 0.0f});
-    return entity;
+    NpcShipConfig config;
+    config.agent = agent;
+    return createNpcShip(world, position, factionId, config);
 }
 
 flecs::entity createNpcShip(ecs::Ecs& world, const spatial::WorldPosition& position,

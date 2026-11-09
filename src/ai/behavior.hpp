@@ -38,7 +38,8 @@ struct BehaviorSensors
 // so unit tests can pin the hysteresis/timing rules without an ECS or
 // spatial index.
 [[nodiscard]] BehaviorState nextBehavior(BehaviorState current, const BehaviorSensors& sensors,
-                                         double stateTimer, const BehaviorParams& params) noexcept;
+                                         double stateTimer, const BehaviorParams& params,
+                                         double targetLostTimer) noexcept;
 
 // ECS wrapper: refreshes the perceived target, advances timers, applies the
 // transition above, and steers the agent toward whatever the resulting

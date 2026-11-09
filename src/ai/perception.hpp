@@ -2,9 +2,11 @@
 
 #include "ai/components.hpp"
 #include "ecs/spatial_index.hpp"
+#include "ecs/world.hpp"
 
 #include <cstdint>
 #include <optional>
+#include <vector>
 
 namespace starforge::ai
 {
@@ -29,13 +31,17 @@ struct PerceivedTarget
     flecs::entity entity {};
     std::uint32_t factionId = 0;
     double distance = 0.0;
+    double distanceSq = 0.0;
 };
 
-// Nearest hostile ship claimed from the fixed spatial-index neighbourhood.
-// Returns nothing when no hostile ship is within perceptionRadius.
-[[nodiscard]] std::optional<PerceivedTarget> nearestHostile(ecs::Ecs& world, const ecs::SpatialIndex& index,
-                                                             flecs::entity agentEntity,
-                                                             const ecs::Transform& agentTransform,
-                                                             const AiAgent& agent, std::uint32_t selfFaction);
+// Nearest hostile ship claimed from the given fixed neighbourhood. The
+// caller supplies the index neighbourhood so one query per think serves
+// both perception and separation. Returns nothing when no hostile ship is
+// within perceptionRadius.
+[[nodiscard]] std::optional<PerceivedTarget> nearestHostile(ecs::Ecs& world,
+                                                            const std::vector<flecs::entity>& candidates,
+                                                            flecs::entity agentEntity,
+                                                            const ecs::Transform& agentTransform,
+                                                            const AiAgent& agent, std::uint32_t selfFaction);
 
 } // namespace starforge::ai

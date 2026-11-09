@@ -39,7 +39,7 @@ TEST_CASE("AI perception: nearest hostile in the spatial neighbourhood")
 
     AiAgent agent;
     agent.perceptionRadius = 100.0f;
-    const auto target = nearestHostile(world, index, agentShip, agentShip.get<starforge::ecs::Transform>(), agent, 1);
+    const auto target = nearestHostile(world, index.findNeighborhood(agentShip.get<starforge::ecs::Transform>().position), agentShip, agentShip.get<starforge::ecs::Transform>(), agent, 1);
     REQUIRE(target.has_value());
     CHECK(target->entity == hostileShip);
     CHECK(target->distance == doctest::Approx(40.0));
@@ -63,7 +63,7 @@ TEST_CASE("AI perception: works at interstellar range through camera-relative of
 
     AiAgent agent;
     agent.perceptionRadius = 100.0f;
-    const auto target = nearestHostile(world, index, agentShip, agentShip.get<starforge::ecs::Transform>(), agent, 1);
+    const auto target = nearestHostile(world, index.findNeighborhood(agentShip.get<starforge::ecs::Transform>().position), agentShip, agentShip.get<starforge::ecs::Transform>(), agent, 1);
     REQUIRE(target.has_value());
     CHECK(target->entity == hostileShip);
     CHECK(target->distance == doctest::Approx(25.0));

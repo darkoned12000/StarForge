@@ -36,11 +36,24 @@
     (no starvation). The scheduler's per-tick pass also advances
     `stateTimer`/`targetLostTimer`, so FSM dwell and lost-target rules
     run at real simulation speed even though `updateBehavior` only runs
-    on think ticks. Decision order is sorted by entity id with a
-    round-robin cursor, and the snapshot is cached/rebuilt only when the
+    on think ticks; steering likewise integrates over the elapsed think
+    interval rather than the single tick dt. Decision order is sorted by
+    entity id with a round-robin cursor preserved by entity id across
+    snapshot rebuilds, and the snapshot is cached/rebuilt only when the
     entity population changes, a cached agent dies or loses `AiAgent`,
     or a 60-tick backstop fires — steady-state ticks pay only an O(N)
-    validity scan, never an O(N log N) sort.
+    validity scan, never an O(N log N) sort. Collision events are
+    latched into `threatTimer` per tick so throttled brains see
+    collisions between thinks; `targetLostTimer` (not time-in-state)
+    drives disengagement.
+  - **Guidance ownership:** routed ships (`NavigationRoute`) are steered
+    only by `advanceRoute`; `updateBehavior` still runs perception/FSM
+    for them but writes no velocity. Target changes use stickiness
+    hysteresis (switch only when the new hostile is under half the
+    distance). Evading and Retreating hold until health ≥ 0.5, and
+    Evading times out back into Engaging/Transit instead of fleeing
+    forever at full health. Perception and separation share one
+    neighbourhood query per think.
 - **Alternatives considered:**
   - **Behavior trees (deferred):** More flexible, but heavier than the
     finite-state profiles needed for patrol/transit/combat until Phase B.

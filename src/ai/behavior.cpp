@@ -19,42 +19,18 @@ namespace
     return glm::length(relative);
 }
 
-[[nodiscard]] SteeringParams steeringParamsFor(const AiAgent& agent, double arrivalRadius) noexcept
-{
-    SteeringParams params;
-    params.maxSpeed = agent.maxSpeed;
-    params.maxAcceleration = agent.maxAcceleration;
-    params.arrivalRadius = arrivalRadius;
-    params.separationRadius = 25.0;
-    params.separationWeight = 1.0;
-    params.turnRate = agent.turnRate;
-    return params;
-}
-
 void steerToward(flecs::entity entity, const spatial::WorldPosition& destination, double dt,
-                 const AiAgent& agent, double arrivalRadius, const ecs::SpatialIndex& index)
+                 const AiAgent& agent, double arrivalRadius,
+                 const std::vector<flecs::entity>& candidates)
 {
     const auto& transform = entity.get<ecs::Transform>();
 
     // Stack buffer: steering is per-agent per-think, so a heap vector
     // here would allocate thousands of times per second at fleet scale.
-    // Neighbours beyond the cap are dropped deterministically (index
-    // order is stable), which only slightly smooths separation.
+    // Stations are excluded (docking ships must glide to the dock, not
+    // be repelled by the station itself).
     std::array<math::Vec3d, 32> others {};
-    std::size_t otherCount = 0;
-    for (const auto other : index.findNeighborhood(transform.position))
-    {
-        if (other == entity || !other.is_alive() || !other.has<ecs::Transform>())
-        {
-            continue;
-        }
-        const math::Vec3d relative =
-            spatial::toCameraRelative(other.get<ecs::Transform>().position, transform.position);
-        if (glm::length(relative) <= 100.0 && otherCount < others.size())
-        {
-            others[otherCount++] = relative;
-        }
-    }
+    const std::size_t otherCount = collectNeighbours(entity, candidates, transform, others);
 
     SteeringParams params = steeringParamsFor(agent, arrivalRadius);
     steerEntity(entity, destination, dt, params, std::span<const math::Vec3d>(others.data(), otherCount));
@@ -63,7 +39,7 @@ void steerToward(flecs::entity entity, const spatial::WorldPosition& destination
 } // namespace
 
 BehaviorState nextBehavior(BehaviorState current, const BehaviorSensors& sensors, double stateTimer,
-                            const BehaviorParams& params) noexcept
+                            const BehaviorParams& params, double targetLostTimer) noexcept
 {
     // Low-health states hold until repaired to >= 0.5 health (recovery
     // hysteresis). Without this band a hurt ship with no enemies nearby
@@ -75,10 +51,20 @@ BehaviorState nextBehavior(BehaviorState current, const BehaviorSensors& sensors
         {
             return BehaviorState::Retreating;
         }
-        if (sensors.healthRatio >= 0.5 && !sensors.hasPerceivedTarget &&
-            stateTimer >= params.evadeDurationSeconds)
+        if (sensors.healthRatio >= 0.5 && stateTimer >= params.evadeDurationSeconds)
         {
-            return sensors.hasDestination ? BehaviorState::Transit : BehaviorState::Patrol;
+            // Healthy and the evasion has run its course: re-engage a
+            // perceived hostile (bounded collision evasion) or resume
+            // travel. Previously evasion at full health with a nearby
+            // enemy fled forever and never re-engaged.
+            if (sensors.hasPerceivedTarget && sensors.targetDistance <= params.engagementRadius)
+            {
+                return BehaviorState::Engaging;
+            }
+            if (!sensors.hasPerceivedTarget)
+            {
+                return sensors.hasDestination ? BehaviorState::Transit : BehaviorState::Patrol;
+            }
         }
         return BehaviorState::Evading;
     }
@@ -137,7 +123,10 @@ BehaviorState nextBehavior(BehaviorState current, const BehaviorSensors& sensors
         }
         if (!sensors.hasPerceivedTarget)
         {
-            if (stateTimer >= params.lostTargetSeconds)
+            // Time since the target was last perceived, not time in
+            // state: a long fight must not disengage instantly the first
+            // frame a target ducks behind cover.
+            if (targetLostTimer >= params.lostTargetSeconds)
             {
                 return sensors.hasDestination ? BehaviorState::Transit : BehaviorState::Patrol;
             }
@@ -150,6 +139,10 @@ BehaviorState nextBehavior(BehaviorState current, const BehaviorSensors& sensors
         return BehaviorState::Engaging;
 
     case BehaviorState::Docking:
+        if (sensors.collisionThreat)
+        {
+            return BehaviorState::Evading;
+        }
         if (!sensors.destinationArrived)
         {
             return BehaviorState::Docking;
@@ -189,6 +182,18 @@ BehaviorState updateBehavior(ecs::Ecs& world, const ecs::SpatialIndex& index, fl
     auto& agent = entity.get_mut<AiAgent>();
     const auto& transform = entity.get<ecs::Transform>();
 
+    // Dead ships are wrecks: no thinking, no movement. M15 will add
+    // destruction; until then the entity persists inertly.
+    if (entity.has<Health>() && entity.get<Health>().currentHealth <= 0.0f)
+    {
+        agent.state = BehaviorState::Stationary;
+        if (entity.has<ecs::Velocity>())
+        {
+            entity.set<ecs::Velocity>({{0.0, 0.0, 0.0}, {0.0f, 0.0f, 0.0f}});
+        }
+        return BehaviorState::Stationary;
+    }
+
     std::uint32_t selfFaction = 0;
     if (entity.has<Faction>())
     {
@@ -204,17 +209,39 @@ BehaviorState updateBehavior(ecs::Ecs& world, const ecs::SpatialIndex& index, fl
     }
     sensors.healthRatio = healthRatio;
 
-    const auto perceived = nearestHostile(world, index, entity, transform, agent, selfFaction);
+    // One neighbourhood query per think, shared by perception and
+    // separation (previously two allocations per think).
+    const auto candidates = index.findNeighborhood(transform.position);
+
+    const auto perceived = nearestHostile(world, candidates, entity, transform, agent, selfFaction);
+    // Target stickiness: keep the current target unless the new nearest
+    // hostile is clearly closer (under half the distance), so ships do
+    // not flip-flop between two insurgents on every think.
+    const bool currentTargetUsable =
+        agent.target.is_alive() && agent.target.has<ecs::Transform>() &&
+        !(agent.target.has<Health>() && agent.target.get<Health>().currentHealth <= 0.0f);
     if (perceived.has_value())
     {
-        agent.target = perceived->entity;
+        bool switchTarget = !currentTargetUsable;
+        if (!switchTarget)
+        {
+            const math::Vec3d toCurrent =
+                spatial::toCameraRelative(agent.target.get<ecs::Transform>().position, transform.position);
+            const double currentDistSq = glm::dot(toCurrent, toCurrent);
+            switchTarget = perceived->distanceSq < currentDistSq * 0.25;
+        }
+        if (switchTarget)
+        {
+            agent.target = perceived->entity;
+        }
         agent.targetLostTimer = 0.0;
         sensors.hasTarget = true;
-        sensors.targetDistance = perceived->distance;
         sensors.hasPerceivedTarget = true;
+        sensors.targetDistance = agent.target == perceived->entity
+                                     ? perceived->distance
+                                     : distanceTo(transform.position, agent.target.get<ecs::Transform>().position);
     }
-    else if (agent.target.is_alive() && agent.target.has<ecs::Transform>() &&
-             !(agent.target.has<Health>() && agent.target.get<Health>().currentHealth <= 0.0f))
+    else if (currentTargetUsable)
     {
         // A 0-HP target is a wreck: drop it instead of circling it forever
         // (tryFire refuses to shoot wrecks, so holding one as a target
@@ -235,13 +262,14 @@ BehaviorState updateBehavior(ecs::Ecs& world, const ecs::SpatialIndex& index, fl
             distanceTo(transform.position, navigation.positionHint) <= navigation.arrivalRadius;
     }
 
-    if (entity.has<ecs::CollisionEvent>())
-    {
-        sensors.collisionThreat = true;
-    }
+    // CollisionEvent is latched into threatTimer by the scheduler's
+    // per-tick pass: a throttled brain would otherwise see contentions
+    // only on the exact tick they happen to think.
+    sensors.collisionThreat = agent.threatTimer > 0.0;
 
     const BehaviorState previous = agent.state;
-    const BehaviorState next = nextBehavior(previous, sensors, agent.stateTimer, params);
+    const BehaviorState next =
+        nextBehavior(previous, sensors, agent.stateTimer, params, agent.targetLostTimer);
     agent.state = next;
     if (next != previous)
     {
@@ -251,8 +279,11 @@ BehaviorState updateBehavior(ecs::Ecs& world, const ecs::SpatialIndex& index, fl
     // scheduler's fixed pass (see scheduler.cpp); updateBehavior only
     // resets them here so FSM dwell rules run at real simulation speed.
 
-    // Steering: each state has one deterministic destination rule; the
-    // finite-state update remains allocation-free.
+    // Steering: each state has one deterministic destination rule. Routed
+    // ships skip steering entirely — advanceRoute is the single owner of
+    // route-following motion (previously both systems wrote Velocity
+    // every tick on think frames and route won/lost arbitrarily).
+    const bool routed = entity.has<NavigationRoute>();
     spatial::WorldPosition destination;
     bool steer = false;
     double arrivalRadius = 50.0;
@@ -291,6 +322,23 @@ BehaviorState updateBehavior(ecs::Ecs& world, const ecs::SpatialIndex& index, fl
         }
         break;
     case BehaviorState::Retreating:
+        // Retreat flees like Evading when there is no destination to
+        // fall back to; previously a destination-less retreat sat still
+        // in weapons range.
+        if (agent.target.is_alive() && agent.target.has<ecs::Transform>())
+        {
+            const auto targetPos = agent.target.get<ecs::Transform>().position;
+            const auto away = spatial::toCameraRelative(transform.position, targetPos);
+            const double awayLength = glm::length(away);
+            if (awayLength > 1.0e-6)
+            {
+                destination = transform.position + away * (1000.0 / awayLength);
+                arrivalRadius = 0.0;
+                steer = true;
+                break;
+            }
+        }
+        [[fallthrough]];
     case BehaviorState::Patrol:
     case BehaviorState::Transit:
     case BehaviorState::Docking:
@@ -306,11 +354,11 @@ BehaviorState updateBehavior(ecs::Ecs& world, const ecs::SpatialIndex& index, fl
         break;
     }
 
-    if (steer)
+    if (steer && !routed)
     {
-        steerToward(entity, destination, dt, agent, arrivalRadius, index);
+        steerToward(entity, destination, dt, agent, arrivalRadius, candidates);
     }
-    else if (entity.has<ecs::Velocity>())
+    else if (!steer && !routed && entity.has<ecs::Velocity>())
     {
         entity.set<ecs::Velocity>({{0.0, 0.0, 0.0}, {0.0f, 0.0f, 0.0f}});
     }

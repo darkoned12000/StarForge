@@ -1,8 +1,11 @@
 #pragma once
 
+#include "ai/components.hpp"
 #include "ecs/components.hpp"
+#include "ecs/spatial_index.hpp"
 #include "spatial/world_position.hpp"
 
+#include <array>
 #include <cstdint>
 #include <span>
 #include <vector>
@@ -22,6 +25,10 @@ struct SteeringParams
     // turnRate here so NPC ships rotate with momentum.
     double turnRate = 0.0;
 };
+
+// Single shared constructor for behaviour and route steering so magic
+// numbers (separation radius/weight, turn rate) cannot drift apart.
+[[nodiscard]] SteeringParams steeringParamsFor(const AiAgent& agent, double arrivalRadius) noexcept;
 
 // Maximum safe speed for arriving at the target without overshoot.
 [[nodiscard]] double arrivalSpeed(double distance, const SteeringParams& params) noexcept;
@@ -56,5 +63,13 @@ void steerEntity(flecs::entity entity, const spatial::WorldPosition& targetPos, 
                  const SteeringParams& params, std::span<const math::Vec3d> otherPositions);
 void steerEntity(flecs::entity entity, const spatial::WorldPosition& targetPos, double dt,
                  const SteeringParams& params, const std::vector<math::Vec3d>& otherPositions = {});
+
+// Shared neighbourhood filter for behaviour and traffic steering: fills
+// `out` (caller-owned stack buffer, no allocation) with camera-relative
+// positions of non-station entities within 100 m, in deterministic index
+// order, capped at out.size().
+[[nodiscard]] std::size_t collectNeighbours(flecs::entity self, const std::vector<flecs::entity>& candidates,
+                                            const ecs::Transform& selfTransform,
+                                            std::array<math::Vec3d, 32>& out);
 
 } // namespace starforge::ai

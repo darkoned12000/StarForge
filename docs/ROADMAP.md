@@ -1157,6 +1157,11 @@ Known M14 follow-ups for later milestones (intentionally out of scope):
   are runtime-only; M18 persistence must remap them on load.
 - `FactionRelation::Allies` and `AiAgent::trafficPriority` are reserved
   hooks, not yet wired to behavior.
+- Perception is O(n) per think over one 2^20 m world cell (fine at
+  current scale); a finer AI grid is later work if battles grow.
+- Station route approach is always the station's +Z side regardless of
+  origin; heading has no explicit up vector and can roll over long
+  turns. Both are visual polish, deferred past M15.
 
 ### M15 – Gameplay Systems
 

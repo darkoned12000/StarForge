@@ -18,44 +18,11 @@ namespace
     return entity.id();
 }
 
-[[nodiscard]] SteeringParams routeSteeringParams(const AiAgent& agent, double arrivalRadius) noexcept
-{
-    SteeringParams params;
-    params.maxSpeed = agent.maxSpeed;
-    params.maxAcceleration = agent.maxAcceleration;
-    params.arrivalRadius = arrivalRadius;
-    params.separationRadius = 25.0;
-    params.separationWeight = 1.0;
-    return params;
-}
-
-[[nodiscard]] std::size_t nearbyPositions(flecs::entity entity, const ecs::SpatialIndex& index,
-                                           const ecs::Transform& self,
-                                           std::array<math::Vec3d, 32>& out)
-{
-    std::size_t count = 0;
-    for (const auto other : index.findNeighborhood(self.position))
-    {
-        if (other == entity || !other.is_alive() || !other.has<ecs::Transform>() ||
-            other.has<ecs::StationTag>())
-        {
-            continue;
-        }
-        const math::Vec3d relative =
-            spatial::toCameraRelative(other.get<ecs::Transform>().position, self.position);
-        if (glm::length(relative) <= 100.0 && count < out.size())
-        {
-            out[count++] = relative;
-        }
-    }
-    return count;
-}
-
 } // namespace
 
 std::vector<RoutePoint> routeToStation([[maybe_unused]] const spatial::WorldPosition& from,
                                         const spatial::WorldPosition& station,
-                                        std::uint8_t dockSlot) noexcept
+                                        std::uint8_t dockSlot)
 {
     const double lateral = static_cast<double>(dockSlot) * 25.0;
     const auto approach = station + math::Vec3d{lateral, 0.0, 250.0};
@@ -97,10 +64,9 @@ void assignRoute(flecs::entity entity, const spatial::WorldPosition& from,
     entity.set<NavigationTarget>(navigation);
 }
 
-bool advanceRoute(ecs::Ecs& world, flecs::entity entity, double dt,
+bool advanceRoute([[maybe_unused]] ecs::Ecs& world, flecs::entity entity, double dt,
                   const ecs::SpatialIndex& index, TrafficManager* traffic)
 {
-    (void)world;
     if (!entity.has<NavigationRoute>() || !entity.has<AiAgent>() || !entity.has<ecs::Transform>())
     {
         return true;
@@ -121,23 +87,30 @@ bool advanceRoute(ecs::Ecs& world, flecs::entity entity, double dt,
         return false;
     }
 
-    // Packet-separation neighbours, stack buffer (no per-tick allocation).
+    // Packet-separation neighbours, stack buffer (no per-tick allocation),
+    // via the shared helper (excludes stations so the dock glide works).
     std::array<math::Vec3d, 32> neighbours {};
     const std::size_t neighbourCount = [&] {
         // transform is read below; fetch it here for the neighbourhood.
-        return nearbyPositions(entity, index, entity.get<ecs::Transform>(), neighbours);
+        return collectNeighbours(entity, index.findNeighborhood(entity.get<ecs::Transform>().position),
+                                 entity.get<ecs::Transform>(), neighbours);
     }();
 
     const auto completeRoute = [&] {
+        // Copy the station handle before the structural removal below:
+        // remove<> can move the entity to a new archetype and invalidate
+        // the `route`/`agent` references.
+        const flecs::entity station = route.station;
         route.complete = true;
         agent.state = BehaviorState::Stationary;
         // Drop the destination so the FSM cannot bounce
         // Stationary -> Docking -> Transit forever on a stale
         // NavigationTarget (the ship is already parked at the dock).
         entity.remove<NavigationTarget>();
-        if (traffic != nullptr && route.station.is_alive())
+        entity.modified<AiAgent>();
+        if (traffic != nullptr && station.is_alive())
         {
-            traffic->releaseDockSlot(route.station, entity);
+            traffic->releaseDockSlot(station, entity);
         }
         if (entity.has<ecs::Velocity>())
         {
@@ -162,7 +135,7 @@ bool advanceRoute(ecs::Ecs& world, flecs::entity entity, double dt,
         route.dwellTimer += dt;
         if (route.dwellTimer < route.dwellSeconds)
         {
-            steerEntity(entity, point.position, dt, routeSteeringParams(agent, point.arrivalRadius),
+            steerEntity(entity, point.position, dt, steeringParamsFor(agent, point.arrivalRadius),
                         neighbourSpan);
             return false;
         }
@@ -182,8 +155,12 @@ bool advanceRoute(ecs::Ecs& world, flecs::entity entity, double dt,
     }
 
     const RoutePoint& activePoint = route.points[route.currentPoint];
-    steerEntity(entity, activePoint.position, dt, routeSteeringParams(agent, activePoint.arrivalRadius),
-                neighbourSpan);
+    // Pass-through waypoints brake later (half arrival radius) so the
+    // ship does not decelerate to a stop at every waypoint; the
+    // advancement check still uses the full arrivalRadius above.
+    const double steerArrival =
+        route.currentPoint + 1 >= route.pointCount ? activePoint.arrivalRadius : activePoint.arrivalRadius * 0.5;
+    steerEntity(entity, activePoint.position, dt, steeringParamsFor(agent, steerArrival), neighbourSpan);
 
     if (entity.has<NavigationTarget>())
     {

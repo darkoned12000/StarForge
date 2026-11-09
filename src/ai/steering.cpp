@@ -10,6 +10,39 @@
 namespace starforge::ai
 {
 
+SteeringParams steeringParamsFor(const AiAgent& agent, double arrivalRadius) noexcept
+{
+    SteeringParams params;
+    params.maxSpeed = agent.maxSpeed;
+    params.maxAcceleration = agent.maxAcceleration;
+    params.arrivalRadius = arrivalRadius;
+    params.separationRadius = 25.0;
+    params.separationWeight = 1.0;
+    params.turnRate = agent.turnRate;
+    return params;
+}
+
+std::size_t collectNeighbours(flecs::entity self, const std::vector<flecs::entity>& candidates,
+                              const ecs::Transform& selfTransform, std::array<math::Vec3d, 32>& out)
+{
+    std::size_t count = 0;
+    for (const auto other : candidates)
+    {
+        if (other == self || !other.is_alive() || !other.has<ecs::Transform>() ||
+            other.has<ecs::StationTag>())
+        {
+            continue;
+        }
+        const math::Vec3d relative =
+            spatial::toCameraRelative(other.get<ecs::Transform>().position, selfTransform.position);
+        if (glm::length(relative) <= 100.0 && count < out.size())
+        {
+            out[count++] = relative;
+        }
+    }
+    return count;
+}
+
 double arrivalSpeed(double distance, const SteeringParams& params) noexcept
 {
     if (distance <= params.arrivalRadius || params.maxAcceleration <= 0.0 || params.maxSpeed <= 0.0)
@@ -123,6 +156,9 @@ void steerEntity(flecs::entity entity, const spatial::WorldPosition& targetPos, 
                  const SteeringParams& params, std::span<const math::Vec3d> otherPositions)
 {
     const auto& transform = entity.get<ecs::Transform>();
+    // Copy the orientation now: adding Velocity below can move the entity
+    // to a new archetype and invalidate `transform` before we read it.
+    const math::Vec4f startOrientation = transform.orientation;
     const math::Vec3d targetRelative = spatial::toCameraRelative(targetPos, transform.position);
 
     math::Vec3d currentVelocity{0.0, 0.0, 0.0};
@@ -162,8 +198,8 @@ void steerEntity(flecs::entity entity, const spatial::WorldPosition& targetPos, 
             // Rate-limit the yaw so ships rotate with momentum instead of
             // snapping. Slerp from the current orientation toward the
             // target heading, clamped to turnRate * dt radians.
-            const glm::quat currentQuat{transform.orientation.w, transform.orientation.x,
-                                        transform.orientation.y, transform.orientation.z};
+            const glm::quat currentQuat{startOrientation.w, startOrientation.x,
+                                        startOrientation.y, startOrientation.z};
             const glm::quat targetQuat{targetHeading.w, targetHeading.x, targetHeading.y, targetHeading.z};
             float cosHalf = std::clamp(std::abs(glm::dot(currentQuat, targetQuat)), 0.0f, 1.0f);
             const float halfAngle = std::acos(cosHalf);
