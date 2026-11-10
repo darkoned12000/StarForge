@@ -38,6 +38,10 @@ enum class PlatformKey
     Space,
     P,
     Escape,
+    Up,
+    Down,
+    Left,
+    Right,
     Count,
 };
 
@@ -75,7 +79,7 @@ public:
     // Input state.
     [[nodiscard]] bool isKeyDown(PlatformKey key) const noexcept;
     [[nodiscard]] bool isMouseButtonDown(PlatformMouseButton button) const noexcept;
-    [[nodiscard]] void takeMouseMotion(float& dxOut, float& dyOut) noexcept;
+    [[nodiscard]] void takeMouseMotion(float& dxOut, float& dyOut, float& scrollOut) noexcept;
     void setRelativeMouseMode(bool enabled) noexcept;
 
     // Instance extensions the windowing system needs for Vulkan presentation.
@@ -98,6 +102,7 @@ private:
     bool        mouseButtonDown_[3] = {};
     float       mouseMotionX_ = 0.0f;
     float       mouseMotionY_ = 0.0f;
+    float       mouseScrollY_ = 0.0f;
 };
 
 } // namespace starforge::platform

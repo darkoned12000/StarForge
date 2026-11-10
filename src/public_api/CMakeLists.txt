@@ -7,6 +7,8 @@ add_library(starforge_public_api STATIC
     renderer.cpp
     starfield.cpp
     starfield_bridge.cpp
+    nebula.cpp
+    nebula_bridge.cpp
     toon.cpp
     toon_bridge.cpp
     world.cpp

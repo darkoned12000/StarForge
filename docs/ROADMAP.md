@@ -1257,14 +1257,30 @@ Known M14 follow-ups for later milestones (intentionally out of scope):
 |------|-------------|-------------|-----------|
 | 15.0.1 ✅ | Game shell: `apps/game/` main loop — fixed-step simulation (60 Hz) decoupled from render, resize/minimize handling, clean shutdown | T5 | Done: `starforge_game` target, 60 Hz accumulator with 5-step cap, resize/format-changed recreate, minimize sleep, `waitIdle` shutdown; committed on `gamedemo` |
 | 15.0.2 ✅ | Player ship + input + camera: Freelancer scheme above (`W`/`S` persistent throttle set-points, `A`/`D` barrel roll, mouse steer, LMB/RMB weapons, `Space` flight/UI toggle, `P`/`Esc` pause menu), ECS `Transform`/`Velocity` ship, chase camera, all positions via `WorldPosition` → camera-relative | T1+T5 | Done: public input facade (`Key`/`MouseButton`/`MouseMotion` on `Application`, SDL polling in `platform::Window`); `apps/game/ship_controller.hpp` (persistent throttle, steer, roll, mode/pause, weapon states) + `game_bridge` (raw ECS bridge, no TU mixes public+internal math); `test_game_controls.cpp` (6 T1 cases) passes; manual window run still to be confirmed by the user |
-| 15.0.3 | Procedural field integration: `StreamingTraversal` + `RawGenerationStore` + `instantiateChunk` driving ECS asteroids, toon/instanced rendering, zero stalls | T1+T3 | Player crosses cell boundaries with no loading screens and no frame pop over the upload budget; distant fields have cheap representation |
-| 15.0.4 | Environment showcase: planet patch + atmosphere shell, nebula backdrop, starfield — all composed in one frame, toon-consistent | T3 | Headless render of the composed scene passes; orbit→approach path renders planet dish + atmosphere limb; zero validation errors |
+| 15.0.3 ✅ | Procedural field integration: `StreamingTraversal` + `RawGenerationStore` + `instantiateChunk` driving ECS asteroids, toon/instanced rendering, zero stalls | T1+T3+T5 | Done: `GameWorld` owns stream/store/budget; `updateStreaming()` each frame instantiates/unmounts chunks (startup: 5 chunks, 307 rocks mounted); ship spawns near the 2^20 boundary so full throttle crosses into cell 1 in ~26s with no loading screen; visible rocks (nearest 64 within 2.5 km) rendered as camera-relative toon cubes; HUD logs cell + mounted count each second. Arrow-key held steering (Up/Down/Left/Right) now works alongside mouse for headless/no-mouse play. Manual crossing run still to be confirmed by the user |
+| 15.0.4 🚧 | Environment showcase: planet patch + atmosphere shell, nebula backdrop, starfield — all composed in one frame, toon-consistent | T3+T5 | Partial: nebula backdrop via new `starforge::Nebula` public facade (3D FBM, recorded after starfield); planet as large toon placeholder cube (12 km at ~63 km, parallax marker, HUD distance) + world-anchored sun (directional billboard). Remaining GPU work deferred under "First Flight Deferred Polish" below |
 | 15.0.5 | Combat slice: one M14 AI hostile (engage/evade), weapon fire, shield hit, health/damage events, audio trigger through M12 facade | T1+T5 | Player can fight and be damaged; hostile engages and evades; hits show stylized effects; no Flecs mutation from physics/audio threads |
 | 15.0.6 | Integration + budgets gate: 5-minute flight proof, frame-time p95 < ADR-004 interval, screenshot/golden review | T4+T5 | 5 minutes continuous play, no loading screens, 0 validation errors, screenshots reviewed for art direction (not pixel counts alone) |
+| 15.0.7 | Sun as visitable celestial body (Grok review): replace the directional sun billboard with a real mesh using M7 quadtree LOD (LargeObjectSetup patch origin), emissive core shader with limb darkening (`1 - u(1-μ)`), corona as additive sphere at 5–10× radius, near plane set to 0.01× radius. Coexists with the starfield sky sphere | T3+T5 | Sun grows when approached and fills the screen at radius; limb darkening reads as a star; corona sits behind the opaque disc; no float32 jitter at solar radius |
+| 15.0.8 | Asteroid variety (Grok review): switch the demo from cubes to `generateAsteroidMesh` (displaced UV-sphere), 3–5 base mesh variants selected per seed, per-instance color tint, tumbling already in place | T1+T3 | Field renders as lumpy rocks in varied palettes; outline pass stays crisp at distance; no cube silhouettes |
+| 15.0.9 | Asteroid instancing + LOD (Grok review): single `vkCmdDrawIndexed` over instance storage, cheaper impostors at long distance, distance-aware outline width | T4 | 1k+ rock field measured under ADR-004 with one draw call; no pops at cull radius |
 
 **Exit (M15.0):** a playable demo a stranger can run: fly, explore,
 fight, look at the toon art direction — and a list of gaps filed for
 M15/M17, not silently absorbed.
+
+#### First Flight Deferred Polish (review 2026-11, code review)
+
+Recorded so they are not lost; each item names its owner milestone:
+
+| Item | Why later | Done when |
+|------|-----------|-----------|
+| Planet ray-sphere billboard + atmosphere limb | New Slang shader + pipeline + depth-write billboard facade; current cube is a parallax marker only | 15.0.4 follow-up: gl_FragDepth written, Fresnel rim `1-(n·v)^p`, golden headless run; gate for M19 production showcase (9.5.6) |
+| Instanced asteroid draw (single `vkCmdDrawIndexed`) | Needs BDA instance storage + batch pipeline; 64 per-draw `Toon::record` calls are fine at demo scale | M15.0.6 / M19: dense field (1k+ rocks) measured under ADR-004 budget with one draw call |
+| Nebula half-resolution offscreen target | Fillrate optimisation (diffuse FBM at 1/4 pixels + upsample); not a correctness issue | M8 residual / 15.0.6 botanical: p95 budget met at 1440p with ≥75% fillrate cut, pixel parity test passes |
+| 3D noise volume texture (32³/64³) | Replaces 80 hash evals/px; needs texture asset + sampler path in effect pipeline | M8 residual with half-res target above; seeded deterministic texture, golden pixel test |
+| Nebula 2D→3D noise (octahedral fold seams) | Done 2026-11 (nebula.slang now 3D FBM on the sphere) | seamless golden pixel test across rotations |
+| Skybox border / fold lines | Octahedral projection removed in the 3D-noise switch; no fold edges remain | golden pixel test across rotations and translations |
 
 ### M15 – Gameplay Systems
 

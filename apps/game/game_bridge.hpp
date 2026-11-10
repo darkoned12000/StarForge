@@ -6,6 +6,7 @@
 // rule the public API bridges use).
 
 #include <memory>
+#include <vector>
 
 namespace starforge::game
 {
@@ -56,6 +57,22 @@ public:
     void setVelocity(const RawVec3d& linear, const RawVec3f& angular);
     void step(float dt);
     [[nodiscard]] RawTransform shipTransform() const;
+    // Sphere push-out: if the ship overlaps an asteroid, slide it out
+    // to the surface and log it. Returns true on contact.
+    [[nodiscard]] bool collideShip();
+
+    // Procedural streaming (M15.0.3): advance the cell traversal from
+    // the ship position, instantiate newly loaded chunks into ECS and
+    // unmount evicted ones, respecting the per-frame upload budget.
+    // Returns the number of chunks loaded this call (for logging).
+    [[nodiscard]] int updateStreaming();
+    // Camera-cell coordinates for HUD/debug logs.
+    [[nodiscard]] RawVec3d shipCell() const;
+    // Asteroids within `radiusMetres` of the ship, ship-relative
+    // positions (metres) with orientation + scale, for Toon rendering.
+    [[nodiscard]] std::vector<RawTransform> visibleAsteroids(double radiusMetres) const;
+    [[nodiscard]] std::size_t mountedAsteroidCount() const;
+    [[nodiscard]] std::size_t streamedChunkCount() const;
 
 private:
     struct Impl;

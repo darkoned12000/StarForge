@@ -75,6 +75,7 @@ Window::Window(Window&& other) noexcept
     }
     mouseMotionX_ = other.mouseMotionX_;
     mouseMotionY_ = other.mouseMotionY_;
+    mouseScrollY_ = other.mouseScrollY_;
 }
 
 Window& Window::operator=(Window&& other) noexcept
@@ -95,6 +96,7 @@ Window& Window::operator=(Window&& other) noexcept
         }
         mouseMotionX_ = other.mouseMotionX_;
         mouseMotionY_ = other.mouseMotionY_;
+        mouseScrollY_ = other.mouseScrollY_;
     }
     return *this;
 }
@@ -158,6 +160,18 @@ void Window::pollEvents()
             case SDL_SCANCODE_ESCAPE:
                 keyDown_[static_cast<std::size_t>(PlatformKey::Escape)] = down;
                 break;
+            case SDL_SCANCODE_UP:
+                keyDown_[static_cast<std::size_t>(PlatformKey::Up)] = down;
+                break;
+            case SDL_SCANCODE_DOWN:
+                keyDown_[static_cast<std::size_t>(PlatformKey::Down)] = down;
+                break;
+            case SDL_SCANCODE_LEFT:
+                keyDown_[static_cast<std::size_t>(PlatformKey::Left)] = down;
+                break;
+            case SDL_SCANCODE_RIGHT:
+                keyDown_[static_cast<std::size_t>(PlatformKey::Right)] = down;
+                break;
             default:
                 break;
             }
@@ -186,6 +200,9 @@ void Window::pollEvents()
         case SDL_EVENT_MOUSE_MOTION:
             mouseMotionX_ += event.motion.xrel;
             mouseMotionY_ += event.motion.yrel;
+            break;
+        case SDL_EVENT_MOUSE_WHEEL:
+            mouseScrollY_ += event.wheel.y;
             break;
         case SDL_EVENT_WINDOW_FOCUS_LOST:
         {
@@ -232,10 +249,11 @@ bool Window::isMouseButtonDown(PlatformMouseButton button) const noexcept
     return idx < 3 && mouseButtonDown_[idx];
 }
 
-void Window::takeMouseMotion(float& dxOut, float& dyOut) noexcept
+void Window::takeMouseMotion(float& dxOut, float& dyOut, float& scrollOut) noexcept
 {
     dxOut = std::exchange(mouseMotionX_, 0.0f);
     dyOut = std::exchange(mouseMotionY_, 0.0f);
+    scrollOut = std::exchange(mouseScrollY_, 0.0f);
 }
 
 Extent2D Window::framebufferSize() const

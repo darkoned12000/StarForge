@@ -10,6 +10,7 @@
 
 #include "starforge/application.hpp"
 #include "starforge/math.hpp"
+#include "starforge/nebula.hpp"
 #include "starforge/renderer.hpp"
 #include "starforge/starfield.hpp"
 #include "starforge/toon.hpp"
@@ -18,11 +19,13 @@
 #include "game_bridge.hpp"
 #include "ship_controller.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <thread>
+#include <vector>
 
 namespace
 {
@@ -73,6 +76,18 @@ starforge::math::Vec3d upFromQuat(starforge::math::Vec4f q)
                                    static_cast<float>(v.z())};
 }
 
+// Uniform scale that keeps w = 1 (Mat4f(s) would set [3][3] = s and
+// collapse positions through perspective divide — rocks/planet were
+// rendering at metres instead of kilometres).
+[[nodiscard]] starforge::math::Mat4f scaleMat(float s)
+{
+    starforge::math::Mat4f m(1.0f);
+    m.columns[0][0] = s;
+    m.columns[1][1] = s;
+    m.columns[2][2] = s;
+    return m;
+}
+
 // Build the input edges for this frame from the public API.
 struct InputTracker
 {
@@ -96,6 +111,10 @@ struct InputTracker
     edge.pausePressed = pause && !tracker.prevPause;
     edge.aDown = app.isKeyDown(starforge::Key::A);
     edge.dDown = app.isKeyDown(starforge::Key::D);
+    edge.arrowUpDown = app.isKeyDown(starforge::Key::Up);
+    edge.arrowDownDown = app.isKeyDown(starforge::Key::Down);
+    edge.arrowLeftDown = app.isKeyDown(starforge::Key::Left);
+    edge.arrowRightDown = app.isKeyDown(starforge::Key::Right);
 
     tracker.prevW = w;
     tracker.prevS = s;
@@ -105,6 +124,7 @@ struct InputTracker
     const auto motion = app.takeMouseMotion();
     edge.mouseDx = motion.dx;
     edge.mouseDy = motion.dy;
+    edge.mouseScrollY = motion.scrollY;
     edge.mouseLeftDown = app.isMouseButtonDown(starforge::MouseButton::Left);
     edge.mouseRightDown = app.isMouseButtonDown(starforge::MouseButton::Right);
     return edge;
@@ -149,6 +169,13 @@ int main()
         return EXIT_FAILURE;
     }
 
+    auto nebula = starforge::Nebula::create(*renderer, {});
+    if (!nebula)
+    {
+        logError(nebula.error().c_str());
+        return EXIT_FAILURE;
+    }
+
     // Game layer: ECS world holds the player ship (raw bridge).
     starforge::game::GameWorld world;
     starforge::game::FlightState flight;
@@ -170,6 +197,8 @@ int main()
     bool lastFirePrimary = false;
     bool lastFireSecondary = false;
     bool lastRelativeMouse = false;
+    float cameraDist = 8.0f; // chase-camera distance (fixed for FOV zoom)
+    float cameraFov = kPi / 3.0f; // vertical FOV radians (wheel zoom)
 
     while (!app->shouldClose())
     {
@@ -211,6 +240,11 @@ int main()
                     logError(sf.error().c_str());
                     return EXIT_FAILURE;
                 }
+                if (auto nb = nebula->recreate(*renderer); !nb)
+                {
+                    logError(nb.error().c_str());
+                    return EXIT_FAILURE;
+                }
                 if (auto t = toon->recreate(*renderer); !t)
                 {
                     logError(t.error().c_str());
@@ -234,10 +268,30 @@ int main()
             pending.pausePressed = pending.pausePressed || edge.pausePressed;
             pending.aDown = edge.aDown;
             pending.dDown = edge.dDown;
+            pending.arrowUpDown = edge.arrowUpDown;
+            pending.arrowDownDown = edge.arrowDownDown;
+            pending.arrowLeftDown = edge.arrowLeftDown;
+            pending.arrowRightDown = edge.arrowRightDown;
             pending.mouseDx += edge.mouseDx;
             pending.mouseDy += edge.mouseDy;
+            pending.mouseScrollY += edge.mouseScrollY;
             pending.mouseLeftDown = edge.mouseLeftDown;
             pending.mouseRightDown = edge.mouseRightDown;
+        }
+
+        // Scroll-wheel FOV zoom (runs every frame, not step-gated).
+        // Roll out (down) widens the view so you see more around you;
+        // roll in (up) narrows it like a magnifier.
+        if (pending.mouseScrollY != 0.0f)
+        {
+            const float before = cameraFov;
+            cameraFov = std::clamp(cameraFov - pending.mouseScrollY * 0.02f, 0.4f, 1.7f);
+            if (cameraFov != before)
+            {
+                std::printf("[INPUT] fov %.0f deg\n", cameraFov * 57.29578f);
+                std::fflush(stdout);
+            }
+            pending.mouseScrollY = 0.0f;
         }
 
         // ...then consume BUTTON EDGES immediately (never gated on the
@@ -250,25 +304,12 @@ int main()
                 flight.paused = !flight.paused;
                 pending.pausePressed = false;
             }
-            if (!flight.paused)
+            if (!flight.paused && pending.spacePressed)
             {
-                if (pending.spacePressed)
-                {
-                    flight.mode = flight.mode == starforge::game::FlightMode::Flight
-                                      ? starforge::game::FlightMode::Ui
-                                      : starforge::game::FlightMode::Flight;
-                    pending.spacePressed = false;
-                }
-                if (pending.wPressed)
-                {
-                    flight.throttle = std::min(1.0f, flight.throttle + starforge::game::kThrottleStep);
-                    pending.wPressed = false;
-                }
-                if (pending.sPressed)
-                {
-                    flight.throttle = std::max(0.0f, flight.throttle - starforge::game::kThrottleStep);
-                    pending.sPressed = false;
-                }
+                flight.mode = flight.mode == starforge::game::FlightMode::Flight
+                                  ? starforge::game::FlightMode::Ui
+                                  : starforge::game::FlightMode::Flight;
+                pending.spacePressed = false;
             }
             if (flight.paused)
             {
@@ -282,16 +323,23 @@ int main()
                 // doesn't deliver a stale jump.
                 pending.mouseDx = 0.0f;
                 pending.mouseDy = 0.0f;
+                pending.mouseScrollY = 0.0f;
                 pending.mouseLeftDown = false;
                 pending.mouseRightDown = false;
                 accumulator = 0.0f;
             }
         }
 
-        // --- Fixed-step simulation (M15.0.1) ---
+        // --- Fixed-step simulation (M15.0.1) + streaming (M15.0.3) ---
         if (!flight.paused)
         {
             accumulator += frameDt;
+        }
+        if (const int loaded = world.updateStreaming(); loaded > 0)
+        {
+            std::printf("[STREAM] loaded %d chunk(s); mounted=%zu chunks=%zu\n", loaded,
+                        world.mountedAsteroidCount(), world.streamedChunkCount());
+            std::fflush(stdout);
         }
         int steps = 0;
         while (accumulator >= kSimStep && steps < 5 && !flight.paused) // cap: avoid spiral of death
@@ -302,17 +350,36 @@ int main()
             const auto ship = world.shipTransform();
             const auto forward = forwardFromQuat(
                 {ship.orientation.x, ship.orientation.y, ship.orientation.z, ship.orientation.w});
-            const float speed = starforge::game::targetSpeed(flight);
+            // Zero the approach speed while overlapping a rock: the
+            // controller rebuilds velocity each step, so bridge-side
+            // damping alone would be overwritten next tick.
+            const bool blocked = world.collideShip();
+            const float speed = blocked ? 0.0f : starforge::game::targetSpeed(flight);
             world.setVelocity(
                 {forward.x() * speed, forward.y() * speed, forward.z() * speed},
                 {flight.pitchRate, flight.yawRate, flight.rollRate});
             world.step(kSimStep);
+            if (blocked)
+            {
+                static float lastCollideLog = -10.0f;
+                if (time - lastCollideLog >= 1.0f)
+                {
+                    std::printf("[COLLIDE] asteroid contact\n");
+                    std::fflush(stdout);
+                    lastCollideLog = time;
+                }
+            }
             accumulator -= kSimStep;
             ++steps;
+            // Throttle edges are consumed deterministically on the
+            // first step; levels (A/D, arrows, buttons, pad) persist.
+            pending.wPressed = false;
+            pending.sPressed = false;
             // Mouse deltas are consumed by the first step; held levels
-            // (A/D roll, mouse buttons) must survive every sub-step.
+            // (A/D roll, arrows, mouse buttons) must survive every sub-step.
             pending.mouseDx = 0.0f;
             pending.mouseDy = 0.0f;
+            pending.mouseScrollY = 0.0f;
         }
 
         // --- Console HUD + edge logs (troubleshooting feedback) ---
@@ -356,10 +423,16 @@ int main()
             // While paused the ship velocity is zero, not the throttle
             // target — show effective speed so it reads as stopped.
             const float effectiveSpeed = flight.paused ? 0.0f : starforge::game::targetSpeed(flight);
+            const auto cell = world.shipCell();
+            // World-anchored planet marker (~63 km from spawn).
+            const double pdx = 1067000.0 - ship.position.x;
+            const double pdy = 8000.0 - ship.position.y;
+            const double pdz = -60000.0 - ship.position.z;
+            const double planetDist = std::sqrt(pdx * pdx + pdy * pdy + pdz * pdz);
             std::printf(
-                "[HUD] throttle %.0f%% speed %.0f m/s pos (%.0f, %.0f, %.0f) mode %s%s\n",
+                "[HUD] throttle %.0f%% speed %.0f m/s pos (%.0f, %.0f, %.0f) cell (%.0f,%.0f,%.0f) rocks %zu planet %.0f m mode %s%s\n",
                 flight.throttle * 100.0f, effectiveSpeed, ship.position.x, ship.position.y,
-                ship.position.z,
+                ship.position.z, cell.x, cell.y, cell.z, world.mountedAsteroidCount(), planetDist,
                 flight.mode == starforge::game::FlightMode::Ui ? "UI" : "FLIGHT",
                 flight.paused ? " PAUSED" : "");
             std::fflush(stdout);
@@ -386,17 +459,18 @@ int main()
             ship.orientation.x, ship.orientation.y, ship.orientation.z, ship.orientation.w};
         const starforge::math::Vec3f shipForward = toVec3f(forwardFromQuat(shipQuat));
         const starforge::math::Vec3f shipUp = toVec3f(upFromQuat(shipQuat));
-        // Camera-relative offsets (ship at origin):
+        // Camera-relative offsets (ship at origin); scroll wheel zooms.
         const starforge::math::Vec3f eyeOffset = {
-            -shipForward.x() * 8.0f + shipUp.x() * 2.5f,
-            -shipForward.y() * 8.0f + shipUp.y() * 2.5f,
-            -shipForward.z() * 8.0f + shipUp.z() * 2.5f};
+            -shipForward.x() * cameraDist + shipUp.x() * (cameraDist * 0.31f),
+            -shipForward.y() * cameraDist + shipUp.y() * (cameraDist * 0.31f),
+            -shipForward.z() * cameraDist + shipUp.z() * (cameraDist * 0.31f)};
         const starforge::math::Vec3f lookAhead = {
             shipForward.x() * 10.0f, shipForward.y() * 10.0f, shipForward.z() * 10.0f};
 
         const float aspect = static_cast<float>(size.width) / std::max(static_cast<float>(size.height), 1.0f);
         const auto view = starforge::math::lookAt(eyeOffset, lookAhead, shipUp);
-        const auto proj = starforge::math::perspectiveVulkan(kPi / 3.0f, aspect, 0.1f, 1000.0f);
+        // Far plane covers the world-anchored planet (~63 km); rocks live within 2.5 km.
+        const auto proj = starforge::math::perspectiveVulkan(cameraFov, aspect, 0.1f, 150000.0f);
         // Ship sits at the ship-relative origin; lookAt already places it
         // 8 m ahead of the camera. Adding another translation would
         // double-shift it (review fix).
@@ -413,20 +487,13 @@ int main()
         }
 
         starforge::Starfield::Params sunParams;
-        // Sun is a fixed world object, not camera-anchored. Compute it
-        // camera-relative each frame (sunWorld - shipPos in double, cast
-        // once) so it stays put in the sky and only drifts as the ship
-        // turns or travels — it does not follow the camera.
-        {
-            constexpr starforge::game::RawVec3d kSunWorld{50000.0, 10000.0, -100000.0};
-            const auto ship = world.shipTransform();
-            sunParams.worldPosition = {
-                static_cast<float>(kSunWorld.x - ship.position.x),
-                static_cast<float>(kSunWorld.y - ship.position.y),
-                static_cast<float>(kSunWorld.z - ship.position.z)};
-            sunParams.radius = 5000.0f; // ~3° at ~110 km
-            sunParams.intensity = 1.0f;
-        }
+        // Sun is a distant-star direction (translation-invariant like
+        // the starfield sky), deliberately in a different patch of sky
+        // from the planet (~35° away) so the two read as separate
+        // objects with sensible relative scale (star dominates).
+        sunParams.worldPosition = {-5000.0f, 2500.0f, -6000.0f};
+        sunParams.radius = 800.0f; // dominant disc (~11° at 8.6 km)
+        sunParams.intensity = 1.0f;
 
         starforge::Toon::Context toonContext;
         toonContext.viewProj = proj * view * model;
@@ -441,9 +508,115 @@ int main()
         toonParams.rimStrength = 0.6f;
         toonParams.outlineWidth = 2.0f;
 
+        // --- Asteroid field (M15.0.3): streaming chunks + authored
+        // near cluster, rendered as toon cubes (placeholder geometry).
+        const auto rocks = world.visibleAsteroids(2500.0);
+        std::vector<const starforge::game::RawTransform*> sorted;
+        sorted.reserve(rocks.size());
+        for (const auto& r : rocks)
+        {
+            sorted.push_back(&r);
+        }
+        constexpr std::size_t kMaxRocks = 64;
+        const std::size_t take = std::min(sorted.size(), kMaxRocks);
+        std::partial_sort(sorted.begin(), sorted.begin() + static_cast<std::ptrdiff_t>(take), sorted.end(),
+                          [](const starforge::game::RawTransform* a, const starforge::game::RawTransform* b) {
+                              const double da = a->position.x * a->position.x + a->position.y * a->position.y +
+                                                a->position.z * a->position.z;
+                              const double db = b->position.x * b->position.x + b->position.y * b->position.y +
+                                                b->position.z * b->position.z;
+                              return da < db;
+                          });
+
+        // --- Environment showcase (M15.0.4) ---
+        // Nebula backdrop first (fullscreen FBM), then stars, then
+        // planet dish placeholder + ship + asteroids. Planet patch
+        // renderer with atmosphere shell wiring is future 15.0.4 work
+        // (documented placeholder until the GPU patch facade lands).
+        starforge::Nebula::RenderContext nebContext;
+        nebContext.viewProj = proj * view;
+        nebContext.invViewProj = starforge::math::inverse(nebContext.viewProj);
+        nebContext.cameraPosition = eyeOffset;
+        nebContext.resolution = {static_cast<float>(size.width), static_cast<float>(size.height)};
+        nebContext.time = time;
+
+        starforge::Nebula::Params nebParams;
+        nebParams.baseColor = {0.30f, 0.15f, 0.50f, 1.0f};
+        nebParams.density = 1.0f;
+        nebParams.scattering = 0.45f;
+        nebParams.time = time;
+
+        // Planet dish placeholder: WORLD-anchored (~63 km from spawn),
+        // computed ship-relative each frame like the sun used to be,
+        // so it stays put in the world and grows as the ship approaches.
+        // (Patch renderer + atmosphere shell remain future work.)
+        constexpr starforge::game::RawVec3d kPlanetWorld{1067000.0, 8000.0, -60000.0};
+        starforge::math::Vec3f planetRel{
+            static_cast<float>(kPlanetWorld.x - ship.position.x),
+            static_cast<float>(kPlanetWorld.y - ship.position.y),
+            static_cast<float>(kPlanetWorld.z - ship.position.z)};
+        starforge::math::Mat4f planetModel(1.0f);
+        planetModel.columns[3] = {planetRel.x(), planetRel.y(), planetRel.z(), 1.0f};
+        planetModel = planetModel * scaleMat(6000.0f);
+        starforge::Toon::Context planetContext;
+        planetContext.viewProj = proj * view * planetModel;
+        planetContext.modelView = view * planetModel;
+        planetContext.lightDirectionView = toonContext.lightDirectionView;
+        starforge::Toon::Params planetParams;
+        planetParams.baseColor = {0.15f, 0.45f, 1.0f, 1.0f}; // bright water blue
+        planetParams.shadowColor = {0.02f, 0.12f, 0.35f, 1.0f};
+        planetParams.bandCount = 4.0f;
+        planetParams.rimStrength = 1.0f;
+        planetParams.outlineWidth = 1.0f;
+
+        // Composition order: starfield base (opaque), then nebula
+        // additive over it, then planet/ship/rocks depth-tested.
         auto frame = renderer->renderFrame(starContext.clearColor, [&](starforge::FrameContext& fc) {
             starfield->record(fc, starContext, sunParams);
+            nebula->record(fc, nebContext, nebParams);
+            toon->record(fc, planetContext, planetParams);
             toon->record(fc, toonContext, toonParams);
+            std::size_t shown = 0;
+            for (const auto* rock : sorted)
+            {
+                if (shown >= kMaxRocks)
+                {
+                    break;
+                }
+                // Fade-in by distance (grow-in) masks streaming pop-in
+                // at the 2.5 km cull radius.
+                const double rdist = std::sqrt(rock->position.x * rock->position.x +
+                                                 rock->position.y * rock->position.y +
+                                                 rock->position.z * rock->position.z);
+                float fade = 1.0f;
+                if (rdist > 1800.0)
+                {
+                    fade = std::max(0.0f, 1.0f - static_cast<float>((rdist - 1800.0) / 700.0));
+                }
+                if (fade <= 0.001f)
+                {
+                    continue;
+                }
+                const starforge::math::Vec4f rq{
+                    rock->orientation.x, rock->orientation.y, rock->orientation.z, rock->orientation.w};
+                starforge::math::Mat4f rm(1.0f);
+                rm.columns[3] = {static_cast<float>(rock->position.x), static_cast<float>(rock->position.y),
+                                 static_cast<float>(rock->position.z), 1.0f};
+                const auto rockModel = rm * matFromQuat(rq) * scaleMat(rock->scale * fade);
+                starforge::Toon::Context rc;
+                rc.viewProj = proj * view * rockModel;
+                rc.modelView = view * rockModel;
+                rc.lightDirectionView = toonContext.lightDirectionView;
+                rc.resolution = toonContext.resolution;
+                starforge::Toon::Params rp;
+                rp.baseColor = {0.55f, 0.45f, 0.35f, 1.0f};
+                rp.shadowColor = {0.15f, 0.12f, 0.1f, 1.0f};
+                rp.bandCount = 2.0f;
+                rp.rimStrength = 0.25f;
+                rp.outlineWidth = 1.5f;
+                toon->record(fc, rc, rp);
+                ++shown;
+            }
         });
         if (!frame)
         {

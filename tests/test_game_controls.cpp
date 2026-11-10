@@ -97,6 +97,30 @@ TEST_CASE("Flight: Space toggles mode, P/Esc toggles pause")
     CHECK_FALSE(state.paused);
 }
 
+TEST_CASE("Flight: arrow keys pitch/yaw held")
+{
+    starforge::game::FlightState state;
+    starforge::game::InputEdge up;
+    up.arrowUpDown = true;
+    starforge::game::applyInput(state, up, 1.0f / 60.0f);
+    CHECK(state.pitchRate > 0.0f);
+
+    starforge::game::InputEdge down;
+    down.arrowDownDown = true;
+    starforge::game::applyInput(state, down, 1.0f / 60.0f);
+    CHECK(state.pitchRate < 0.0f);
+
+    starforge::game::InputEdge left;
+    left.arrowLeftDown = true;
+    starforge::game::applyInput(state, left, 1.0f / 60.0f);
+    CHECK(state.yawRate > 0.0f);
+
+    starforge::game::InputEdge right;
+    right.arrowRightDown = true;
+    starforge::game::applyInput(state, right, 1.0f / 60.0f);
+    CHECK(state.yawRate < 0.0f);
+}
+
 TEST_CASE("Flight: weapon states follow buttons, suppressed while paused")
 {
     starforge::game::FlightState state;

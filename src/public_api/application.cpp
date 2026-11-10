@@ -122,6 +122,18 @@ bool Application::isKeyDown(Key key) const noexcept
     case Key::Escape:
         platformKey = platform::PlatformKey::Escape;
         break;
+    case Key::Up:
+        platformKey = platform::PlatformKey::Up;
+        break;
+    case Key::Down:
+        platformKey = platform::PlatformKey::Down;
+        break;
+    case Key::Left:
+        platformKey = platform::PlatformKey::Left;
+        break;
+    case Key::Right:
+        platformKey = platform::PlatformKey::Right;
+        break;
     default:
         return false;
     }
@@ -156,11 +168,12 @@ MouseMotion Application::takeMouseMotion() noexcept
 {
     float dx = 0.0f;
     float dy = 0.0f;
+    float scroll = 0.0f;
     if (impl_)
     {
-        impl_->window.takeMouseMotion(dx, dy);
+        impl_->window.takeMouseMotion(dx, dy, scroll);
     }
-    return MouseMotion{.dx = dx, .dy = dy};
+    return MouseMotion{.dx = dx, .dy = dy, .scrollY = scroll};
 }
 
 void Application::setRelativeMouseMode(bool enabled) noexcept

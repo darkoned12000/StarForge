@@ -11,6 +11,7 @@ target_link_libraries(starforge_game
     PRIVATE
         starforge_public_api
         starforge_ecs
+        starforge_content
         starforge_math
         starforge_spatial
 )
