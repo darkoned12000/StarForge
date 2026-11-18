@@ -5,15 +5,18 @@
 #include "gpu_resources/buffer.hpp"
 #include "gpu_resources/compute_pipeline.hpp"
 #include "gpu_resources/gpu_culling.hpp"
-#include "gpu_resources/transfer.hpp"
+#include "math/math.hpp"
 #include "vulkan/vulkan_context.hpp"
 #include "vulkan/vulkan_device.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
-#include <set>
+#include <numeric>
+#include <random>
+#include <string>
 #include <vector>
 
 #ifndef STARFORGE_SHADER_DIR
@@ -25,70 +28,99 @@ using namespace starforge::gpu_resources;
 using namespace starforge::vulkan;
 using namespace starforge::math;
 
-TEST_CASE("GPU cull parity: compute vs CPU reference")
+namespace
+{
+
+constexpr float kInstanceRadius = 0.1f;
+constexpr std::uint32_t kPushSize = 104; // 24 floats + uint + uint
+
+starforge::bench::BenchmarkScene makeParityScene(std::uint32_t count, double visibleFraction,
+                                                  std::uint64_t seed)
+{
+    starforge::bench::BenchmarkScene scene;
+    scene.seed = seed;
+    scene.radius = 10.0;
+    scene.instanceCount = count;
+    scene.instances.reserve(count);
+
+    std::mt19937 rng(static_cast<std::uint32_t>(seed));
+    std::uniform_real_distribution<float> jitter(-0.4f, 0.4f);
+    const std::uint32_t visibleCount = static_cast<std::uint32_t>(
+        std::llround(static_cast<double>(count) * visibleFraction));
+
+    for (std::uint32_t i = 0; i < count; ++i)
+    {
+        SceneInstance instance{};
+        if (i < visibleCount)
+        {
+            // Well inside the camera frustum, far from every plane boundary.
+            instance.posX = jitter(rng);
+            instance.posY = jitter(rng);
+            instance.posZ = 0.0;
+        }
+        else
+        {
+            // Well outside: +X beyond the camera's horizontal field of view.
+            instance.posX = 50.0 + jitter(rng);
+            instance.posY = 0.0;
+            instance.posZ = 0.0;
+        }
+        instance.scale = kInstanceRadius / 0.5f; // cullInstances uses 0.5 * scale
+        scene.instances.push_back(instance);
+    }
+    return scene;
+}
+
+} // namespace
+
+TEST_CASE("GPU cull parity: bit-exact visible sets (100 .. 50k instances, T2)")
 {
     ContextCreateInfo info;
     info.enableValidation = kValidationDefault;
     info.requiredExtensions.clear();
-
     auto context = VulkanContext::create(info);
     REQUIRE(context.has_value());
 
     {
         auto device = VulkanDevice::create(*context);
         REQUIRE(device.has_value());
-
-        Allocator::CreateInfo allocInfo;
-        allocInfo.instance = context->instance();
-        allocInfo.physicalDevice = context->physicalDevice();
-        allocInfo.device = device->device();
-        auto allocator = Allocator::create(allocInfo);
+        auto allocator = Allocator::create({
+            .instance = context->instance(),
+            .physicalDevice = context->physicalDevice(),
+            .device = device->device(),
+        });
         REQUIRE(allocator.has_value());
 
-        auto uploader = Uploader::create(*device);
-        REQUIRE(uploader.has_value());
-
-        const std::string shaderPath = std::string(STARFORGE_SHADER_DIR) + "/cull.spv";
-        std::ifstream file(shaderPath, std::ios::ate | std::ios::binary);
-        if (!file)
-        {
-            // Skip if shader not available.
-            return;
-        }
+        std::ifstream file(std::string(STARFORGE_SHADER_DIR) + "/cull.spv",
+                           std::ios::ate | std::ios::binary);
+        REQUIRE(file.good());
         const auto size = static_cast<std::size_t>(file.tellg());
         std::vector<std::uint8_t> bytes(size);
         file.seekg(0);
         file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size));
+        auto pipeline = ComputePipeline::create(*device, {
+            .spirv = bytes, .entryPoint = "main", .storageBufferCount = 3,
+            .pushConstantSize = kPushSize,
+        });
+        REQUIRE(pipeline.has_value());
 
-        // Test with multiple instance counts and visibility fractions.
-        const std::uint32_t instanceCounts[] = {100, 1000, 5000};
-        const double visibleFractions[] = {1.0, 0.1, 0.01};
+        const std::uint32_t instanceCounts[] = {100, 1000, 5000, 50000};
+        const double visibleFractions[] = {0.01, 0.1, 1.0};
 
-        for (std::uint32_t ic : instanceCounts)
+        for (std::uint32_t count : instanceCounts)
         {
-            for (double vf : visibleFractions)
+            for (double fraction : visibleFractions)
             {
-                // Generate scene.
-                double radius = 5.0;
-                if (vf > 0.0 && vf <= 1.0)
-                {
-                    radius = 5.0 / std::cbrt(vf);
-                }
-                if (radius < 1.0) radius = 1.0;
+                const std::uint64_t seed = 1337ULL + count + static_cast<std::uint64_t>(fraction * 100.0);
+                const auto scene = makeParityScene(count, fraction, seed);
 
-                auto scene = generateScene(42, ic, radius);
+                const Mat4d view = glm::lookAt(Vec3d(0, 0, 5), Vec3d(0, 0, 0), Vec3d(0, 1, 0));
+                const Mat4d proj = Mat4d(perspectiveVulkanReverseZ(
+                    glm::radians(60.0f), 16.0f / 9.0f, 0.1f, 100.0f));
+                const Frustum frustum = buildFrustum(proj * view);
 
-                // Build frustum.
-                Mat4d view = glm::lookAt(Vec3d(0, 0, 5), Vec3d(0, 0, 0), Vec3d(0, 1, 0));
-                Mat4d proj = glm::perspective(1.0, 16.0 / 9.0, 100.0, 0.1); // swapped for reverse-Z
-                Mat4d vp = proj * view;
-                Frustum frustum = buildFrustum(vp);
-
-                // CPU culling using original cullInstances (double precision).
-                auto cpuVisible = cullInstances(scene, frustum, 0.5);
-
-                // Float planes for GPU (cast from double frustum).
-                float planes[24];
+                // CPU oracle uses the same float-rounded planes the shader sees.
+                float planes[24] = {};
                 for (int p = 0; p < 6; ++p)
                 {
                     for (int c = 0; c < 4; ++c)
@@ -96,148 +128,94 @@ TEST_CASE("GPU cull parity: compute vs CPU reference")
                         planes[p * 4 + c] = static_cast<float>(frustum.planes[p][c]);
                     }
                 }
-                std::set<std::uint32_t> cpuSet(cpuVisible.begin(), cpuVisible.end());
-
-                // Prepare bounds data (vec4 per instance: center XYZ + radius W).
-                std::vector<float> boundsData(ic * 4);
-                for (std::uint32_t i = 0; i < ic; ++i)
+                std::vector<std::uint32_t> cpuVisible;
+                std::vector<float> bounds(count * 4);
+                for (std::uint32_t i = 0; i < count; ++i)
                 {
-                    boundsData[i * 4 + 0] = static_cast<float>(scene.instances[i].posX);
-                    boundsData[i * 4 + 1] = static_cast<float>(scene.instances[i].posY);
-                    boundsData[i * 4 + 2] = static_cast<float>(scene.instances[i].posZ);
-                    boundsData[i * 4 + 3] = 0.5f * scene.instances[i].scale;
+                    const auto& instance = scene.instances[i];
+                    bounds[i * 4 + 0] = static_cast<float>(instance.posX);
+                    bounds[i * 4 + 1] = static_cast<float>(instance.posY);
+                    bounds[i * 4 + 2] = static_cast<float>(instance.posZ);
+                    bounds[i * 4 + 3] = kInstanceRadius;
+
+                    bool visible = true;
+                    for (int p = 0; p < 6 && visible; ++p)
+                    {
+                        const double dist = static_cast<double>(planes[p * 4 + 0]) * instance.posX +
+                                            static_cast<double>(planes[p * 4 + 1]) * instance.posY +
+                                            static_cast<double>(planes[p * 4 + 2]) * instance.posZ +
+                                            static_cast<double>(planes[p * 4 + 3]);
+                        if (dist < -static_cast<double>(kInstanceRadius)) visible = false;
+                    }
+                    if (visible) cpuVisible.push_back(i);
                 }
+                REQUIRE_FALSE(cpuVisible.empty());
 
-                // Create GpuCulling.
-                auto gpuCulling = GpuCulling::create(*allocator, {
-                    .instanceCount = ic,
-                    .framesInFlight = 1,
-                });
-                REQUIRE(gpuCulling.has_value());
+                auto culling = GpuCulling::create(*allocator, {
+                    .instanceCount = count, .framesInFlight = 1});
+                REQUIRE(culling.has_value());
+                REQUIRE(culling->uploadBounds(bounds).has_value());
 
-                auto uploadResult = gpuCulling->uploadBounds(boundsData);
-                REQUIRE(uploadResult.has_value());
-
-                // Debug: read back bounds buffer.
-                auto bMapped = gpuCulling->boundsBuffer().map();
-                REQUIRE(bMapped.has_value());
-                auto* bData = static_cast<float*>(*bMapped);
-                MESSAGE("Bounds[0]: " << bData[0] << " " << bData[1] << " " << bData[2] << " " << bData[3]);
-                gpuCulling->boundsBuffer().unmap();
-
-                // Debug: print bounds buffer address.
-                VkBufferDeviceAddressInfo addrInfo{};
-                addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-                addrInfo.buffer = gpuCulling->boundsBuffer().handle();
-                VkDeviceAddress addr = vkGetBufferDeviceAddress(device->device(), &addrInfo);
-                MESSAGE("Bounds buffer address: " << addr);
-
-                // Create compute pipeline with push constants.
-                // Push constant size: 6 planes (96) + uint (4) + uint64 (8) = 108, padded to 112
-                constexpr std::uint32_t pushSize = 104; // 96 + 4 + 4
-                auto pipeline = ComputePipeline::create(*device, {
-                    .spirv = bytes,
-                    .entryPoint = "main",
-                    .storageBufferCount = 3, // bounds + indirect + visibleIndices
-                    .pushConstantSize = pushSize,
-                });
-                REQUIRE(pipeline.has_value());
-
-                // Reset indirect buffer.
-                auto resetResult = gpuCulling->resetIndirectBuffer(0);
-                REQUIRE(resetResult.has_value());
-
-                // Create command pool and buffer.
-                VkCommandPool cmdPool = VK_NULL_HANDLE;
                 VkCommandPoolCreateInfo poolInfo{};
                 poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
                 poolInfo.queueFamilyIndex = device->graphicsQueueFamily();
                 poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-                REQUIRE(vkCreateCommandPool(device->device(), &poolInfo, nullptr, &cmdPool) == VK_SUCCESS);
+                VkCommandPool pool = VK_NULL_HANDLE;
+                REQUIRE(vkCreateCommandPool(device->device(), &poolInfo, nullptr, &pool) == VK_SUCCESS);
 
+                VkCommandBufferAllocateInfo cmdAlloc{};
+                cmdAlloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+                cmdAlloc.commandPool = pool;
+                cmdAlloc.commandBufferCount = 1;
                 VkCommandBuffer cmd = VK_NULL_HANDLE;
-                VkCommandBufferAllocateInfo cmdAllocInfo{};
-                cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-                cmdAllocInfo.commandPool = cmdPool;
-                cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-                cmdAllocInfo.commandBufferCount = 1;
-                REQUIRE(vkAllocateCommandBuffers(device->device(), &cmdAllocInfo, &cmd) == VK_SUCCESS);
+                REQUIRE(vkAllocateCommandBuffers(device->device(), &cmdAlloc, &cmd) == VK_SUCCESS);
 
-                VkCommandBufferBeginInfo beginInfo{};
-                beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-                beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-                REQUIRE(vkBeginCommandBuffer(cmd, &beginInfo) == VK_SUCCESS);
-
-                // Record culling.
-                auto recordResult = gpuCulling->recordCulling(
-                    cmd, device->device(), *pipeline, 0, planes, ic);
-                REQUIRE(recordResult.has_value());
-
-                REQUIRE(vkEndCommandBuffer(cmd) == VK_SUCCESS);
-
-                // Submit.
                 VkFenceCreateInfo fenceInfo{};
                 fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
                 VkFence fence = VK_NULL_HANDLE;
                 REQUIRE(vkCreateFence(device->device(), &fenceInfo, nullptr, &fence) == VK_SUCCESS);
 
-                VkCommandBufferSubmitInfo cmdSubmit{};
-                cmdSubmit.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
-                cmdSubmit.commandBuffer = cmd;
+                VkCommandBufferBeginInfo begin{};
+                begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+                begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+                REQUIRE(vkBeginCommandBuffer(cmd, &begin) == VK_SUCCESS);
+                REQUIRE(culling->recordCulling(cmd, device->device(), *pipeline, 0,
+                                               planes, count).has_value());
+                REQUIRE(vkEndCommandBuffer(cmd) == VK_SUCCESS);
 
-                VkSubmitInfo2 submitInfo{};
-                submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
-                submitInfo.commandBufferInfoCount = 1;
-                submitInfo.pCommandBufferInfos = &cmdSubmit;
-
-                REQUIRE(vkQueueSubmit2(device->graphicsQueue(), 1, &submitInfo, fence) == VK_SUCCESS);
+                VkCommandBufferSubmitInfo submitCmd{};
+                submitCmd.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+                submitCmd.commandBuffer = cmd;
+                VkSubmitInfo2 submit{};
+                submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+                submit.commandBufferInfoCount = 1;
+                submit.pCommandBufferInfos = &submitCmd;
+                REQUIRE(device->submit(1, &submit, fence) == VK_SUCCESS);
                 REQUIRE(vkWaitForFences(device->device(), 1, &fence, VK_TRUE, UINT64_MAX) == VK_SUCCESS);
 
-                // Read back indirect command (instanceCount at offset 4).
-                auto& indirectBuf = gpuCulling->indirectBuffer(0);
-                auto mapped = indirectBuf.map();
-                REQUIRE(mapped.has_value());
-                (void)indirectBuf.invalidate(0, 16);
-                auto* indirectData = static_cast<std::uint32_t*>(*mapped);
-                std::uint32_t gpuVisibleCount = indirectData[1]; // instanceCount
-                indirectBuf.unmap();
+                auto indirectMapped = culling->indirectBuffer(0).map();
+                REQUIRE(indirectMapped.has_value());
+                (void)culling->indirectBuffer(0).invalidate(0, 16);
+                const auto* command = static_cast<const std::uint32_t*>(*indirectMapped);
+                const std::uint32_t gpuCount = command[1];
+                culling->indirectBuffer(0).unmap();
 
-                // Read back visible indices.
-                auto& visibleBuf = gpuCulling->visibleIndicesBuffer(0);
-                auto vMapped = visibleBuf.map();
-                REQUIRE(vMapped.has_value());
-                (void)visibleBuf.invalidate(0, ic * sizeof(std::uint32_t));
-                auto* visibleData = static_cast<std::uint32_t*>(*vMapped);
+                auto indicesMapped = culling->visibleIndicesBuffer(0).map();
+                REQUIRE(indicesMapped.has_value());
+                (void)culling->visibleIndicesBuffer(0).invalidate(0, count * sizeof(std::uint32_t));
+                const auto* gpuIndicesRaw = static_cast<const std::uint32_t*>(*indicesMapped);
+                std::vector<std::uint32_t> gpuIndices(gpuIndicesRaw, gpuIndicesRaw + gpuCount);
+                culling->visibleIndicesBuffer(0).unmap();
 
-                std::set<std::uint32_t> gpuSet;
-                for (std::uint32_t i = 0; i < gpuVisibleCount; ++i)
-                {
-                    gpuSet.insert(visibleData[i]);
-                }
-                visibleBuf.unmap();
+                CHECK(gpuCount == cpuVisible.size());
+                std::sort(gpuIndices.begin(), gpuIndices.end());
+                CHECK(gpuIndices == cpuVisible); // bit-for-bit visible-set equivalence
 
-                // Compare. Allow small differences due to float (GPU) vs double (CPU)
-                // precision on frustum boundary cases.
-                const double tolerance = std::max(5.0, 0.05 * static_cast<double>(ic));
-                CHECK(std::abs(static_cast<double>(gpuVisibleCount) - static_cast<double>(cpuVisible.size())) <= tolerance);
-
-                // Count mismatches.
-                std::size_t mismatches = 0;
-                for (std::uint32_t i = 0; i < ic; ++i)
-                {
-                    bool inCpu = cpuSet.count(i) > 0;
-                    bool inGpu = gpuSet.count(i) > 0;
-                    if (inCpu != inGpu) ++mismatches;
-                }
-                MESSAGE("GPU: " << gpuVisibleCount << " CPU: " << cpuVisible.size() << " mismatches: " << mismatches);
-                CHECK(mismatches <= static_cast<std::size_t>(tolerance));
-
-                // Cleanup.
                 vkDestroyFence(device->device(), fence, nullptr);
-                vkDestroyCommandPool(device->device(), cmdPool, nullptr);
+                vkFreeCommandBuffers(device->device(), pool, 1, &cmd);
+                vkDestroyCommandPool(device->device(), pool, nullptr);
             }
         }
-
         CHECK(context->validationErrorCount() == 0);
     }
 }

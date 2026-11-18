@@ -232,6 +232,20 @@ starforge_add_shader(
 )
 
 starforge_add_shader(
+    SOURCE "${PROJECT_SOURCE_DIR}/shaders/graphics/indirect_cube_descriptors.slang"
+    STAGE  vertex
+    ENTRY  vertexMain
+    OUTPUT_NAME indirect_cube_descriptors.vert
+)
+
+starforge_add_shader(
+    SOURCE "${PROJECT_SOURCE_DIR}/shaders/graphics/indirect_cube_descriptors.slang"
+    STAGE  fragment
+    ENTRY  fragmentMain
+    OUTPUT_NAME indirect_cube_descriptors.frag
+)
+
+starforge_add_shader(
     SOURCE "${PROJECT_SOURCE_DIR}/shaders/graphics/indirect_cube.slang"
     STAGE  vertex
     ENTRY  vertexMain

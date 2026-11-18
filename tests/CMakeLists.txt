@@ -154,6 +154,7 @@ add_executable(starforge_gpu_tests
     test_ecs_render.cpp
     test_gpu_cull_parity.cpp
     test_gpu_indirect_cull.cpp
+    test_gpu_feature_fallback.cpp
     test_gpu_driven_benchmark.cpp
     test_depth_ordering.cpp
     test_starfield_render.cpp
@@ -218,6 +219,22 @@ add_test(NAME starforge_gpu_tests COMMAND starforge_gpu_tests)
 set_tests_properties(starforge_gpu_tests PROPERTIES
     LABELS "gpu"
     SKIP_RETURN_CODE 77
+)
+
+# M5 Phase 4: run the GPU suite with each optional feature forced off. The
+# fallback tests assert the capability flags and the draw path actually used.
+add_test(NAME gpu_tests_no_draw_indirect_count COMMAND starforge_gpu_tests)
+set_tests_properties(gpu_tests_no_draw_indirect_count PROPERTIES
+    LABELS "gpu"
+    SKIP_RETURN_CODE 77
+    ENVIRONMENT "STARFORGE_DISABLE_FEATURES=drawIndirectCount"
+)
+
+add_test(NAME gpu_tests_no_bindless COMMAND starforge_gpu_tests)
+set_tests_properties(gpu_tests_no_bindless PROPERTIES
+    LABELS "gpu"
+    SKIP_RETURN_CODE 77
+    ENVIRONMENT "STARFORGE_DISABLE_FEATURES=bindless"
 )
 
 if(NOT CMAKE_CROSSCOMPILING)

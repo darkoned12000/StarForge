@@ -387,9 +387,10 @@ Items 1–4 are done in Phase 3; item 5 belongs to Phase 4.
    - `bindless` disabled: fall back to a single global storage buffer bound via
      BDA or descriptor set 0, indexed by the compacted instance IDs.
 
-**Status (2026-11-18):** items 1–4 are implemented in Phase 3 (in-place
-fill/barrier/dispatch/barrier sequence, SoA bounds, per-frame double buffering);
-item 5 is the Phase 4 fallback work and remains open.
+**Status (2026-11-18):** all five items are implemented — items 1–4 in Phase 3
+(in-place fill/barrier/dispatch/barrier sequence, SoA bounds, per-frame double
+buffering), item 5 in Phase 4 (`GpuDrivenDraw` selects `vkCmdDrawIndirect` vs
+`vkCmdDrawIndirectCount` and BDA vs descriptor storage by capability).
 
 ### Phase 1: Foundation & Deferred Hygiene (T1 / CPU Focus)
 
@@ -517,6 +518,12 @@ oracle. Matrix row updated below.
 Validate GPU culling correctness against the CPU oracle and verify runtime
 feature degradation paths.
 
+**Status: complete (2026-11-18).** `test_gpu_cull_parity.cpp` now checks strict
+count equality and bit-for-bit sorted index sets across 100/1k/5k/50k instances
+at 1%/10%/100% visibility. `GpuDrivenDraw` implements both fallback pairs and
+four T2 cases run the full GPU suite with `STARFORGE_DISABLE_FEATURES` forcing
+`drawIndirectCount` and `bindless` off. Matrix row updated below.
+
 **Step 4.1: T2 Parity Test (Compute vs. CPU Reference)**
 - Create `tests/test_gpu_cull_parity.cpp`.
 - Generate randomized test scenes (100 to 50k instances) with varying
@@ -571,7 +578,7 @@ against M4 baselines.
 | Phase 1 ✅ | CMake decoupling, unit frustum normals, randomized CPU oracle, viewport Y-flip | `starforge_tests` runs without Vulkan runtime; passes oracle tests | None | Done: swapchain-selection and workload-scene helpers moved into loader-free libraries; `starforge_tests` no longer links Vulkan/SDL (ELF `NEEDED` gate + 321 CPU cases pass); all frustum tests use engine reverse-Z projection; exact unit-normal + randomized camera/orientation/scale oracle; negative-height viewports and CCW gate (`render_conventions`) |
 | Phase 2 ✅ | ImageView RAII, ImageUsageFlags, pool/fence recycling, 2D/3D compute & BDA tests | `starforge_gpu_tests` clean under validation; zero allocation thrashing | Phase 1 | Done: tracked `Image` layouts + RAII `ImageView`, cached resettable cmd buffers/fences in `Uploader`/`ComputePipeline` (`operationCount()` tests), synchronized `VulkanDevice::submit`/`submit2`; new BDA-deref, 2D/3D-lane, real N-vs-2N/frame-1/nested timestamp tests. 48 GPU cases green under validation |
 | Phase 3 ✅ | Slang culling shader, SoA bounding buffers, double-buffered indirect commands | Valid indirect execution on simple cube mesh | Phase 2 | Done: `GpuCulling::recordCulling` performs GPU-side fill/barriers/dispatch in-frame; `test_gpu_indirect_cull.cpp` renders two frame slots with `vkCmdDrawIndirect`, verifies GPU `instanceCount` against the CPU frustum oracle and lit pixels, validation-clean |
-| Phase 4 | GPU vs CPU culling parity suite, feature fallback implementations | T2 Proof: bitwise matching visible sets; green tests with features disabled | Phase 3 |
+| Phase 4 ✅ | GPU vs CPU culling parity suite, feature fallback implementations | T2 Proof: bitwise matching visible sets; green tests with features disabled | Phase 3 | Done: strict count + sorted-index parity across 100/1k/5k/50k at 1/10/100%; `GpuDrivenDraw` BDA vs descriptor and drawIndirect vs drawIndirectCount paths; 4 fallback T2 cases + full GPU suite CTest runs with each feature disabled (12/12 CTests green) |
 | Phase 5 | 10k/100k/1M benchmark profiles, baseline comparison, validated runs | T4 Proof: 1M instances beat M4; CPU submission time flat | Phase 4 |
 
 ### Deferred from testing review (must address during M5)

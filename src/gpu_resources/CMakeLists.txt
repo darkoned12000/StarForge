@@ -3,6 +3,7 @@ add_library(starforge_gpu STATIC
     buffer.cpp
     compute_pipeline.cpp
     gpu_culling.cpp
+    gpu_driven_draw.cpp
     image.cpp
     instance_data.cpp
     staging_ring_buffer.cpp
