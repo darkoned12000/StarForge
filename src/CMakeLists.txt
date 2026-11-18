@@ -39,6 +39,7 @@ target_link_libraries(starforge
         starforge_jobs
         starforge_planets
         starforge_bench
+        starforge_gpu_driven_bench
         starforge_math
         starforge_spatial
         starforge_stats

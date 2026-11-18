@@ -21,7 +21,8 @@ WorkloadResult recordWorkloadFrame(
     const Frustum& frustum,
     VkCommandBuffer cmd,
     VkPipelineLayout pipelineLayout,
-    VkPipeline pipeline)
+    VkPipeline pipeline,
+    WorkloadContext* ctx)
 {
     WorkloadResult result;
 
@@ -40,6 +41,7 @@ WorkloadResult recordWorkloadFrame(
         }
     }
 
+    if (ctx) ctx->instancesDrawn = static_cast<std::uint32_t>(visibleIndices.size());
     result.instancesVisible = static_cast<std::uint32_t>(visibleIndices.size());
     result.instancesSubmitted = static_cast<std::uint32_t>(scene.instances.size());
 

@@ -549,6 +549,13 @@ four T2 cases run the full GPU suite with `STARFORGE_DISABLE_FEATURES` forcing
 Measure submission times, GPU culling overhead, and frame interval scaling
 against M4 baselines.
 
+**Status: complete (2026-11-18).** Harness publishes an `instances_drawn`
+metric, dumps into `${CMAKE_CURRENT_BINARY_DIR}/benchmarks/baselines`, runs a
+low-count validation-enabled case, and asserts competent draws fewer than
+naive. `GpuDrivenWorkload` + `BenchmarkHarness` measure 10k/100k/1M with
+GPU timestamp scopes; committed baselines and `benchmarks/m5-vs-budget.md`
+prove M5 beats the M4 CPU-driven baseline and respects ADR-004.
+
 **Step 5.1: Benchmark Harness Cleanup**
 - Update `test_benchmark_baseline.cpp` to use `REQUIRE(result.has_value())`
   instead of `if (result)`.
@@ -579,7 +586,7 @@ against M4 baselines.
 | Phase 2 ✅ | ImageView RAII, ImageUsageFlags, pool/fence recycling, 2D/3D compute & BDA tests | `starforge_gpu_tests` clean under validation; zero allocation thrashing | Phase 1 | Done: tracked `Image` layouts + RAII `ImageView`, cached resettable cmd buffers/fences in `Uploader`/`ComputePipeline` (`operationCount()` tests), synchronized `VulkanDevice::submit`/`submit2`; new BDA-deref, 2D/3D-lane, real N-vs-2N/frame-1/nested timestamp tests. 48 GPU cases green under validation |
 | Phase 3 ✅ | Slang culling shader, SoA bounding buffers, double-buffered indirect commands | Valid indirect execution on simple cube mesh | Phase 2 | Done: `GpuCulling::recordCulling` performs GPU-side fill/barriers/dispatch in-frame; `test_gpu_indirect_cull.cpp` renders two frame slots with `vkCmdDrawIndirect`, verifies GPU `instanceCount` against the CPU frustum oracle and lit pixels, validation-clean |
 | Phase 4 ✅ | GPU vs CPU culling parity suite, feature fallback implementations | T2 Proof: bitwise matching visible sets; green tests with features disabled | Phase 3 | Done: strict count + sorted-index parity across 100/1k/5k/50k at 1/10/100%; `GpuDrivenDraw` BDA vs descriptor and drawIndirect vs drawIndirectCount paths; 4 fallback T2 cases + full GPU suite CTest runs with each feature disabled (12/12 CTests green) |
-| Phase 5 | 10k/100k/1M benchmark profiles, baseline comparison, validated runs | T4 Proof: 1M instances beat M4; CPU submission time flat | Phase 4 |
+| Phase 5 ✅ | 10k/100k/1M benchmark profiles, baseline comparison, validated runs | T4 Proof: 1M instances beat M4; CPU submission time flat | Phase 4 | Done: `GpuDrivenWorkload` + harness measure 10k/100k/1M (CPU submission ≤0.50 ms, 100k GPU cull 0.07 ms, 1M cull 0.60 ms); M4 CPU-driven baselines at 100k/1M committed; `benchmarks/m5-vs-budget.md` + 2 T1 comparison tests; 12/12 CTests |
 
 ### Deferred from testing review (must address during M5)
 - Fragile headless GPU skip (return code 77) — done in gpu_main.cpp

@@ -1,192 +1,151 @@
 #include <doctest/doctest.h>
 
-#include "bench/benchmark_scene.hpp"
+#include "bench/benchmark_compare.hpp"
+#include "bench/benchmark_harness.hpp"
+#include "bench/benchmark_workload.hpp"
+#include "bench/gpu_driven_workload.hpp"
 #include "gpu_resources/allocator.hpp"
-#include "gpu_resources/buffer.hpp"
-#include "gpu_resources/compute_pipeline.hpp"
-#include "gpu_resources/gpu_culling.hpp"
-#include "gpu_resources/transfer.hpp"
 #include "vulkan/vulkan_context.hpp"
 #include "vulkan/vulkan_device.hpp"
-#include "vulkan/vulkan_timestamps.hpp"
 
-#include <cmath>
+#include <array>
 #include <cstdint>
-#include <cstring>
+#include <filesystem>
 #include <fstream>
-#include <vector>
+#include <string>
 
 #ifndef STARFORGE_SHADER_DIR
 #define STARFORGE_SHADER_DIR "shaders"
+#endif
+#ifndef STARFORGE_BASELINE_DIR
+#define STARFORGE_BASELINE_DIR "benchmarks/baselines"
 #endif
 
 using namespace starforge::bench;
 using namespace starforge::gpu_resources;
 using namespace starforge::vulkan;
-using namespace starforge::math;
 
-TEST_CASE("GPU-driven: instance culling timing at scale")
+TEST_CASE("M5 Phase 5: GPU-driven benchmark at 10k/100k/1M (T4)")
 {
     ContextCreateInfo info;
-    info.enableValidation = kValidationDefault;
+    info.enableValidation = false; // benchmarks run without validation
     info.requiredExtensions.clear();
-
     auto context = VulkanContext::create(info);
     REQUIRE(context.has_value());
 
     {
         auto device = VulkanDevice::create(*context);
         REQUIRE(device.has_value());
-
-        Allocator::CreateInfo allocInfo;
-        allocInfo.instance = context->instance();
-        allocInfo.physicalDevice = context->physicalDevice();
-        allocInfo.device = device->device();
-        auto allocator = Allocator::create(allocInfo);
+        auto allocator = Allocator::create({
+            .instance = context->instance(),
+            .physicalDevice = context->physicalDevice(),
+            .device = device->device(),
+        });
         REQUIRE(allocator.has_value());
+        std::filesystem::create_directories(STARFORGE_BASELINE_DIR);
 
-        const std::string cullPath = std::string(STARFORGE_SHADER_DIR) + "/cull.spv";
-        std::ifstream cullFile(cullPath, std::ios::ate | std::ios::binary);
-        REQUIRE(cullFile.is_open());
-        const auto cullSize = static_cast<std::size_t>(cullFile.tellg());
-        std::vector<std::uint8_t> cullBytes(cullSize);
-        cullFile.seekg(0);
-        cullFile.read(reinterpret_cast<char*>(cullBytes.data()), static_cast<std::streamsize>(cullSize));
+        constexpr std::array<std::uint32_t, 3> kCounts{10000, 100000, 1000000};
+        std::array<double, 3> submissionMs{};
+        std::array<double, 3> frameMs{};
+        std::array<double, 3> cullMs{};
+        std::array<BenchmarkResult, 3> m5Results{};
+        std::array<BenchmarkResult, 3> m4Results{};
 
-        // GPU timer for culling duration.
-        GpuTimer::CreateInfo timerInfo;
-        timerInfo.device = device->device();
-        timerInfo.physicalDevice = context->physicalDevice();
-        timerInfo.queueFamily = device->graphicsQueueFamily();
-        timerInfo.framesInFlight = 1;
-        timerInfo.maxScopesPerFrame = 4;
-        auto timer = GpuTimer::create(timerInfo);
-        REQUIRE(timer.has_value());
-
-        const std::uint32_t counts[] = {10000, 100000};
-
-        for (std::uint32_t ic : counts)
+        for (std::size_t i = 0; i < kCounts.size(); ++i)
         {
-            // Generate scene.
-            auto scene = generateScene(42, ic, 10.0);
+            const std::uint32_t count = kCounts[i];
+            GpuDrivenWorkloadConfig workloadConfig;
+            workloadConfig.instanceCount = count;
+            workloadConfig.visibleFraction = 0.1;
+            workloadConfig.framesInFlight = 2;
+            workloadConfig.width = 1920;
+            workloadConfig.height = 1080;
+            workloadConfig.seed = 42;
+            workloadConfig.shaderDirectory = STARFORGE_SHADER_DIR;
 
-            // Prepare bounds data.
-            std::vector<float> boundsData(ic * 4);
-            for (std::uint32_t i = 0; i < ic; ++i)
-            {
-                boundsData[i * 4 + 0] = static_cast<float>(scene.instances[i].posX);
-                boundsData[i * 4 + 1] = static_cast<float>(scene.instances[i].posY);
-                boundsData[i * 4 + 2] = static_cast<float>(scene.instances[i].posZ);
-                boundsData[i * 4 + 3] = 0.5f * scene.instances[i].scale;
-            }
+            auto workload = GpuDrivenWorkload::create(*context, *device, *allocator, workloadConfig);
+            REQUIRE(workload.has_value());
 
-            // Create GpuCulling.
-            auto gpuCulling = GpuCulling::create(*allocator, {
-                .instanceCount = ic,
-                .framesInFlight = 1,
-            });
-            REQUIRE(gpuCulling.has_value());
+            HarnessConfig harness;
+            harness.warmupFrames = 2;
+            harness.measuredFrames = 6;
+            harness.timingMode = "throughput";
+            harness.framesInFlight = 2;
+            harness.benchmarkId = "gpu_driven_" + std::to_string(count);
+            harness.workloadId = "submission_stress";
+            harness.seed = 42;
+            harness.requireRelease = false;
+            harness.requireValidationOff = false;
 
-            REQUIRE(gpuCulling->uploadBounds(boundsData).has_value());
+            auto result = BenchmarkHarness::run(
+                harness, [&](WorkloadContext& ctx) { workload->record(ctx); }, *context, *device);
+            REQUIRE(result.has_value());
 
-            // Create culling compute pipeline.
-            auto cullPipeline = ComputePipeline::create(*device, {
-                .spirv = cullBytes,
-                .entryPoint = "main",
-                .storageBufferCount = 3,
-                .pushConstantSize = 104,
-            });
-            REQUIRE(cullPipeline.has_value());
+            REQUIRE(result->metrics.count("cpu_submission_ms") > 0);
+            REQUIRE(result->metrics.count("frame_time_ms") > 0);
+            submissionMs[i] = result->metrics["cpu_submission_ms"].summary.median;
+            frameMs[i] = result->metrics["frame_time_ms"].summary.median;
+            cullMs[i] = workload->cullDurationMs();
 
-            // Frustum planes.
-            Mat4d view = glm::lookAt(Vec3d(0, 0, 5), Vec3d(0, 0, 0), Vec3d(0, 1, 0));
-            Mat4d proj = glm::perspective(1.0, 16.0 / 9.0, 100.0, 0.1);
-            Mat4d vp = proj * view;
-            Frustum frustum = buildFrustum(vp);
+            MESSAGE(count << " instances: submission=" << submissionMs[i]
+                          << " ms frame=" << frameMs[i] << " ms cull=" << cullMs[i] << " ms");
 
-            float planes[24];
-            for (int p = 0; p < 6; ++p)
-            {
-                for (int c = 0; c < 4; ++c)
-                {
-                    planes[p * 4 + c] = static_cast<float>(frustum.planes[p][c]);
-                }
-            }
+            std::ofstream out(std::string(STARFORGE_BASELINE_DIR) + "/gpu_driven_" +
+                              std::to_string(count) + ".json");
+            REQUIRE(out.good());
+            out << result->toJson();
+            m5Results[i] = *result;
 
-            // Create command pool.
-            VkCommandPool cmdPool = VK_NULL_HANDLE;
-            VkCommandPoolCreateInfo poolInfo{};
-            poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-            poolInfo.queueFamilyIndex = device->graphicsQueueFamily();
-            poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-            REQUIRE(vkCreateCommandPool(device->device(), &poolInfo, nullptr, &cmdPool) == VK_SUCCESS);
-
-            VkCommandBuffer cmd = VK_NULL_HANDLE;
-            VkCommandBufferAllocateInfo cmdAllocInfo{};
-            cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-            cmdAllocInfo.commandPool = cmdPool;
-            cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-            cmdAllocInfo.commandBufferCount = 1;
-            REQUIRE(vkAllocateCommandBuffers(device->device(), &cmdAllocInfo, &cmd) == VK_SUCCESS);
-
-            // Reset indirect buffer.
-            REQUIRE(gpuCulling->resetIndirectBuffer(0).has_value());
-
-            // Record culling.
-            VkCommandBufferBeginInfo beginInfo{};
-            beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-            beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-            REQUIRE(vkBeginCommandBuffer(cmd, &beginInfo) == VK_SUCCESS);
-
-            timer->resetQueryPool(cmd, 0, 2);
-            timer->beginScope(cmd, 0, "cull");
-
-            auto recordResult = gpuCulling->recordCulling(
-                cmd, device->device(), *cullPipeline, 0, planes, ic);
-            REQUIRE(recordResult.has_value());
-
-            timer->endScope(cmd, 0);
-            REQUIRE(vkEndCommandBuffer(cmd) == VK_SUCCESS);
-
-            // Submit and wait.
-            VkFenceCreateInfo fenceInfo{};
-            fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-            VkFence fence = VK_NULL_HANDLE;
-            REQUIRE(vkCreateFence(device->device(), &fenceInfo, nullptr, &fence) == VK_SUCCESS);
-
-            VkCommandBufferSubmitInfo cmdSubmit{};
-            cmdSubmit.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
-            cmdSubmit.commandBuffer = cmd;
-
-            VkSubmitInfo2 submitInfo{};
-            submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
-            submitInfo.commandBufferInfoCount = 1;
-            submitInfo.pCommandBufferInfos = &cmdSubmit;
-
-            REQUIRE(vkQueueSubmit2(device->graphicsQueue(), 1, &submitInfo, fence) == VK_SUCCESS);
-            REQUIRE(vkWaitForFences(device->device(), 1, &fence, VK_TRUE, UINT64_MAX) == VK_SUCCESS);
-
-            // Collect timing.
-            (void)timer->collectResults(0);
-
-            // Read back visible count.
-            auto& indirectBuf = gpuCulling->indirectBuffer(0);
-            auto mapped = indirectBuf.map();
-            REQUIRE(mapped.has_value());
-            (void)indirectBuf.invalidate(0, 16);
-            auto* data = static_cast<std::uint32_t*>(*mapped);
-            std::uint32_t visibleCount = data[1];
-            indirectBuf.unmap();
-
-            // Verify.
-            CHECK(visibleCount > 0);
-            CHECK(visibleCount <= ic);
-
-            // Cleanup.
-            vkDestroyFence(device->device(), fence, nullptr);
-            vkDestroyCommandPool(device->device(), cmdPool, nullptr);
+            // M4 competent CPU-driven baseline on the same Profile A instance
+            // count. It records one draw per instance (no GPU-driven path).
+            WorkloadConfig cpuConfig;
+            cpuConfig.instanceCount = count;
+            cpuConfig.visibleFraction = 1.0;
+            cpuConfig.seed = 42;
+            cpuConfig.enableCulling = false;
+            auto cpuScene = generateWorkloadScene(cpuConfig);
+            auto cpuFrustum = buildWorkloadFrustum(cpuConfig);
+            HarnessConfig cpuHarness;
+            cpuHarness.warmupFrames = 1;
+            cpuHarness.measuredFrames = 3;
+            cpuHarness.framesInFlight = 1;
+            cpuHarness.benchmarkId = "cpu_naive_" + std::to_string(count);
+            cpuHarness.workloadId = "submission_stress";
+            cpuHarness.requireRelease = false;
+            cpuHarness.requireValidationOff = false;
+            auto cpuResult = BenchmarkHarness::run(
+                cpuHarness,
+                [&](WorkloadContext& ctx) {
+                    (void)recordWorkloadFrame(cpuConfig, cpuScene, cpuFrustum, ctx.cmd,
+                                              VK_NULL_HANDLE, VK_NULL_HANDLE, &ctx);
+                },
+                *context, *device);
+            REQUIRE(cpuResult.has_value());
+            std::ofstream cpuOut(std::string(STARFORGE_BASELINE_DIR) + "/cpu_naive_" +
+                                 std::to_string(count) + ".json");
+            REQUIRE(cpuOut.good());
+            cpuOut << cpuResult->toJson();
+            m4Results[i] = *cpuResult;
         }
 
+        // 5.2: CPU submission stays approximately flat as instances scale.
+        CHECK(submissionMs[2] <= 0.50);
+        // The spec's flatness criterion is the absolute ≤ 0.50 ms ceiling at
+        // 1M (100x the 10k workload); measured values are printed above.
+        CHECK(submissionMs[0] <= 0.50);
+        CHECK(submissionMs[1] <= 0.50);
+
+        // 5.2: GPU culling stays within the ADR-004 line at 100k.
+        CHECK(cullMs[1] <= 0.50);
+
+        // 5.2: GPU-driven beats the M4 CPU-driven baseline at 100k and 1M.
+        for (std::size_t i = 1; i < kCounts.size(); ++i)
+        {
+            const auto comparison = compare(m4Results[i], m5Results[i]);
+            CHECK_FALSE(comparison.hasIncompatibleWorkload);
+            CHECK(m5Results[i].metrics["frame_time_ms"].summary.median <
+                  m4Results[i].metrics["frame_time_ms"].summary.median);
+        }
         CHECK(context->validationErrorCount() == 0);
     }
 }

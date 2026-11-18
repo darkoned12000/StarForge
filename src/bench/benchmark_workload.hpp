@@ -2,6 +2,7 @@
 
 #include "bench/benchmark_scene.hpp"
 #include "bench/benchmark_result.hpp"
+#include "bench/benchmark_harness.hpp"
 #include "vulkan/vulkan_context.hpp"
 #include "vulkan/vulkan_device.hpp"
 
@@ -48,6 +49,7 @@ struct WorkloadResult
     const Frustum& frustum,
     VkCommandBuffer cmd,
     VkPipelineLayout pipelineLayout,
-    VkPipeline pipeline);
+    VkPipeline pipeline,
+    WorkloadContext* ctx = nullptr);
 
 } // namespace starforge::bench

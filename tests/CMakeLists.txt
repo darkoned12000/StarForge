@@ -32,6 +32,7 @@ add_executable(starforge_tests
     test_benchmark_compare.cpp
     test_budget_compare.cpp
     test_thread_scaling.cpp
+    test_m5_baseline_comparison.cpp
     test_benchmark_scene.cpp
     test_cpu_timer.cpp
     test_content_generation.cpp
@@ -114,6 +115,8 @@ target_include_directories(starforge_tests PRIVATE ${PROJECT_SOURCE_DIR}/apps/ga
 target_compile_definitions(starforge_tests
     PRIVATE
         STARFORGE_BUDGETS_FILE="${PROJECT_SOURCE_DIR}/benchmarks/budgets.json"
+        STARFORGE_M5_BASELINE_DIR="${PROJECT_SOURCE_DIR}/benchmarks/baselines"
+        STARFORGE_M5_REPORT_FILE="${PROJECT_SOURCE_DIR}/benchmarks/m5-vs-budget.md"
 )
 
 add_test(NAME starforge_tests COMMAND starforge_tests)
@@ -178,6 +181,7 @@ target_link_libraries(starforge_gpu_tests
     PRIVATE
         starforge_core
         starforge_bench
+        starforge_gpu_driven_bench
         starforge_math
         starforge_planets
         starforge_spatial
@@ -191,7 +195,7 @@ target_link_libraries(starforge_gpu_tests
 target_compile_definitions(starforge_gpu_tests
     PRIVATE
         STARFORGE_SHADER_DIR="${PROJECT_BINARY_DIR}/shaders"
-        STARFORGE_BASELINE_DIR="${PROJECT_BINARY_DIR}/benchmarks/baselines"
+        STARFORGE_BASELINE_DIR="${CMAKE_CURRENT_BINARY_DIR}/benchmarks/baselines"
         STARFORGE_GOLDEN_DIR="${PROJECT_SOURCE_DIR}/tests/goldens"
 )
 

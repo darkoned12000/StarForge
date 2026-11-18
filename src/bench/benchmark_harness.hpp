@@ -36,6 +36,7 @@ struct WorkloadContext
     VkCommandBuffer cmd = VK_NULL_HANDLE;
     std::uint32_t frameIndex = 0;
     std::uint32_t framesInFlight = 2;
+    std::uint32_t instancesDrawn = 0; // set by the workload for parity/invariant checks
 };
 
 // Workload callback: records commands into cmd for one frame.

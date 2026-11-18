@@ -80,7 +80,7 @@ TEST_CASE("Benchmark baseline: naive and competent CPU-driven (10k instances)")
             harnessConfig.seed = 42;
 
             auto workload = [&](WorkloadContext& ctx) {
-                (void)recordWorkloadFrame(config, scene, frustum, ctx.cmd, VK_NULL_HANDLE, VK_NULL_HANDLE);
+                (void)recordWorkloadFrame(config, scene, frustum, ctx.cmd, VK_NULL_HANDLE, VK_NULL_HANDLE, &ctx);
             };
 
             harnessConfig.requireRelease = false;
@@ -117,7 +117,7 @@ TEST_CASE("Benchmark baseline: naive and competent CPU-driven (10k instances)")
         {
             WorkloadConfig config;
             config.instanceCount = 10000;
-            config.visibleFraction = 1.0;
+            config.visibleFraction = 0.1; // culling must reduce the drawn set
             config.seed = 42;
             config.enableCulling = true;
             config.resolutionWidth = 1920;
@@ -136,7 +136,7 @@ TEST_CASE("Benchmark baseline: naive and competent CPU-driven (10k instances)")
             harnessConfig.seed = 42;
 
             auto workload = [&](WorkloadContext& ctx) {
-                (void)recordWorkloadFrame(config, scene, frustum, ctx.cmd, VK_NULL_HANDLE, VK_NULL_HANDLE);
+                (void)recordWorkloadFrame(config, scene, frustum, ctx.cmd, VK_NULL_HANDLE, VK_NULL_HANDLE, &ctx);
             };
 
             harnessConfig.requireRelease = false;
@@ -160,12 +160,54 @@ TEST_CASE("Benchmark baseline: naive and competent CPU-driven (10k instances)")
             competentResult = *result;
         }
 
-        // Baseline invariant: competent (with culling) should draw fewer objects than naive.
+        // Baseline invariant: competent (with culling) draws fewer instances.
         REQUIRE(naiveResult.has_value());
         REQUIRE(competentResult.has_value());
-        // For 100% visible fraction they may be similar, but CPU culling path is exercised.
-        // The invariant is that culling is applied; at minimum both produce valid results.
-        CHECK(naiveResult->metrics.count("frame_time_ms") > 0);
-        CHECK(competentResult->metrics.count("frame_time_ms") > 0);
+        REQUIRE(naiveResult->metrics.count("instances_drawn") > 0);
+        REQUIRE(competentResult->metrics.count("instances_drawn") > 0);
+        const double naiveDrawn = naiveResult->metrics["instances_drawn"].summary.median;
+        const double competentDrawn = competentResult->metrics["instances_drawn"].summary.median;
+        CHECK(competentDrawn < naiveDrawn);
+    }
+}
+
+TEST_CASE("Benchmark baseline: low-count run with validation enabled (5.1)")
+{
+    ContextCreateInfo info;
+    info.enableValidation = true;
+    info.requiredExtensions.clear();
+    auto context = VulkanContext::create(info);
+    REQUIRE(context.has_value());
+
+    {
+        auto device = VulkanDevice::create(*context);
+        REQUIRE(device.has_value());
+
+        WorkloadConfig config;
+        config.instanceCount = 1000;
+        config.visibleFraction = 0.1;
+        config.seed = 42;
+        config.enableCulling = true;
+        auto scene = generateWorkloadScene(config);
+        auto frustum = buildWorkloadFrustum(config);
+
+        HarnessConfig harnessConfig;
+        harnessConfig.warmupFrames = 1;
+        harnessConfig.measuredFrames = 3;
+        harnessConfig.benchmarkId = "validated_low_count";
+        harnessConfig.workloadId = "submission_stress";
+        harnessConfig.requireRelease = false;
+        harnessConfig.requireValidationOff = false;
+
+        auto workload = [&](WorkloadContext& ctx) {
+            (void)recordWorkloadFrame(config, scene, frustum, ctx.cmd,
+                                      VK_NULL_HANDLE, VK_NULL_HANDLE, &ctx);
+        };
+        auto result = BenchmarkHarness::run(harnessConfig, workload, *context, *device);
+        REQUIRE(result.has_value());
+        CHECK(result->metrics.count("frame_time_ms") > 0);
+        CHECK(result->metrics["frame_time_ms"].summary.valid);
+        CHECK(result->metrics["instances_drawn"].summary.median > 0.0);
+        CHECK(context->validationErrorCount() == 0);
     }
 }

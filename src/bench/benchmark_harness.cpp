@@ -344,6 +344,7 @@ BenchmarkHarness::run(const HarnessConfig& config,
     // Measured phase.
     FrameTimingCollector collector;
     std::vector<double> gpuDurations;
+    std::vector<double> instancesDrawnSamples;
 
     auto frameStart = std::chrono::steady_clock::now();
 
@@ -397,6 +398,8 @@ BenchmarkHarness::run(const HarnessConfig& config,
         }
 
         workload(ctx);
+
+        instancesDrawnSamples.push_back(static_cast<double>(ctx.instancesDrawn));
 
         if (gpuTimestampsAvailable)
         {
@@ -495,6 +498,14 @@ BenchmarkHarness::run(const HarnessConfig& config,
         gpuMetric.summary = gpuStats;
         gpuMetric.rawSamples = gpuDurations;
         result.metrics["gpu_time_ms"] = gpuMetric;
+    }
+
+    if (!instancesDrawnSamples.empty())
+    {
+        Metric drawn;
+        drawn.rawSamples = instancesDrawnSamples;
+        drawn.summary = stats::compute(instancesDrawnSamples);
+        result.metrics["instances_drawn"] = drawn;
     }
 
     // Memory snapshot (after benchmark).
