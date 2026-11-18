@@ -67,6 +67,16 @@ struct ToonVertex
     math::Vec3f outlineNormal{};
 };
 
+// Extended vertex for glTF-style textured materials (five float4 per vertex).
+struct ToonTexturedVertex
+{
+    math::Vec3f position{};
+    math::Vec3f normal{};
+    math::Vec3f outlineNormal{};
+    math::Vec2f uv{};
+    math::Vec4f tangent{1.0f, 0.0f, 0.0f, 1.0f};
+};
+
 // GPU-owned toon mesh (BDA vertex array, three float4 per vertex). Move-only.
 class ToonMesh
 {
@@ -80,14 +90,26 @@ public:
 
     [[nodiscard]] std::uint64_t deviceAddress() const noexcept { return address_; }
     [[nodiscard]] std::uint32_t vertexCount() const noexcept { return vertexCount_; }
+    [[nodiscard]] bool textured() const noexcept { return textureWidth_ > 0; }
+    [[nodiscard]] std::uint64_t textureAddress() const noexcept { return textureAddress_; }
+    [[nodiscard]] std::uint32_t textureWidth() const noexcept { return textureWidth_; }
+    [[nodiscard]] std::uint32_t textureHeight() const noexcept { return textureHeight_; }
 
 private:
     friend class ToonRenderer;
-    ToonMesh(std::unique_ptr<gpu_resources::Buffer> buffer, std::uint64_t address, std::uint32_t count) noexcept;
+    ToonMesh(std::shared_ptr<gpu_resources::Allocator> allocator,
+             std::unique_ptr<gpu_resources::Buffer> buffer,
+             std::uint64_t address, std::uint32_t count) noexcept;
 
+    // Shared so a mesh stays valid if its ToonRenderer is recreated.
+    std::shared_ptr<gpu_resources::Allocator> allocator_;
     std::unique_ptr<gpu_resources::Buffer> buffer_;
+    std::unique_ptr<gpu_resources::Buffer> textureBuffer_;
     std::uint64_t address_ = 0;
+    std::uint64_t textureAddress_ = 0;
     std::uint32_t vertexCount_ = 0;
+    std::uint32_t textureWidth_ = 0;
+    std::uint32_t textureHeight_ = 0;
 };
 
 // Cel-shaded (toon) renderer: quantized diffuse bands, stepped specular,
@@ -130,6 +152,11 @@ public:
     [[nodiscard]] std::expected<ToonMesh, std::string>
     createMesh(std::span<const ToonVertex> vertices);
 
+    // Textured mesh from glTF-style attributes and RGBA8 base-colour pixels.
+    [[nodiscard]] std::expected<ToonMesh, std::string>
+    createTexturedMesh(std::span<const ToonTexturedVertex> vertices,
+                       const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height);
+
     // Records one draw with explicit mesh geometry. An invalid mesh falls
     // back to the built-in cube.
     void renderMesh(VkCommandBuffer cmd, const ToonRenderContext& context,
@@ -143,7 +170,7 @@ private:
     VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
     std::uint32_t framesInFlight_ = 2;
     std::uint32_t currentDrawSlot_ = 0;
-    std::unique_ptr<gpu_resources::Allocator> allocator_;
+    std::shared_ptr<gpu_resources::Allocator> allocator_;
     std::unique_ptr<gpu_resources::Buffer> drawDataBuffer_;
     std::optional<vulkan::GraphicsPipeline> toonPipeline_;
     std::optional<vulkan::GraphicsPipeline> outlinePipeline_;

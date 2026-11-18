@@ -2,6 +2,7 @@
 #include <doctest/doctest.h>
 
 #include "starforge/application.hpp"
+#include "starforge/hud.hpp"
 #include "starforge/nebula.hpp"
 #include "starforge/starfield.hpp"
 #include "starforge/math.hpp"
@@ -144,6 +145,8 @@ TEST_CASE("Public Toon: production showcase composes through public API (9.5.6)"
     REQUIRE(nebula.has_value());
     auto sun = starforge::Sun::create(*renderer, {});
     REQUIRE(sun.has_value());
+    auto hud = starforge::Hud::create(*renderer, {});
+    REQUIRE(hud.has_value());
 
     // A small procedural hull (tetrahedral wedge) uploaded as a toon mesh.
     std::vector<starforge::Toon::MeshVertex> vertices;
@@ -176,6 +179,7 @@ TEST_CASE("Public Toon: production showcase composes through public API (9.5.6)"
         nebula->record(fc, nebulaContext, {});
         stars->record(fc, starContext, {});
         toon->recordMesh(fc, context, material, *mesh);
+        hud->record(fc, {});
     });
     REQUIRE(frame.has_value());
     CHECK(*frame == starforge::Renderer::FrameResult::Presented);

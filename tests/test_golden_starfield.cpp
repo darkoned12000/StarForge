@@ -1,7 +1,7 @@
 #include <doctest/doctest.h>
 
-// stb PNG IO (single implementation TU for the gpu test binary).
-#define STB_IMAGE_IMPLEMENTATION
+// stb image IO: the implementation now lives in starforge_asset (glTF loader),
+// which the gpu test binary links. stb_image_write implementation is here.
 #include "stb_image.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"

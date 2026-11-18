@@ -33,9 +33,16 @@ struct alignas(16) DrawData
     math::Vec4f fresnel{0.0f, 0.0f, 0.0f, 0.0f};
     math::Vec4f material{0.0f, 0.0f, 0.0f, 0.0f};
     math::Vec4f highlight{0.0f, 0.0f, 0.0f, 0.0f};
+    std::uint64_t textureAddress = 0;
+    std::uint32_t textureWidth = 0;
+    std::uint32_t textureHeight = 0;
+    std::uint32_t pad0 = 0;
+    std::uint32_t pad1 = 0;
+    std::uint32_t pad2 = 0;
+    std::uint32_t pad3 = 0;
 };
 
-static_assert(sizeof(DrawData) == 208, "Toon DrawData must match the shader layout (208 bytes)");
+static_assert(sizeof(DrawData) == 240, "Toon DrawData must match the shader layout (240 bytes)");
 static_assert(offsetof(DrawData, params) == 128, "Toon DrawData params offset must be 128");
 
 // Push constants for toon.slang: clip matrix + BDA pointer + mode. 80 bytes.
@@ -144,6 +151,17 @@ std::expected<ToonRenderer, std::string> ToonRenderer::create(const CreateInfo& 
         return std::unexpected("ToonRenderer: device push-constant range is smaller than 96 bytes");
     }
 
+    VkPhysicalDeviceFeatures2 deviceFeatures{};
+    deviceFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    VkPhysicalDeviceVulkan12Features features12{};
+    features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    deviceFeatures.pNext = &features12;
+    vkGetPhysicalDeviceFeatures2(info.physicalDevice, &deviceFeatures);
+    if (!features12.bufferDeviceAddress || !deviceFeatures.features.shaderInt64)
+    {
+        return std::unexpected("ToonRenderer requires bufferDeviceAddress and shaderInt64");
+    }
+
     ToonRenderer renderer;
     renderer.device_ = info.device;
     renderer.framesInFlight_ = info.framesInFlight;
@@ -169,7 +187,7 @@ std::expected<ToonRenderer, std::string> ToonRenderer::create(const CreateInfo& 
     {
         return std::unexpected(std::move(drawBuffer.error()));
     }
-    renderer.allocator_ = std::make_unique<gpu_resources::Allocator>(std::move(*allocator));
+    renderer.allocator_ = std::make_shared<gpu_resources::Allocator>(std::move(*allocator));
     renderer.drawDataBuffer_ = std::make_unique<gpu_resources::Buffer>(std::move(*drawBuffer));
 
     auto vertModule = loadShaderModule(info.device, info.shaderDirectory + "/toon.vert.spv");
@@ -238,18 +256,15 @@ std::expected<ToonRenderer, std::string> ToonRenderer::create(const CreateInfo& 
         .viewportHeight = 1.0f,
     });
 
-    if (!toon)
-    {
+    auto fail = [&](const std::string& message) {
+        vkDestroyShaderModule(info.device, *vertModule, nullptr);
+        vkDestroyShaderModule(info.device, *fragModule, nullptr);
         vkDestroyPipelineLayout(info.device, renderer.pipelineLayout_, nullptr);
         renderer.pipelineLayout_ = VK_NULL_HANDLE;
-        return std::unexpected(toon.error());
-    }
-    if (!outline)
-    {
-        vkDestroyPipelineLayout(info.device, renderer.pipelineLayout_, nullptr);
-        renderer.pipelineLayout_ = VK_NULL_HANDLE;
-        return std::unexpected(outline.error());
-    }
+        return std::unexpected(message);
+    };
+    if (!toon) return fail(toon.error());
+    if (!outline) return fail(outline.error());
     auto emissive = vulkan::GraphicsPipeline::create({
         .device = info.device,
         .colorFormat = info.colorFormat,
@@ -268,12 +283,7 @@ std::expected<ToonRenderer, std::string> ToonRenderer::create(const CreateInfo& 
         .viewportWidth = 1.0f,
         .viewportHeight = 1.0f,
     });
-    if (!emissive)
-    {
-        vkDestroyPipelineLayout(info.device, renderer.pipelineLayout_, nullptr);
-        renderer.pipelineLayout_ = VK_NULL_HANDLE;
-        return std::unexpected(emissive.error());
-    }
+    if (!emissive) return fail(emissive.error());
     renderer.toonPipeline_ = std::move(*toon);
     renderer.outlinePipeline_ = std::move(*outline);
     renderer.emissivePipeline_ = std::move(*emissive);
@@ -337,9 +347,10 @@ void ToonRenderer::destroy() noexcept
     currentDrawSlot_ = 0;
 }
 
-ToonMesh::ToonMesh(std::unique_ptr<gpu_resources::Buffer> buffer, std::uint64_t address,
+ToonMesh::ToonMesh(std::shared_ptr<gpu_resources::Allocator> allocator,
+                   std::unique_ptr<gpu_resources::Buffer> buffer, std::uint64_t address,
                    std::uint32_t count) noexcept
-    : buffer_(std::move(buffer)), address_(address), vertexCount_(count)
+    : allocator_(std::move(allocator)), buffer_(std::move(buffer)), address_(address), vertexCount_(count)
 {
 }
 
@@ -386,14 +397,85 @@ std::expected<ToonMesh, std::string> ToonRenderer::createMesh(std::span<const To
         buffer->unmap();
     }
     const std::uint64_t address = buffer->deviceAddress(device_);
-    return ToonMesh(std::make_unique<gpu_resources::Buffer>(std::move(*buffer)), address,
+    return ToonMesh(allocator_, std::make_unique<gpu_resources::Buffer>(std::move(*buffer)), address,
                     static_cast<std::uint32_t>(vertices.size()));
+}
+
+std::expected<ToonMesh, std::string> ToonRenderer::createTexturedMesh(
+    std::span<const ToonTexturedVertex> vertices, const std::uint8_t* rgba,
+    std::uint32_t width, std::uint32_t height)
+{
+    if (!allocator_ || vertices.empty()) return std::unexpected("Textured toon mesh requires vertices");
+    if ((width == 0 || height == 0) || rgba == nullptr)
+        return std::unexpected("Textured toon mesh requires an RGBA base-colour texture");
+
+    std::vector<char> host(vertices.size() * 80);
+    for (std::size_t i = 0; i < vertices.size(); ++i)
+    {
+        auto* out = reinterpret_cast<float*>(host.data() + i * 80);
+        const auto& v = vertices[i];
+        out[0] = v.position.x; out[1] = v.position.y; out[2] = v.position.z;
+        out[4] = v.normal.x; out[5] = v.normal.y; out[6] = v.normal.z;
+        out[8] = v.outlineNormal.x; out[9] = v.outlineNormal.y; out[10] = v.outlineNormal.z;
+        out[12] = v.uv.x; out[13] = v.uv.y;
+        out[16] = v.tangent.x; out[17] = v.tangent.y; out[18] = v.tangent.z; out[19] = v.tangent.w;
+    }
+
+    auto buffer = gpu_resources::Buffer::create(*allocator_, {
+        .size = static_cast<VkDeviceSize>(host.size()),
+        .usage = gpu_resources::BufferUsage::Storage,
+        .memory = gpu_resources::MemoryPlacement::CpuToGpu,
+        .name = "starforge.Toon.TexturedMesh",
+    });
+    if (!buffer) return std::unexpected(buffer.error());
+    {
+        auto mapped = buffer->map();
+        if (!mapped) return std::unexpected(mapped.error());
+        std::memcpy(*mapped, host.data(), host.size());
+        (void)buffer->flush(0, host.size());
+        buffer->unmap();
+    }
+    const std::uint64_t address = buffer->deviceAddress(device_);
+
+    // One packed RGBA8 uint32 per texel (4 bytes, not 16).
+    const std::size_t texelCount = static_cast<std::size_t>(width) * height;
+    std::vector<std::uint32_t> texels(texelCount);
+    for (std::size_t i = 0; i < texelCount; ++i)
+    {
+        texels[i] = static_cast<std::uint32_t>(rgba[i * 4 + 0]) |
+                    (static_cast<std::uint32_t>(rgba[i * 4 + 1]) << 8) |
+                    (static_cast<std::uint32_t>(rgba[i * 4 + 2]) << 16) |
+                    (static_cast<std::uint32_t>(rgba[i * 4 + 3]) << 24);
+    }
+    auto texture = gpu_resources::Buffer::create(*allocator_, {
+        .size = static_cast<VkDeviceSize>(texels.size() * sizeof(std::uint32_t)),
+        .usage = gpu_resources::BufferUsage::Storage,
+        .memory = gpu_resources::MemoryPlacement::CpuToGpu,
+        .name = "starforge.Toon.BaseColorTexture",
+    });
+    if (!texture) return std::unexpected(texture.error());
+    {
+        auto mapped = texture->map();
+        if (!mapped) return std::unexpected(mapped.error());
+        std::memcpy(*mapped, texels.data(), texels.size() * sizeof(std::uint32_t));
+        (void)texture->flush(0, texels.size() * sizeof(std::uint32_t));
+        texture->unmap();
+    }
+
+    ToonMesh mesh(allocator_, std::make_unique<gpu_resources::Buffer>(std::move(*buffer)), address,
+                  static_cast<std::uint32_t>(vertices.size()));
+    mesh.textureBuffer_ = std::make_unique<gpu_resources::Buffer>(std::move(*texture));
+    mesh.textureAddress_ = mesh.textureBuffer_->deviceAddress(device_);
+    mesh.textureWidth_ = width;
+    mesh.textureHeight_ = height;
+    return mesh;
 }
 
 void ToonRenderer::renderMesh(VkCommandBuffer cmd, const ToonRenderContext& context,
                               const ToonParams& params, const ToonMesh& mesh)
 {
-    if (!toonPipeline_.has_value() || !outlinePipeline_.has_value() || !drawDataBuffer_)
+    if (!toonPipeline_.has_value() || !outlinePipeline_.has_value() ||
+        !emissivePipeline_.has_value() || !drawDataBuffer_)
     {
         return;
     }
@@ -408,8 +490,15 @@ void ToonRenderer::renderMesh(VkCommandBuffer cmd, const ToonRenderContext& cont
     drawData.fresnel = params.fresnelColor;
     drawData.material = params.materialParams;
     drawData.highlight = params.highlightColor;
+    drawData.textureAddress = mesh.textureAddress();
+    drawData.textureWidth = mesh.textureWidth();
+    drawData.textureHeight = mesh.textureHeight();
 
-    // Pixel outline width -> object units (uniform scale assumed).
+    // Pixel outline width -> object units (uniform scale assumed). The
+    // shader extrudes the hull in object space; the depth test then keeps
+    // only the silhouette rim. A screen-space xy-only offset (previous
+    // revision) left depth unchanged and let back faces paint over the
+    // base geometry on oblique faces.
     const auto& translation = context.modelView[3];
     const float distance = std::sqrt(translation[0] * translation[0] + translation[1] * translation[1] +
                                      translation[2] * translation[2]);
@@ -444,6 +533,8 @@ void ToonRenderer::renderMesh(VkCommandBuffer cmd, const ToonRenderContext& cont
     push.drawDataAddress = drawDataBuffer_->deviceAddress(device_) + slotOffset;
     push.vertexAddress = mesh.deviceAddress();
     push.vertexCount = mesh.vertexCount();
+    // pad0/pad1 were only used by the reverted screen-space outline; the
+    // object-space hull needs no per-frame resolution in push constants.
 
     const std::uint32_t vertexCount = push.vertexCount > 0 ? push.vertexCount : 36u;
     const bool emissive = (params.capabilities & 1u) != 0;

@@ -85,6 +85,16 @@ convenience wrapper around the same path.
   outline thickness is specified in screen pixels. Diffuse color can use a
   three-stop ramp (`shadowColor` → `midColor` → `baseColor`); a `midColor`
   with alpha 0 uses the midpoint of the shadow and base colors.
+- `starforge::Asset` — CPU-side glTF 2.0 decoder (`loadFromMemory`,
+  `loadFromFile`, `meshes()`) exposing positions, normals, UVs, tangents,
+  indices and glTF base-colour material data (including embedded textures).
+  Pair with `Toon::createMeshFromAsset` to render an imported mesh.
+- `starforge::Nebula` — fullscreen cel-style nebula backdrop; `Params::celShaded`
+  quantizes the FBM into flat toon bands.
+- `starforge::Sun` — visitable celestial body with an emissive core, corona
+  shell and 64-bit camera-relative positioning.
+- `starforge::Hud` — toon-styled HUD with outlined flat panels, a portrait
+  frame and accent bars; `record()` draws into an active frame.
 - `starforge::Audio` — backend-neutral audio: `create`, `loadFromMemory`
   (WAV/FLAC/MP3 bytes), `play`/`stop`/`isPlaying`, per-bus gain
   (`setBusVolume`), `setListener`, `setEmitter` (3D positional audio with

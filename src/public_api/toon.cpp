@@ -4,6 +4,10 @@
 #include "shader_dir.hpp"
 #include "toon_bridge.hpp"
 
+#include <cmath>
+#include <cstdint>
+#include <map>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -186,6 +190,57 @@ Toon::createMesh(std::span<const MeshVertex> vertices) const
     auto backend = impl_->backend->createMesh(raw.data(), static_cast<std::uint32_t>(raw.size()));
     if (!backend) return std::unexpected(backend.error());
 
+    auto impl = std::make_unique<ToonMesh::Impl>();
+    impl->backend = std::move(*backend);
+    return ToonMesh(std::move(impl));
+}
+
+std::expected<Toon::ToonMesh, std::string>
+Toon::createMeshFromAsset(const MeshData& mesh) const
+{
+    if (!impl_ || !impl_->backend)
+        return std::unexpected("Toon::createMeshFromAsset failed: Toon is moved-from");
+    if (mesh.vertices.empty()) return std::unexpected("Asset mesh has no vertices");
+
+    // Weld by position and average normals to bake smooth outline normals.
+    // Copying hard per-face normals would crack the inverted-hull outline at
+    // every sharp corner (review finding).
+    auto positionKey = [](const math::Vec3f& p) {
+        auto key = [](float f) {
+            return static_cast<std::int64_t>(std::round(f * 10000.0f));
+        };
+        return std::make_tuple(key(p.x()), key(p.y()), key(p.z()));
+    };
+    std::map<std::tuple<std::int64_t, std::int64_t, std::int64_t>, math::Vec3f> accumulated;
+    for (const auto& v : mesh.vertices)
+    {
+        accumulated[positionKey(v.position)] =
+            accumulated[positionKey(v.position)] + v.normal;
+    }
+
+    std::vector<bridge::RawToonTexturedVertex> raw(mesh.vertices.size());
+    for (std::size_t i = 0; i < mesh.vertices.size(); ++i)
+    {
+        const auto& v = mesh.vertices[i];
+        raw[i].position[0] = v.position.x(); raw[i].position[1] = v.position.y(); raw[i].position[2] = v.position.z();
+        raw[i].normal[0] = v.normal.x(); raw[i].normal[1] = v.normal.y(); raw[i].normal[2] = v.normal.z();
+        const math::Vec3f smooth = math::normalize(accumulated[positionKey(v.position)]);
+        raw[i].outlineNormal[0] = smooth.x();
+        raw[i].outlineNormal[1] = smooth.y();
+        raw[i].outlineNormal[2] = smooth.z();
+        raw[i].uv[0] = v.uv.x(); raw[i].uv[1] = v.uv.y();
+        for (int c = 0; c < 4; ++c) raw[i].tangent[c] = v.tangent[c];
+    }
+
+    static constexpr std::uint8_t kWhite[4] = {255, 255, 255, 255};
+    const bool hasTexture = mesh.material.hasBaseColorTexture && !mesh.material.textureRGBA.empty();
+    const std::uint8_t* pixels = hasTexture ? mesh.material.textureRGBA.data() : kWhite;
+    const std::uint32_t width = hasTexture ? mesh.material.textureWidth : 1u;
+    const std::uint32_t height = hasTexture ? mesh.material.textureHeight : 1u;
+
+    auto backend = impl_->backend->createTexturedMesh(
+        raw.data(), static_cast<std::uint32_t>(raw.size()), pixels, width, height);
+    if (!backend) return std::unexpected(backend.error());
     auto impl = std::make_unique<ToonMesh::Impl>();
     impl->backend = std::move(*backend);
     return ToonMesh(std::move(impl));

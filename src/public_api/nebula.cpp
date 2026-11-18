@@ -116,6 +116,7 @@ void Nebula::record(FrameContext& frameContext, const RenderContext& context, co
     rawParams.absorption = params.absorption;
     rawParams.scattering = params.scattering;
     rawParams.time = params.time;
+    rawParams.celShaded = params.celShaded;
     impl_->backend->render(RendererInternalAccess::commandBuffer(frameContext), rawContext, rawParams);
 }
 

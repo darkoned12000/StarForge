@@ -34,6 +34,19 @@ namespace
 constexpr float kPi = 3.141592653589793f;
 constexpr float kSimStep = 1.0f / 60.0f; // fixed 60 Hz simulation
 
+// Celestial sun (M15.0.7). One source of truth for the HUD and the
+// renderer — the old demo had duplicated literals whose comments said
+// ~80 km while the actual position was 469 km away.
+//
+// Numbers are chosen so the *whole* sun fits inside the camera far
+// plane (150 km): centre 30 km from spawn, core 4 km, corona 3x = 12 km,
+// i.e. 18..42 km from the ship. It is also reachable: 30 km at 60 m/s
+// is ~8.5 minutes at full throttle. Direction is well away from the
+// planet (~67 degrees) so the two read as separate objects.
+constexpr starforge::game::RawVec3d kSunWorld{1047000.0 - 21000.0, 12000.0, -18000.0};
+constexpr double kSunRadius = 4000.0;
+constexpr double kSunCoronaMultiplier = 3.0;
+
 void logInfo(const char* message)
 {
     std::printf("[STARFORGE] %s\n", message);
@@ -443,10 +456,10 @@ int main()
             const double pdz = -60000.0 - ship.position.z;
             const double planetDist = std::sqrt(pdx * pdx + pdy * pdy + pdz * pdz);
 
-            // World-anchored celestial sun (~80 km from spawn).
-            const double sdx = (1047000.0 - 300000.0) - ship.position.x;
-            const double sdy = 25000.0 - ship.position.y;
-            const double sdz = -360000.0 - ship.position.z;
+            // World-anchored celestial sun (~30 km from spawn).
+            const double sdx = kSunWorld.x - ship.position.x;
+            const double sdy = kSunWorld.y - ship.position.y;
+            const double sdz = kSunWorld.z - ship.position.z;
             const double sunDist = std::sqrt(sdx * sdx + sdy * sdy + sdz * sdz);
 
             std::printf(
@@ -489,7 +502,8 @@ int main()
 
         const float aspect = static_cast<float>(size.width) / std::max(static_cast<float>(size.height), 1.0f);
         const auto view = starforge::math::lookAt(eyeOffset, lookAhead, shipUp);
-        // Far plane covers the world-anchored planet (~63 km) and sun (~80 km); rocks live within 2.5 km.
+        // Far plane covers the world-anchored planet (~63 km), sun (~30 km
+        // plus a 12 km corona) and rocks (within 2.5 km), with margin.
         const auto proj = starforge::math::perspectiveVulkan(cameraFov, aspect, 0.1f, 150000.0f);
         // Ship sits at the ship-relative origin; lookAt already places it
         // 8 m ahead of the camera. Adding another translation would
@@ -563,8 +577,9 @@ int main()
 
         // --- 3D Visitable Celestial Sun (M15.0.7) ---
         // Real 3D celestial mesh with M7 quadtree LOD (LargeObjectSetup),
-        // Eddington limb darkening (1 - u(1 - μ)), and additive corona shell at 6x radius.
-        // Anchored at world coordinates (~80 km from spawn).
+        // Eddington limb darkening (1 - u(1 - μ)), and additive corona shell.
+        // Anchored at world coordinates (~30 km from spawn); the core and
+        // corona both sit inside the far plane so the whole body renders.
         starforge::Sun::RenderContext sunContext;
         sunContext.viewProj = proj * view;
         sunContext.cameraPosition = starforge::WorldPosition::fromMeters(
@@ -574,12 +589,11 @@ int main()
         sunContext.resolution = {static_cast<float>(size.width), static_cast<float>(size.height)};
         sunContext.time = time;
 
-        constexpr starforge::game::RawVec3d kSunWorld{1047000.0 - 300000.0, 25000.0, -360000.0};
         starforge::Sun::Params sun3DParams;
         sun3DParams.worldPosition = starforge::WorldPosition::fromMeters(
             kSunWorld.x, kSunWorld.y, kSunWorld.z).value_or(starforge::WorldPosition{});
-        sun3DParams.radius = 50000.0; // 50 km celestial photosphere radius
-        sun3DParams.coronaRadiusMultiplier = 6.0; // Corona reaches out to 300 km
+        sun3DParams.radius = kSunRadius; // 4 km celestial photosphere radius
+        sun3DParams.coronaRadiusMultiplier = kSunCoronaMultiplier; // Corona reaches out to 12 km
         sun3DParams.coreColor = {1.0f, 0.95f, 0.82f, 1.0f}; // Blazing yellow-white core
         sun3DParams.limbColor = {0.95f, 0.40f, 0.05f, 1.0f}; // Deep amber solar rim
         sun3DParams.coronaColor = {1.0f, 0.65f, 0.20f, 1.0f}; // Glowing outer corona

@@ -930,11 +930,11 @@ pipeline; no per-material shaders were added.
 | Item | Status | Owner / done when |
 |------|--------|-------------------|
 | Mesh input, baked outline normals, emissive tint, 4-stop ramp, shadow/attenuation/detail | **Done** in M9.5 — BDA `ToonMesh`, capability bitmask, `toon.slang` branches | — |
-| Authored glTF meshes, UVs/tangents, textures/decals and glTF→toon material mapping | Open — placeholder procedural meshes only | M17: render a glTF ship/station with the toon material |
-| Screen-space crease/outline pass | Open — inverted hull only draws outer silhouettes | Needs a G-buffer/post pass with object ID, normals, depth and reverse-Z linearization |
-| HDR/tonemap/bloom and sRGB policy | Open — UNORM output clamps palette colors | Decide the color-space pipeline; HDR toon scene passes a golden/budget test without flattened bands |
-| Stylized environment variants | Open — nebula/starfield remain photoreal | Decide per-material vs global toon direction; toon-styled sky proof in the golden test |
-| Toon HUD/panels/portraits and hero assets | Open — UI is M16, hero meshes are M17 | Toon HUD + one authored hero mesh with consistent outline/rim rules |
+| Authored glTF meshes, UVs/tangents, textures/decals and glTF→toon material mapping | **Done** (toon integration): in-house GLB decoder (`src/asset/`), public `starforge::Asset`, embedded PNG decode, UV/tangent retention, `Toon::createMeshFromAsset` + texture capability 32; headless textured-glTF render test. Full M17 asset pipeline (hot reload, LODs, meshoptimizer) remains separate | — |
+| Screen-space crease/outline pass | **Done**: `gbuffer.slang` writes object ID + view normals with reverse-Z depth; `edge_detect.slang` post pass linearizes depth and detects ID/normal/depth discontinuities; golden `tests/goldens/toon_crease_128.png` | — |
+| HDR/tonemap/bloom and sRGB policy | **Done**: `R16G16B16A16_SFLOAT` HDR target, ACES tonemap to UNORM sRGB-style output, bright-pass + separable Gaussian bloom (`TextureEffect` with sampled-image descriptors); golden `hdr_toon_128.png`, p95 < 6.94 ms, clipped-pixel check | — |
+| Stylized environment variants | **Done**: `NebulaParams::celShaded` quantizes FBM into flat bands; the toon-showcase golden now renders a cel-styled sky. Starfield/dust remain photoreal | — |
+| Toon HUD/panels/portraits and hero assets | **Done**: `starforge::Hud` public facade + `HudRenderer` draw outlined flat panels, a portrait frame and accent bars (`hud.slang`, golden `toon_hud_128.png`); hero meshes are covered by the glTF→Toon path above and composed in the public showcase test | — |
 
 ## Game Layer (M10+)
 

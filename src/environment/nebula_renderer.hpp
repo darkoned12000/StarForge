@@ -37,6 +37,7 @@ struct NebulaParams
     float phaseG = 0.2f;        // Henyey-Greenstein asymmetry factor
     std::uint32_t stepCount = 64;
     float time = 0.0f;
+    bool celShaded = false; // quantized, cel-styled background variant
 };
 
 // Nebula rendering system (volumetric raymarching; rendering pending).

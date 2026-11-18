@@ -2,6 +2,7 @@
 
 #include "internal/effect_pipeline.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <utility>
@@ -38,10 +39,19 @@ static_assert(offsetof(PushConstants, aspectTan) == 80, "Nebula aspectTan offset
     push.absorption = params.absorption;
     push.color = params.baseColor;
 
-    const math::Mat4f invView = glm::inverse(context.viewProj);
-    const math::Vec3f right = glm::normalize(math::Vec3f(invView[0]));
-    const math::Vec3f up = glm::normalize(math::Vec3f(invView[1]));
-    const math::Vec3f forward = -glm::normalize(math::Vec3f(invView[2]));
+    // inv(viewProj) = invView * invProj: columns 0/1 give world-space right/up,
+    // but column 2 is the camera position scaled by 1/proj[2][2], NOT forward.
+    // Derive forward by unprojecting two NDC points instead (review fix).
+    const math::Mat4f invViewProj = glm::inverse(context.viewProj);
+    const math::Vec3f right = glm::normalize(math::Vec3f(invViewProj[0]));
+    const math::Vec3f up = glm::normalize(math::Vec3f(invViewProj[1]));
+    auto unproject = [&](float ndcZ) {
+        const math::Vec4f p = invViewProj * math::Vec4f{0.0f, 0.0f, ndcZ, 1.0f};
+        return math::Vec3f(p) / p.w;
+    };
+    const math::Vec3f nearPoint = unproject(0.0f);
+    const math::Vec3f farPoint = unproject(1.0f);
+    const math::Vec3f forward = glm::normalize(farPoint - nearPoint);
     const float projRow1Squared = context.viewProj[0][1] * context.viewProj[0][1] +
                                   context.viewProj[1][1] * context.viewProj[1][1] +
                                   context.viewProj[2][1] * context.viewProj[2][1];
@@ -50,7 +60,7 @@ static_assert(offsetof(PushConstants, aspectTan) == 80, "Nebula aspectTan offset
     push.right = math::Vec4f{right, 0.0f};
     push.up = math::Vec4f{up, 0.0f};
     push.forward = math::Vec4f{forward, 0.0f};
-    push.aspectTan = math::Vec4f{aspect, tanHalfFov, 0.0f, 0.0f};
+    push.aspectTan = math::Vec4f{aspect, tanHalfFov, 0.0f, params.celShaded ? 1.0f : 0.0f};
     return push;
 }
 

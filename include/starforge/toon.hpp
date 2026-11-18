@@ -1,5 +1,6 @@
 #pragma once
 
+#include "starforge/asset.hpp"
 #include "starforge/math.hpp"
 #include "starforge/renderer.hpp"
 
@@ -11,6 +12,27 @@
 
 namespace starforge
 {
+
+// Typed material capabilities (bitmask). Combine with | in Toon::Params.
+enum class ToonCapability : std::uint32_t
+{
+    None = 0,
+    Emissive = 1u,
+    Fresnel = 2u,
+    Faceted = 4u,
+    ScatteringRim = 8u,
+    ShadowDetail = 16u,
+    Textured = 32u,
+};
+
+inline ToonCapability operator|(ToonCapability a, ToonCapability b) noexcept
+{
+    return static_cast<ToonCapability>(static_cast<std::uint32_t>(a) | static_cast<std::uint32_t>(b));
+}
+inline ToonCapability operator&(ToonCapability a, ToonCapability b) noexcept
+{
+    return static_cast<ToonCapability>(static_cast<std::uint32_t>(a) & static_cast<std::uint32_t>(b));
+}
 
 // Public toon (cel-shaded) facade: quantized diffuse bands, stepped
 // specular, rim light, and an inverted-hull outline pass. Owns its
@@ -111,6 +133,13 @@ public:
     // outlive every mesh it creates. Empty vertex lists are rejected.
     [[nodiscard]] std::expected<ToonMesh, std::string>
     createMesh(std::span<const MeshVertex> vertices) const;
+
+    // Creates a textured toon mesh from decoded glTF asset data. UVs,
+    // tangents and the embedded base-colour texture are uploaded; map the
+    // asset's material base-colour factor into Toon::Params yourself and set
+    // capability bit 32 to enable texture sampling.
+    [[nodiscard]] std::expected<ToonMesh, std::string>
+    createMeshFromAsset(const MeshData& mesh) const;
 
     // Records a draw with explicit mesh geometry (base + outline, or the
     // additive pass for emissive materials).

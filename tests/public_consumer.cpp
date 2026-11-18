@@ -2,7 +2,9 @@
 // Compiled with -fsyntax-only against include/ as the sole include path,
 // proving no internal src/ headers are needed to use the public API.
 #include "starforge/application.hpp"
+#include "starforge/asset.hpp"
 #include "starforge/audio.hpp"
+#include "starforge/hud.hpp"
 #include "starforge/math.hpp"
 #include "starforge/renderer.hpp"
 #include "starforge/starfield.hpp"
@@ -12,7 +14,9 @@
 #include <type_traits>
 
 static_assert(std::is_move_constructible_v<starforge::Application>);
+static_assert(std::is_move_constructible_v<starforge::Asset>);
 static_assert(std::is_move_constructible_v<starforge::Audio>);
+static_assert(std::is_move_constructible_v<starforge::Hud>);
 static_assert(std::is_move_constructible_v<starforge::Renderer>);
 static_assert(std::is_move_constructible_v<starforge::Starfield>);
 static_assert(std::is_move_constructible_v<starforge::Toon>);

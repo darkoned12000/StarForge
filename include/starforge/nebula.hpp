@@ -38,6 +38,8 @@ public:
         float absorption = 0.1f;
         float scattering = 0.5f;
         float time = 0.0f;
+        // Cel-styled background: quantized FBM bands instead of a smooth ramp.
+        bool celShaded = false;
     };
 
     [[nodiscard]] static std::expected<Nebula, std::string> create(Renderer& renderer, const CreateInfo& info);

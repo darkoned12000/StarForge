@@ -2,8 +2,12 @@
 
 add_library(starforge_public_api STATIC
     application.cpp
+    asset.cpp
+    asset_bridge.cpp
     audio.cpp
     audio_bridge.cpp
+    hud.cpp
+    hud_bridge.cpp
     renderer.cpp
     starfield.cpp
     starfield_bridge.cpp
@@ -32,6 +36,7 @@ target_include_directories(starforge_public_api
 target_link_libraries(starforge_public_api
     PRIVATE
         starforge_platform
+        starforge_asset
         starforge_vulkan
         starforge_spatial
         starforge_environment

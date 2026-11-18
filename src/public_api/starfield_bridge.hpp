@@ -1,5 +1,7 @@
 #pragma once
 
+#include "bridge_types.hpp"
+
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
@@ -13,32 +15,6 @@
 // aliases (both live in starforge::math). This header must not be installed.
 namespace starforge::public_api_bridge
 {
-
-struct RawVec3f
-{
-    float x = 0.0f;
-    float y = 0.0f;
-    float z = 0.0f;
-};
-
-struct RawVec4f
-{
-    float x = 0.0f;
-    float y = 0.0f;
-    float z = 0.0f;
-    float w = 0.0f;
-};
-
-struct RawVec2f
-{
-    float x = 0.0f;
-    float y = 0.0f;
-};
-
-struct RawMat4f
-{
-    float columns[4][4] = {};
-};
 
 struct RawStarfieldContext
 {

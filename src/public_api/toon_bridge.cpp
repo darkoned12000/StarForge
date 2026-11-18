@@ -141,6 +141,33 @@ RawToon::createMesh(const RawToonVertex* vertices, std::uint32_t vertexCount)
     return result;
 }
 
+std::expected<std::unique_ptr<RawToonMesh>, std::string>
+RawToon::createTexturedMesh(const RawToonTexturedVertex* vertices, std::uint32_t vertexCount,
+                            const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height)
+{
+    if (!impl_ || vertices == nullptr || vertexCount == 0)
+        return std::unexpected("RawToon::createTexturedMesh requires a renderer and vertices");
+    std::vector<environment::ToonTexturedVertex> converted(vertexCount);
+    for (std::uint32_t i = 0; i < vertexCount; ++i)
+    {
+        converted[i].position = ::starforge::math::Vec3f{vertices[i].position[0], vertices[i].position[1],
+                                                          vertices[i].position[2]};
+        converted[i].normal = ::starforge::math::Vec3f{vertices[i].normal[0], vertices[i].normal[1],
+                                                        vertices[i].normal[2]};
+        converted[i].outlineNormal = ::starforge::math::Vec3f{
+            vertices[i].outlineNormal[0], vertices[i].outlineNormal[1], vertices[i].outlineNormal[2]};
+        converted[i].uv = ::starforge::math::Vec2f{vertices[i].uv[0], vertices[i].uv[1]};
+        converted[i].tangent = ::starforge::math::Vec4f{vertices[i].tangent[0], vertices[i].tangent[1],
+                                                         vertices[i].tangent[2], vertices[i].tangent[3]};
+    }
+    auto mesh = impl_->renderer.createTexturedMesh(converted, rgba, width, height);
+    if (!mesh) return std::unexpected(mesh.error());
+    auto result = std::unique_ptr<RawToonMesh>(new RawToonMesh());
+    result->impl_ = std::make_unique<RawToonMesh::Impl>(RawToonMesh::Impl{std::move(*mesh)});
+    result->vertexCount_ = vertexCount;
+    return result;
+}
+
 void RawToon::renderMesh(VkCommandBuffer cmd, const RawToonContext& context,
                          const RawToonParams& params, const RawToonMesh& mesh)
 {

@@ -42,6 +42,7 @@ namespace
     result.absorption = value.absorption;
     result.scattering = value.scattering;
     result.time = value.time;
+    result.celShaded = value.celShaded;
     return result;
 }
 

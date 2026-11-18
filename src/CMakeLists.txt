@@ -9,6 +9,7 @@
 # `starforge` is the umbrella target applications link against.
 
 add_subdirectory(core)
+add_subdirectory(asset)
 add_subdirectory(profiling)
 add_subdirectory(content)
 add_subdirectory(jobs)
@@ -34,6 +35,7 @@ add_library(starforge INTERFACE)
 target_link_libraries(starforge
     INTERFACE
         starforge_core
+        starforge_asset
         starforge_profiling
         starforge_content
         starforge_jobs

@@ -17,6 +17,7 @@ endif()
 add_executable(starforge_tests
     main.cpp
     test_version.cpp
+    test_asset_gltf.cpp
     test_vulkan_version.cpp
     test_gpu_capabilities.cpp
     test_swapchain_selection.cpp
@@ -71,6 +72,7 @@ add_executable(starforge_tests
 target_link_libraries(starforge_tests
     PRIVATE
         starforge_core
+        starforge_asset
         starforge_bench
         starforge_content
         starforge_jobs
@@ -146,6 +148,7 @@ add_executable(starforge_gpu_tests
     test_compute_dispatch.cpp
     test_resource_pooling.cpp
     test_clear_render.cpp
+    test_asset_gltf.cpp
     test_image_readback.cpp
     test_image_layout_tracking.cpp
     test_depth_format.cpp
@@ -170,6 +173,9 @@ add_executable(starforge_gpu_tests
     test_golden_starfield.cpp
     test_golden_toon.cpp
     test_toon_showcase.cpp
+    test_hdr_pipeline.cpp
+    test_toon_crease.cpp
+    test_hud.cpp
     test_atmosphere_render.cpp
     test_vulkan_retirement.cpp
     test_naive_control.cpp
@@ -181,6 +187,7 @@ add_executable(starforge_gpu_tests
 target_link_libraries(starforge_gpu_tests
     PRIVATE
         starforge_core
+        starforge_asset
         starforge_bench
         starforge_gpu_driven_bench
         starforge_math
@@ -198,6 +205,7 @@ target_compile_definitions(starforge_gpu_tests
         STARFORGE_SHADER_DIR="${PROJECT_BINARY_DIR}/shaders"
         STARFORGE_BASELINE_DIR="${CMAKE_CURRENT_BINARY_DIR}/benchmarks/baselines"
         STARFORGE_GOLDEN_DIR="${PROJECT_SOURCE_DIR}/tests/goldens"
+        STARFORGE_GPU_TESTS=1
 )
 
 target_include_directories(starforge_gpu_tests SYSTEM

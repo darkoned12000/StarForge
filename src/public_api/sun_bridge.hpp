@@ -1,5 +1,7 @@
 #pragma once
 
+#include "bridge_types.hpp"
+
 #include "world_bridge.hpp"
 #include <vulkan/vulkan.h>
 
@@ -10,20 +12,6 @@
 
 namespace starforge::public_api_bridge
 {
-
-struct RawVec4f
-{
-    float x = 0.0f;
-    float y = 0.0f;
-    float z = 0.0f;
-    float w = 0.0f;
-};
-
-struct RawVec2f
-{
-    float x = 0.0f;
-    float y = 0.0f;
-};
 
 struct RawSunContext
 {

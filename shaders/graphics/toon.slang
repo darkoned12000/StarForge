@@ -7,7 +7,7 @@
 //
 // Push constants carry the clip matrix plus a BDA pointer to the
 // per-draw block (modelView, light, and the color-ramp data below). This
-// keeps the push-constant range at 80 bytes, below Vulkan's guaranteed
+// keeps the push-constant range at 96 bytes, below Vulkan's guaranteed
 // 128-byte minimum.
 
 static const float3 kCubePositions[36] = {
@@ -84,6 +84,13 @@ struct DrawData
     float4 fresnel;   // rgb + strength (shield rim, atmosphere gradient)
     float4 material;  // x: facet, y: shadow strength, z: attenuation, w: detail
     float4 highlight; // rgb: fourth ramp stop, a: banded threshold (0 = unused)
+    uint64_t textureAddress; // BDA to RGBA8 texels (capability 32)
+    uint     textureWidth;
+    uint     textureHeight;
+    uint     pad0;
+    uint     pad1;
+    uint     pad2;
+    uint     pad3;
 };
 
 struct PushConstants
@@ -106,6 +113,7 @@ struct VSOutput
     float4 position : SV_Position;
     float3 normalView : NORMAL0;
     float3 positionView : POSITION0;
+    float2 uv : TEXCOORD0;
 };
 
 // Anti-aliased step: softens band/specular/rim edges to avoid pixel crawl.
@@ -119,33 +127,55 @@ float aastep(float threshold, float value)
 VSOutput vertexMain(uint vertexIndex : SV_VertexID)
 {
     VSOutput output;
+    DrawDataPtr drawPtr = { pc.drawDataAddress };
+    DrawData draw = drawPtr.Get();
+    const uint caps = uint(draw.params.w + 0.5);
     uint idx = min(vertexIndex, 35u);
     float3 objectPos = kCubePositions[idx];
     float3 objectNormal = kCubeNormals[idx];
     float3 outlineNormal = kCubeOutlineNormals[idx];
+    float2 texcoord = float2(0.0, 0.0);
 
-    // Optional caller-owned mesh (three float4 per vertex: position, normal,
-    // baked smooth outline normal). Zero address keeps the built-in cube.
+    // Optional caller-owned mesh. Zero address keeps the built-in cube.
     if (pc.vertexAddress != 0u && vertexIndex < pc.vertexCount)
     {
-        uint64_t base = pc.vertexAddress + uint64_t(vertexIndex) * 48u;
         typedef vk::BufferPointer<float4> Float4Ptr;
-        Float4Ptr pp = { base };
-        Float4Ptr np = { base + 16u };
-        Float4Ptr op = { base + 32u };
-        objectPos = pp.Get().xyz;
-        objectNormal = np.Get().xyz;
-        outlineNormal = op.Get().xyz;
+        uint64_t base = pc.vertexAddress;
+        if ((caps & 32u) != 0u)
+        {
+            // Textured layout: five float4 (pos, normal, outline, uv, tangent).
+            base += uint64_t(vertexIndex) * 80u;
+            Float4Ptr pp = { base };
+            Float4Ptr np = { base + 16u };
+            Float4Ptr op = { base + 32u };
+            Float4Ptr up = { base + 48u };
+            objectPos = pp.Get().xyz;
+            objectNormal = np.Get().xyz;
+            outlineNormal = op.Get().xyz;
+            texcoord = up.Get().xy;
+        }
+        else
+        {
+            // Plain layout: three float4 (pos, normal, outline).
+            base += uint64_t(vertexIndex) * 48u;
+            Float4Ptr pp = { base };
+            Float4Ptr np = { base + 16u };
+            Float4Ptr op = { base + 32u };
+            objectPos = pp.Get().xyz;
+            objectNormal = np.Get().xyz;
+            outlineNormal = op.Get().xyz;
+        }
     }
-
-    DrawDataPtr drawPtr = { pc.drawDataAddress };
-    DrawData draw = drawPtr.Get();
 
     if (pc.mode > 0)
     {
-        // Outline extrusion along smoothed outline normals. params.z is a
-        // CPU-computed object-space width derived from the desired
-        // screen-pixel thickness (exact for rigid/uniform transforms).
+        // Object-space extrusion along smoothed outline normals. draw.params.z
+        // is the CPU-computed object-space width derived from the desired
+        // screen-pixel thickness (exact for rigid/uniform transforms). This
+        // pushes the hull away from the camera in depth so the base pass's
+        // depth buffer rejects it except at the silhouette — a screen-space
+        // xy-only offset leaves depth unchanged, letting back faces pass the
+        // depth test on oblique faces and painting large dark regions.
         objectPos += outlineNormal * draw.params.z;
     }
 
@@ -155,6 +185,7 @@ VSOutput vertexMain(uint vertexIndex : SV_VertexID)
     output.position = mul(pc.mvp, float4(objectPos, 1.0));
     output.normalView = viewNormal;
     output.positionView = viewPos.xyz;
+    output.uv = texcoord;
     return output;
 }
 
@@ -215,6 +246,19 @@ float4 fragmentMain(VSOutput input) : SV_Target
 
     uint caps = uint(draw.params.w + 0.5);
     float facing = 1.0 - max(dot(normal, viewDir), 0.0);
+
+    // Base-colour texture (glTF baseColorTexture, RGBA8 in a BDA texel buffer).
+    if ((caps & 32u) != 0u && draw.textureAddress != 0u && draw.textureWidth > 0u)
+    {
+        uint tx = clamp(uint(input.uv.x * float(draw.textureWidth)), 0u, draw.textureWidth - 1u);
+        uint ty = clamp(uint(input.uv.y * float(draw.textureHeight)), 0u, draw.textureHeight - 1u);
+        typedef vk::BufferPointer<uint> PixelPtr; // one packed RGBA8 per texel
+        PixelPtr pixel = { draw.textureAddress + uint64_t(ty * draw.textureWidth + tx) * 4u };
+        uint packed = pixel.Get();
+        float4 sampled = float4(float(packed & 255u), float((packed >> 8u) & 255u),
+                                float((packed >> 16u) & 255u), float((packed >> 24u) & 255u)) / 255.0f;
+        color *= sampled.rgb;
+    }
 
     // Emissive tint: engine exhaust, glowing cores, weapon fire/impact.
     if ((caps & 1u) != 0u)

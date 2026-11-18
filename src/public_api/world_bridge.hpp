@@ -1,5 +1,7 @@
 #pragma once
 
+#include "bridge_types.hpp"
+
 #include <cstdint>
 #include <expected>
 #include <string>
@@ -10,30 +12,6 @@
 // starforge::math). This header must not be installed.
 namespace starforge::public_api_bridge
 {
-
-struct RawVec3d
-{
-    double x = 0.0;
-    double y = 0.0;
-    double z = 0.0;
-};
-
-struct RawVec3f
-{
-    float x = 0.0f;
-    float y = 0.0f;
-    float z = 0.0f;
-};
-
-struct RawMat3d
-{
-    double columns[3][3] = {};
-};
-
-struct RawMat4f
-{
-    float columns[4][4] = {};
-};
 
 struct RawWorldPosition
 {

@@ -105,6 +105,12 @@ float4 fragmentMain(VSOutput input) : SV_Target
     float dens = fbm3(dir * 7.0 + warp * 1.5 + t);
 
     float cloud = smoothstep(0.35, 0.85, dens) * pc.density;
+    // Cel-styled variant: quantize the cloud into flat bands instead of the
+    // smooth photoreal FBM ramp (aspectTan.z carries the style flag).
+    if (pc.aspectTan.w > 0.5)
+    {
+        cloud = floor(cloud * 5.0 + 0.5) / 5.0;
+    }
     // Self-absorption attenuates deep layers.
     cloud *= exp(-cloud * pc.absorption);
     float3 col = pc.color.rgb * cloud * pc.scattering;

@@ -2,6 +2,7 @@
 
 add_library(starforge_environment STATIC
     internal/effect_pipeline.cpp
+    internal/texture_effect.cpp
     nebula_renderer.cpp
     dust_field.cpp
     particle_system.cpp
@@ -17,6 +18,7 @@ add_library(starforge_environment STATIC
     shield_effect.cpp
     asteroid_field.cpp
     toon_renderer.cpp
+    hud_renderer.cpp
     sun_renderer.cpp
 )
 

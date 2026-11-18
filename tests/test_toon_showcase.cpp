@@ -222,14 +222,16 @@ Scene makeScene()
     auto nebula = NebulaRenderer::create({
         .device = s.device->device(), .physicalDevice = s.context->physicalDevice(),
         .queueFamily = s.device->graphicsQueueFamily(),
-        .colorFormat = VK_FORMAT_R8G8B8A8_UNORM, .depthFormat = VK_FORMAT_UNDEFINED,
+        .colorFormat = VK_FORMAT_R8G8B8A8_UNORM,
+        .depthFormat = findDepthFormat(s.context->physicalDevice()),
         .shaderDirectory = dir});
     REQUIRE(nebula.has_value());
     s.nebula = std::move(*nebula);
     auto stars = StarfieldRenderer::create({
         .device = s.device->device(), .physicalDevice = s.context->physicalDevice(),
         .queueFamily = s.device->graphicsQueueFamily(),
-        .colorFormat = VK_FORMAT_R8G8B8A8_UNORM, .depthFormat = VK_FORMAT_UNDEFINED,
+        .colorFormat = VK_FORMAT_R8G8B8A8_UNORM,
+        .depthFormat = findDepthFormat(s.context->physicalDevice()),
         .shaderDirectory = dir});
     REQUIRE(stars.has_value());
     s.stars = std::move(*stars);
@@ -342,6 +344,7 @@ void recordScene(Scene& s)
     nebulaParams.baseColor = {0.18f, 0.05f, 0.35f, 1.0f};
     nebulaParams.density = 0.7f;
     nebulaParams.scattering = 0.5f;
+    nebulaParams.celShaded = true; // toon-styled sky proof (M9.5 deferred item)
     s.nebula->render(s.cmd, nebulaCtx, nebulaParams);
 
     StarfieldRenderContext starCtx{};

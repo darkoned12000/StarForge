@@ -1,5 +1,7 @@
 #pragma once
 
+#include "bridge_types.hpp"
+
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
@@ -14,32 +16,6 @@
 // installed.
 namespace starforge::public_api_bridge
 {
-
-struct RawVec3f
-{
-    float x = 0.0f;
-    float y = 0.0f;
-    float z = 0.0f;
-};
-
-struct RawVec2f
-{
-    float x = 0.0f;
-    float y = 0.0f;
-};
-
-struct RawVec4f
-{
-    float x = 0.0f;
-    float y = 0.0f;
-    float z = 0.0f;
-    float w = 0.0f;
-};
-
-struct RawMat4f
-{
-    float columns[4][4] = {};
-};
 
 struct RawToonContext
 {
@@ -69,6 +45,15 @@ struct RawToonVertex
     float position[3] = {};
     float normal[3] = {};
     float outlineNormal[3] = {};
+};
+
+struct RawToonTexturedVertex
+{
+    float position[3] = {};
+    float normal[3] = {};
+    float outlineNormal[3] = {};
+    float uv[2] = {};
+    float tangent[4] = {1.0f, 0.0f, 0.0f, 1.0f};
 };
 
 // Opaque GPU mesh owned by RawToon. Must be destroyed before the renderer.
@@ -119,6 +104,10 @@ public:
 
     [[nodiscard]] std::expected<std::unique_ptr<RawToonMesh>, std::string>
     createMesh(const RawToonVertex* vertices, std::uint32_t vertexCount);
+
+    [[nodiscard]] std::expected<std::unique_ptr<RawToonMesh>, std::string>
+    createTexturedMesh(const RawToonTexturedVertex* vertices, std::uint32_t vertexCount,
+                       const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height);
 
     void renderMesh(VkCommandBuffer cmd, const RawToonContext& context,
                     const RawToonParams& params, const RawToonMesh& mesh);

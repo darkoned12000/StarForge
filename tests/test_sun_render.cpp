@@ -27,6 +27,33 @@ using namespace starforge::math;
 using namespace starforge::spatial;
 using namespace starforge::vulkan;
 
+TEST_CASE("Sun M15.0.7: demo sun fits inside the far plane (T1)")
+{
+    // Guards against the M15.0.7 demo bug: position/radius/corona literals
+    // had drifted so the sun sat at 469 km with a 300 km corona behind a
+    // 150 km far plane, leaving only a clipped shell visible. Keep these
+    // numbers in sync with apps/game/main.cpp (kSunWorld/kSunRadius/
+    // kSunCoronaMultiplier and the camera far plane).
+    constexpr double kSpawnX = 1047000.0;
+    constexpr double kSunX = kSpawnX - 21000.0;
+    constexpr double kSunY = 12000.0;
+    constexpr double kSunZ = -18000.0;
+    constexpr double kCoreRadius = 4000.0;
+    constexpr double kCoronaMultiplier = 3.0;
+    constexpr double kFarPlane = 150000.0;
+
+    const double distance = std::sqrt((kSunX - kSpawnX) * (kSunX - kSpawnX) +
+                                      kSunY * kSunY + kSunZ * kSunZ);
+    const double coronaRadius = kCoreRadius * kCoronaMultiplier;
+
+    CHECK(distance > coronaRadius);                  // camera outside the shell
+    CHECK(distance + coronaRadius < kFarPlane);       // whole body inside far plane
+    CHECK(distance - coronaRadius > 1000.0);          // clear of the near plane
+
+    // Reachable at demo speed (60 m/s) in a single session (< 15 minutes).
+    CHECK(distance / 60.0 < 15.0 * 60.0);
+}
+
 TEST_CASE("Sun M15.0.7: Eddington limb darkening mathematical proof (T1)")
 {
     // Eddington linear limb darkening law: I(μ) = 1.0 - u * (1.0 - μ)
