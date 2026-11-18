@@ -289,6 +289,8 @@ bool GpuTimer::collectResults(std::uint32_t frameIndex)
 
     if (availResult != VK_SUCCESS)
     {
+        core::logWarning(kTag, "Query result read for frame {} failed: {} (queries={})",
+                         frameIndex, resultName(availResult), queryCount);
         return false;
     }
 

@@ -1,6 +1,7 @@
 #include "vulkan/vulkan_renderer.hpp"
 
 #include "core/log.hpp"
+#include "vulkan/queue_sync.hpp"
 #include "vulkan/vulkan_result.hpp"
 #include "vulkan/vulkan_swapchain.hpp"
 
@@ -632,7 +633,7 @@ FrameRenderer::renderFrameImpl(const VulkanSwapchain& swapchain, VkQueue queue, 
     submitInfo.signalSemaphoreInfoCount = 1;
     submitInfo.pSignalSemaphoreInfos = &signalSemInfo;
 
-    if (const VkResult result = vkQueueSubmit2(queue, 1, &submitInfo, fence); result != VK_SUCCESS)
+    if (const VkResult result = submit2(queue, 1, &submitInfo, fence); result != VK_SUCCESS)
     {
         return std::unexpected(starforge::vulkan::describeFailure("vkQueueSubmit2", result));
     }

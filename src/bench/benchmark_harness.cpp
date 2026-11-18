@@ -3,6 +3,7 @@
 #include "bench/cpu_timer.hpp"
 #include "core/log.hpp"
 #include "gpu_resources/allocator.hpp"
+#include "vulkan/queue_sync.hpp"
 #include "vulkan/vulkan_timestamps.hpp"
 
 #include <algorithm>
@@ -334,7 +335,7 @@ BenchmarkHarness::run(const HarnessConfig& config,
         submitInfo.commandBufferInfoCount = 1;
         submitInfo.pCommandBufferInfos = &cmdSubmit;
 
-        vkQueueSubmit2(device.graphicsQueue(), 1, &submitInfo, fences[frameIndex]);
+        (void)starforge::vulkan::submit2(device.graphicsQueue(), 1, &submitInfo, fences[frameIndex]);
     }
 
     // Wait for all warm-up frames to complete.
@@ -416,7 +417,7 @@ BenchmarkHarness::run(const HarnessConfig& config,
         submitInfo.commandBufferInfoCount = 1;
         submitInfo.pCommandBufferInfos = &cmdSubmit;
 
-        vkQueueSubmit2(device.graphicsQueue(), 1, &submitInfo, fences[frameIndex]);
+        (void)starforge::vulkan::submit2(device.graphicsQueue(), 1, &submitInfo, fences[frameIndex]);
 
         cpuTimer.endSubmission();
         cpuTimer.endFrame();

@@ -294,7 +294,7 @@ TEST_CASE("Compute dispatch: boundary validation")
     CHECK(context->validationErrorCount() == 0);
 }
 
-TEST_CASE("Compute dispatch: multidimensional dispatch API")
+TEST_CASE("Compute dispatch: 2D and 3D dimensions write the expected lanes (2.3)")
 {
     ContextCreateInfo info;
     info.enableValidation = kValidationDefault;
@@ -315,48 +315,60 @@ TEST_CASE("Compute dispatch: multidimensional dispatch API")
         REQUIRE(allocator.has_value());
 
         {
-            // Verify API accepts 2D and 3D dispatch dimensions.
-            const std::string shaderPath = std::string(STARFORGE_SHADER_DIR) + "/test_compute.spv";
-            std::ifstream file(shaderPath, std::ios::ate | std::ios::binary);
-            if (!file)
-            {
-                return;
-            }
-            const auto size = static_cast<std::size_t>(file.tellg());
-            std::vector<std::uint8_t> bytes(size);
-            file.seekg(0);
-            file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size));
-
-            auto pipeline = ComputePipeline::create(*device, {
-                .spirv = bytes,
-                .entryPoint = "main",
-                .storageBufferCount = 2,
-            });
+            auto pipeline = ComputePipeline::createFromFile(
+                *device, std::string(STARFORGE_SHADER_DIR) + "/dispatch_3d.spv", "main", 1);
             REQUIRE(pipeline.has_value());
 
-            constexpr std::uint32_t count = 256;
-            constexpr VkDeviceSize bufSize = count * sizeof(std::uint32_t);
-            auto bufA = Buffer::create(*allocator, { .size = bufSize, .usage = BufferUsage::Storage, .memory = MemoryPlacement::CpuToGpu });
-            REQUIRE(bufA.has_value());
-            auto bufB = Buffer::create(*allocator, { .size = bufSize, .usage = BufferUsage::Storage, .memory = MemoryPlacement::GpuPreferred });
-            REQUIRE(bufB.has_value());
+            constexpr std::uint32_t kCount = 512;
+            constexpr VkDeviceSize kSize = kCount * sizeof(std::uint32_t);
+            auto scratch = Buffer::create(*allocator, {
+                .size = kSize, .usage = BufferUsage::TransferSrc, .memory = MemoryPlacement::CpuToGpu});
+            REQUIRE(scratch.has_value());
+            auto output = Buffer::create(*allocator, {
+                .size = kSize, .usage = BufferUsage::Storage, .memory = MemoryPlacement::GpuPreferred});
+            REQUIRE(output.has_value());
+            auto readback = Buffer::create(*allocator, {
+                .size = kSize, .usage = BufferUsage::TransferDst, .memory = MemoryPlacement::GpuToCpu});
+            REQUIRE(readback.has_value());
+            auto uploader = Uploader::create(*device);
+            REQUIRE(uploader.has_value());
 
-            {
-                auto mapped = bufA->map();
+            auto poison = [&] {
+                auto mapped = scratch->map();
                 REQUIRE(mapped.has_value());
-                for (std::uint32_t i = 0; i < count; ++i)
-                    static_cast<std::uint32_t*>(*mapped)[i] = i;
-                (void)bufA->flush(0, bufSize);
-                bufA->unmap();
-            }
+                for (std::uint32_t i = 0; i < kCount; ++i)
+                    static_cast<std::uint32_t*>(*mapped)[i] = kPoisonValue;
+                (void)scratch->flush(0, kSize);
+                scratch->unmap();
+                REQUIRE(uploader->copyBuffer(*scratch, *output, kSize).has_value());
+            };
+            auto verify = [&](std::uint32_t writtenLanes) {
+                REQUIRE(uploader->copyBuffer(*output, *readback, kSize).has_value());
+                auto mapped = readback->map();
+                REQUIRE(mapped.has_value());
+                (void)readback->invalidate(0, kSize);
+                const auto* values = static_cast<const std::uint32_t*>(*mapped);
+                for (std::uint32_t i = 0; i < kCount; ++i)
+                {
+                    if (i < writtenLanes)
+                        CHECK(values[i] == i + 1000u);
+                    else
+                        CHECK(values[i] == kPoisonValue);
+                }
+                readback->unmap();
+            };
 
-            {
-                const Buffer* bindings[] = {&(*bufA), &(*bufB)};
-                // API accepts 2D and 3D dimensions (dispatch covers first dimension)
-                REQUIRE(pipeline->dispatchAndWait(bindings, count / kWorkgroupSize, 1, 1).has_value());
-                REQUIRE(pipeline->dispatchAndWait(bindings, count / kWorkgroupSize, 2, 1).has_value());
-                REQUIRE(pipeline->dispatchAndWait(bindings, count / kWorkgroupSize, 2, 3).has_value());
-            }
+            const Buffer* bindings[] = {&(*output)};
+
+            // 2D: 2x2 groups of 4x4 threads -> x 0..7, y 0..7, 64 lanes.
+            poison();
+            REQUIRE(pipeline->dispatchAndWait(bindings, 2, 2, 1).has_value());
+            verify(64);
+
+            // 3D: 2x2x2 groups -> x 0..7, y 0..7, z 0..1, 128 lanes.
+            poison();
+            REQUIRE(pipeline->dispatchAndWait(bindings, 2, 2, 2).has_value());
+            verify(128);
         }
 
         CHECK(allocator->allocationCount() == 0);

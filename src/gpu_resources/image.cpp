@@ -249,6 +249,55 @@ void Image::transitionLayout(VkCommandBuffer cmd, VkImage image,
     vkCmdPipelineBarrier2(cmd, &dep);
 }
 
+void Image::transition(VkCommandBuffer cmd, VkImageLayout newLayout,
+                       VkPipelineStageFlags2 dstStage, VkAccessFlags2 dstAccess)
+{
+    if (layout_ == newLayout) return; // already in the requested layout
+
+    // The oldLayout is the *tracked* one, not a hardcoded assumption. A broad
+    // source mask is conservative and valid for every prior use.
+    transitionLayout(cmd, image_, layout_, newLayout, aspectMask_,
+                     VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT,
+                     dstStage, dstAccess);
+    layout_ = newLayout;
+}
+
+void Image::transitionToColorAttachment(VkCommandBuffer cmd)
+{
+    transition(cmd, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+               VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+}
+
+void Image::transitionToDepthAttachment(VkCommandBuffer cmd)
+{
+    const VkImageLayout layout = (format_ == VK_FORMAT_D32_SFLOAT_S8_UINT ||
+                                  format_ == VK_FORMAT_D24_UNORM_S8_UINT ||
+                                  format_ == VK_FORMAT_D16_UNORM_S8_UINT)
+                                     ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                                     : VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    transition(cmd, layout,
+               VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+               VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+}
+
+void Image::transitionToTransferSrc(VkCommandBuffer cmd)
+{
+    transition(cmd, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+               VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+}
+
+void Image::transitionToTransferDst(VkCommandBuffer cmd)
+{
+    transition(cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+               VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
+}
+
+void Image::transitionToShaderReadOnly(VkCommandBuffer cmd)
+{
+    transition(cmd, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+               VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
+}
+
 void Image::transitionToColorAttachment(VkCommandBuffer cmd, VkImage image)
 {
     transitionLayout(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,

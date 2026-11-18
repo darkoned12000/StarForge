@@ -21,6 +21,7 @@ target_link_libraries(starforge_bench
     PUBLIC
         Vulkan::Headers # benchmark_workload.hpp uses Vulkan value types only
         starforge_core
+        starforge_vulkan_queue
         starforge_content
         starforge_jobs
         starforge_planets

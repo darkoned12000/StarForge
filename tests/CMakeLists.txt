@@ -141,8 +141,10 @@ add_executable(starforge_gpu_tests
     test_headless_device.cpp
     test_gpu_resources_upload.cpp
     test_compute_dispatch.cpp
+    test_resource_pooling.cpp
     test_clear_render.cpp
     test_image_readback.cpp
+    test_image_layout_tracking.cpp
     test_depth_format.cpp
     test_offscreen_render.cpp
     test_mesh_render.cpp

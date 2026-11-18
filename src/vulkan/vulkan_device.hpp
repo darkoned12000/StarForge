@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <expected>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -45,6 +46,13 @@ public:
     [[nodiscard]] VkQueue graphicsQueue() const noexcept { return graphicsQueue_; }
     [[nodiscard]] std::uint32_t graphicsQueueFamily() const noexcept { return graphicsQueueFamily_; }
 
+    // Synchronized submission: Vulkan requires host synchronization for
+    // vkQueueSubmit2. Background loaders and the render thread can share the
+    // same queue safely by routing submissions through this method (M5 2.2).
+    [[nodiscard]] VkResult submit(std::uint32_t submitCount,
+                                  const VkSubmitInfo2* submits,
+                                  VkFence fence) const;
+
 private:
     VulkanDevice() = default;
     void destroy() noexcept;
@@ -52,6 +60,7 @@ private:
     VkDevice device_ = VK_NULL_HANDLE;
     VkQueue  graphicsQueue_ = VK_NULL_HANDLE;
     std::uint32_t graphicsQueueFamily_ = 0;
+    mutable std::mutex submitMutex_;
 };
 
 } // namespace starforge::vulkan

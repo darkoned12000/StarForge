@@ -13,6 +13,21 @@ target_link_libraries(starforge_vulkan_core
 
 starforge_set_warnings(starforge_vulkan_core)
 
+# Queue submission mutex lives in its own small target so CPU-only consumers
+# can link benchmarks without inheriting the Vulkan loader (M5 Phase 1 gate).
+add_library(starforge_vulkan_queue STATIC
+    queue_sync.cpp
+)
+
+target_include_directories(starforge_vulkan_queue PUBLIC ${PROJECT_SOURCE_DIR}/src)
+
+target_link_libraries(starforge_vulkan_queue
+    PUBLIC
+        Vulkan::Headers
+)
+
+starforge_set_warnings(starforge_vulkan_queue)
+
 add_library(starforge_vulkan STATIC
     vulkan_context.cpp
     vulkan_device.cpp
@@ -32,6 +47,7 @@ target_link_libraries(starforge_vulkan
     PUBLIC
         starforge_core
         starforge_jobs
+        starforge_vulkan_queue
         starforge_vulkan_core
         Vulkan::Vulkan
 )

@@ -432,6 +432,12 @@ camera/orientation/scale oracle assertions. Render conventions are gated by
 Eliminate execution stalls, resource leaks, and synchronization flaws in
 `starforge_gpu`.
 
+**Status: complete (2026-11-18).** `Image` transitions now use tracked layouts
+and own RAII views; `Uploader`/`ComputePipeline` recycle one command buffer and
+fence per object; queue submissions are mutex-synchronized via `submit2`; and
+the GPU test suite covers BDA dereference, 2D/3D dispatch lanes and real
+timestamp scaling/nesting. Matrix row updated below.
+
 **Step 2.1: Vulkan RAII & Image Abstraction**
 - Convert `ImageUsage` from an enum to a type-safe bitmask flag set
   (`ImageUsageFlags`), supporting combined usages (e.g., ColorAttachment | Sampled).
@@ -551,7 +557,7 @@ against M4 baselines.
 | Phase | Primary Deliverables | Verification Target | Blocked By |
 |-------|---------------------|---------------------|------------|
 | Phase 1 ✅ | CMake decoupling, unit frustum normals, randomized CPU oracle, viewport Y-flip | `starforge_tests` runs without Vulkan runtime; passes oracle tests | None | Done: swapchain-selection and workload-scene helpers moved into loader-free libraries; `starforge_tests` no longer links Vulkan/SDL (ELF `NEEDED` gate + 321 CPU cases pass); all frustum tests use engine reverse-Z projection; exact unit-normal + randomized camera/orientation/scale oracle; negative-height viewports and CCW gate (`render_conventions`) |
-| Phase 2 | ImageView RAII, ImageUsageFlags, pool/fence recycling, 2D/3D compute & BDA tests | `starforge_gpu_tests` clean under validation; zero allocation thrashing | Phase 1 |
+| Phase 2 ✅ | ImageView RAII, ImageUsageFlags, pool/fence recycling, 2D/3D compute & BDA tests | `starforge_gpu_tests` clean under validation; zero allocation thrashing | Phase 1 | Done: tracked `Image` layouts + RAII `ImageView`, cached resettable cmd buffers/fences in `Uploader`/`ComputePipeline` (`operationCount()` tests), synchronized `VulkanDevice::submit`/`submit2`; new BDA-deref, 2D/3D-lane, real N-vs-2N/frame-1/nested timestamp tests. 48 GPU cases green under validation |
 | Phase 3 | Slang culling shader, SoA bounding buffers, double-buffered indirect commands | Valid indirect execution on simple cube mesh | Phase 2 |
 | Phase 4 | GPU vs CPU culling parity suite, feature fallback implementations | T2 Proof: bitwise matching visible sets; green tests with features disabled | Phase 3 |
 | Phase 5 | 10k/100k/1M benchmark profiles, baseline comparison, validated runs | T4 Proof: 1M instances beat M4; CPU submission time flat | Phase 4 |
@@ -570,23 +576,26 @@ against M4 baselines.
 - Hardcoded relative file paths in baseline test — use CMAKE_CURRENT_BINARY_DIR
 - Validation layers disabled in baseline test — add validated run
 - Baseline invariant verification — assert competent draws fewer than naive
-- N vs 2N scaling test unimplemented — needs actual compute dispatch
-- Multi-frame query pool cycling untested — frame index 1 never exercised
-- Nested/concurrent scopes untested — parent/child timestamp scopes
-- No GPU-side BDA readback/dereference — test needs compute shader dispatch
-- Missing BDA alignment checks — assert addr % alignof(uint32_t) == 0
-- Single-dimensional dispatch only — need 2D/3D dispatch tests
-- Consecutive dispatches untested — command pool stability
-- Error/validation boundary paths omitted — test std::unexpected returns
+- N vs 2N scaling test — done: real compute kernel with push-controlled
+  iterations, frame-slot recycling and nested scopes
+- Multi-frame query pool cycling — done: both frame slots produce valid timings
+- Nested scopes — done: parent/child scopes measured and compared
+- GPU-side BDA readback/dereference — done: bda_deref.slang compute test
+- BDA alignment checks — done: 4- and 8-byte alignment asserted
+- 2D/3D dispatch tests — done: dispatch_3d.slang verifies written lanes
+- Consecutive dispatches — done: core test covers repeated dispatches on one pipeline
+- Error/validation boundary paths — done: std::unexpected cases covered
 
 ### Deferred from Vulkan API review (must address during M5)
-- Synchronous execution stalls in Uploader::copyBuffer and ComputePipeline::dispatchAndWait — need command buffer pooling and fence caching
-- Resource allocation thrashing — per-operation fence/cmd buffer creation; tie to frame lifecycle
-- Image layout tracking — Image lacks internal state; transitionTo* helpers assume fixed previous layout
-- ImageUsage bit-flags — mutually exclusive enum; M5 needs combined usage (sampled + color attachment)
-- Unmanaged VkImageView lifetime — createView returns raw handle; needs RAII view type
+- Uploader/ComputePipeline cmd buffer + fence caching — done: one cached
+  resettable command buffer and fence per object (the one-shot wait remains)
+- Resource allocation thrashing — done: no per-operation fence/cmd allocation;
+  `operationCount()` regression tests
+- Image layout tracking — done: non-static transitions use the tracked oldLayout
+- ImageUsage bit-flags — done: ImageUsageFlags bitmask supports combined usage
+- VkImageView RAII — done: Image::ImageView owner + createImageView() used in tests
 - Descriptor set inefficiencies — vkUpdateDescriptorSets every dispatch; move to setup phase
-- Queue thread-safety — single graphics queue; needs external synchronization for background loaders
+- Queue thread-safety — done: VulkanDevice::submit + global submit2 mutex
 - Winding order via projection Y-flip — done: no projection Y-flip, negative-height
   viewports, CCW front face locked by the `render_conventions` CTest
 - Fragile headless GPU skip (return code 77) — done in gpu_main.cpp
@@ -602,23 +611,26 @@ against M4 baselines.
 - Hardcoded relative file paths in baseline test — use CMAKE_CURRENT_BINARY_DIR
 - Validation layers disabled in baseline test — add validated run
 - Baseline invariant verification — assert competent draws fewer than naive
-- N vs 2N scaling test unimplemented — needs actual compute dispatch
-- Multi-frame query pool cycling untested — frame index 1 never exercised
-- Nested/concurrent scopes untested — parent/child timestamp scopes
-- No GPU-side BDA readback/dereference — test needs compute shader dispatch
-- Missing BDA alignment checks — assert addr % alignof(uint32_t) == 0
-- Single-dimensional dispatch only — need 2D/3D dispatch tests
-- Consecutive dispatches untested — command pool stability
-- Error/validation boundary paths omitted — test std::unexpected returns
+- N vs 2N scaling test — done: real compute kernel with push-controlled
+  iterations, frame-slot recycling and nested scopes
+- Multi-frame query pool cycling — done: both frame slots produce valid timings
+- Nested scopes — done: parent/child scopes measured and compared
+- GPU-side BDA readback/dereference — done: bda_deref.slang compute test
+- BDA alignment checks — done: 4- and 8-byte alignment asserted
+- 2D/3D dispatch tests — done: dispatch_3d.slang verifies written lanes
+- Consecutive dispatches — done: core test covers repeated dispatches on one pipeline
+- Error/validation boundary paths — done: std::unexpected cases covered
 
 ### Deferred from Vulkan API review (must address during M5)
-- Synchronous execution stalls in Uploader::copyBuffer and ComputePipeline::dispatchAndWait — need command buffer pooling and fence caching
-- Resource allocation thrashing — per-operation fence/cmd buffer creation; tie to frame lifecycle
-- Image layout tracking — Image lacks internal state; transitionTo* helpers assume fixed previous layout
-- ImageUsage bit-flags — mutually exclusive enum; M5 needs combined usage (sampled + color attachment)
-- Unmanaged VkImageView lifetime — createView returns raw handle; needs RAII view type
+- Uploader/ComputePipeline cmd buffer + fence caching — done: one cached
+  resettable command buffer and fence per object (the one-shot wait remains)
+- Resource allocation thrashing — done: no per-operation fence/cmd allocation;
+  `operationCount()` regression tests
+- Image layout tracking — done: non-static transitions use the tracked oldLayout
+- ImageUsage bit-flags — done: ImageUsageFlags bitmask supports combined usage
+- VkImageView RAII — done: Image::ImageView owner + createImageView() used in tests
 - Descriptor set inefficiencies — vkUpdateDescriptorSets every dispatch; move to setup phase
-- Queue thread-safety — single graphics queue; needs external synchronization for background loaders
+- Queue thread-safety — done: VulkanDevice::submit + global submit2 mutex
 - Winding order via projection Y-flip — done: no projection Y-flip, negative-height
   viewports, CCW front face locked by the `render_conventions` CTest
 

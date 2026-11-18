@@ -10,11 +10,11 @@ namespace starforge::gpu_resources
 std::expected<Uploader, std::string> Uploader::create(const starforge::vulkan::VulkanDevice& device)
 {
     Uploader uploader;
+    uploader.owner_ = &device;
     uploader.device_ = device.device();
     uploader.queueFamily_ = device.graphicsQueueFamily();
-    uploader.queue_ = device.graphicsQueue();
 
-    if (uploader.device_ == VK_NULL_HANDLE || uploader.queue_ == VK_NULL_HANDLE)
+    if (uploader.device_ == VK_NULL_HANDLE || device.graphicsQueue() == VK_NULL_HANDLE)
     {
         return std::unexpected("Invalid device/queue for uploader");
     }
@@ -30,6 +30,27 @@ std::expected<Uploader, std::string> Uploader::create(const starforge::vulkan::V
         return std::unexpected(starforge::vulkan::describeFailure("vkCreateCommandPool", result));
     }
 
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandPool = uploader.commandPool_;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandBufferCount = 1;
+    if (const VkResult result = vkAllocateCommandBuffers(uploader.device_, &allocInfo, &uploader.commandBuffer_);
+        result != VK_SUCCESS)
+    {
+        uploader.destroy();
+        return std::unexpected(starforge::vulkan::describeFailure("vkAllocateCommandBuffers", result));
+    }
+
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    if (const VkResult result = vkCreateFence(uploader.device_, &fenceInfo, nullptr, &uploader.fence_);
+        result != VK_SUCCESS)
+    {
+        uploader.destroy();
+        return std::unexpected(starforge::vulkan::describeFailure("vkCreateFence", result));
+    }
+
     return uploader;
 }
 
@@ -39,10 +60,13 @@ Uploader::~Uploader()
 }
 
 Uploader::Uploader(Uploader&& other) noexcept
-    : device_(std::exchange(other.device_, VK_NULL_HANDLE)),
+    : owner_(std::exchange(other.owner_, nullptr)),
+      device_(std::exchange(other.device_, VK_NULL_HANDLE)),
       commandPool_(std::exchange(other.commandPool_, VK_NULL_HANDLE)),
+      commandBuffer_(std::exchange(other.commandBuffer_, VK_NULL_HANDLE)),
+      fence_(std::exchange(other.fence_, VK_NULL_HANDLE)),
       queueFamily_(other.queueFamily_),
-      queue_(std::exchange(other.queue_, VK_NULL_HANDLE))
+      operationCount_(std::exchange(other.operationCount_, 0))
 {
 }
 
@@ -51,29 +75,40 @@ Uploader& Uploader::operator=(Uploader&& other) noexcept
     if (this != &other)
     {
         destroy();
+        owner_ = std::exchange(other.owner_, nullptr);
         device_ = std::exchange(other.device_, VK_NULL_HANDLE);
         commandPool_ = std::exchange(other.commandPool_, VK_NULL_HANDLE);
+        commandBuffer_ = std::exchange(other.commandBuffer_, VK_NULL_HANDLE);
+        fence_ = std::exchange(other.fence_, VK_NULL_HANDLE);
         queueFamily_ = other.queueFamily_;
-        queue_ = std::exchange(other.queue_, VK_NULL_HANDLE);
+        operationCount_ = std::exchange(other.operationCount_, 0);
     }
     return *this;
 }
 
 void Uploader::destroy() noexcept
 {
-    if (device_ != VK_NULL_HANDLE && commandPool_ != VK_NULL_HANDLE)
+    if (device_ != VK_NULL_HANDLE)
     {
-        vkDestroyCommandPool(device_, commandPool_, nullptr);
+        if (fence_ != VK_NULL_HANDLE) vkDestroyFence(device_, fence_, nullptr);
+        // Destroying the pool implicitly frees its command buffers.
+        if (commandPool_ != VK_NULL_HANDLE) vkDestroyCommandPool(device_, commandPool_, nullptr);
     }
+    owner_ = nullptr;
     device_ = VK_NULL_HANDLE;
     commandPool_ = VK_NULL_HANDLE;
+    commandBuffer_ = VK_NULL_HANDLE;
+    fence_ = VK_NULL_HANDLE;
     queueFamily_ = 0;
-    queue_ = VK_NULL_HANDLE;
+    operationCount_ = 0;
 }
 
 std::expected<void, std::string> Uploader::copyBuffer(const Buffer& src, Buffer& dst, VkDeviceSize size, VkDeviceSize srcOffset, VkDeviceSize dstOffset)
 {
-    if (device_ == VK_NULL_HANDLE || commandPool_ == VK_NULL_HANDLE || queue_ == VK_NULL_HANDLE)
+    std::lock_guard lock(mutex_);
+
+    if (owner_ == nullptr || device_ == VK_NULL_HANDLE || commandPool_ == VK_NULL_HANDLE ||
+        commandBuffer_ == VK_NULL_HANDLE || fence_ == VK_NULL_HANDLE)
     {
         return std::unexpected("Uploader not initialized");
     }
@@ -87,25 +122,20 @@ std::expected<void, std::string> Uploader::copyBuffer(const Buffer& src, Buffer&
         return std::unexpected("copyBuffer range exceeds buffer bounds");
     }
 
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.commandPool = commandPool_;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = 1;
-
-    VkCommandBuffer cmd = VK_NULL_HANDLE;
-    if (const VkResult result = vkAllocateCommandBuffers(device_, &allocInfo, &cmd);
-        result != VK_SUCCESS)
+    if (const VkResult result = vkResetFences(device_, 1, &fence_); result != VK_SUCCESS)
     {
-        return std::unexpected(starforge::vulkan::describeFailure("vkAllocateCommandBuffers", result));
+        return std::unexpected(starforge::vulkan::describeFailure("vkResetFences", result));
+    }
+    if (const VkResult result = vkResetCommandBuffer(commandBuffer_, 0); result != VK_SUCCESS)
+    {
+        return std::unexpected(starforge::vulkan::describeFailure("vkResetCommandBuffer", result));
     }
 
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    if (const VkResult result = vkBeginCommandBuffer(cmd, &beginInfo); result != VK_SUCCESS)
+    if (const VkResult result = vkBeginCommandBuffer(commandBuffer_, &beginInfo); result != VK_SUCCESS)
     {
-        vkFreeCommandBuffers(device_, commandPool_, 1, &cmd);
         return std::unexpected(starforge::vulkan::describeFailure("vkBeginCommandBuffer", result));
     }
 
@@ -125,13 +155,13 @@ std::expected<void, std::string> Uploader::copyBuffer(const Buffer& src, Buffer&
     preDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
     preDep.bufferMemoryBarrierCount = 1;
     preDep.pBufferMemoryBarriers = &preBarrier;
-    vkCmdPipelineBarrier2(cmd, &preDep);
+    vkCmdPipelineBarrier2(commandBuffer_, &preDep);
 
     VkBufferCopy copyRegion{};
     copyRegion.srcOffset = srcOffset;
     copyRegion.dstOffset = dstOffset;
     copyRegion.size = size;
-    vkCmdCopyBuffer(cmd, src.handle(), dst.handle(), 1, &copyRegion);
+    vkCmdCopyBuffer(commandBuffer_, src.handle(), dst.handle(), 1, &copyRegion);
 
     VkBufferMemoryBarrier2 postBarrier{};
     postBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
@@ -149,48 +179,32 @@ std::expected<void, std::string> Uploader::copyBuffer(const Buffer& src, Buffer&
     postDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
     postDep.bufferMemoryBarrierCount = 1;
     postDep.pBufferMemoryBarriers = &postBarrier;
-    vkCmdPipelineBarrier2(cmd, &postDep);
+    vkCmdPipelineBarrier2(commandBuffer_, &postDep);
 
-    if (const VkResult result = vkEndCommandBuffer(cmd); result != VK_SUCCESS)
+    if (const VkResult result = vkEndCommandBuffer(commandBuffer_); result != VK_SUCCESS)
     {
-        vkFreeCommandBuffers(device_, commandPool_, 1, &cmd);
         return std::unexpected(starforge::vulkan::describeFailure("vkEndCommandBuffer", result));
-    }
-
-    VkFenceCreateInfo fenceInfo{};
-    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    VkFence fence = VK_NULL_HANDLE;
-    if (const VkResult result = vkCreateFence(device_, &fenceInfo, nullptr, &fence); result != VK_SUCCESS)
-    {
-        vkFreeCommandBuffers(device_, commandPool_, 1, &cmd);
-        return std::unexpected(starforge::vulkan::describeFailure("vkCreateFence", result));
     }
 
     VkCommandBufferSubmitInfo cmdSubmit{};
     cmdSubmit.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
-    cmdSubmit.commandBuffer = cmd;
+    cmdSubmit.commandBuffer = commandBuffer_;
 
     VkSubmitInfo2 submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
     submitInfo.commandBufferInfoCount = 1;
     submitInfo.pCommandBufferInfos = &cmdSubmit;
 
-    if (const VkResult result = vkQueueSubmit2(queue_, 1, &submitInfo, fence); result != VK_SUCCESS)
+    if (const VkResult result = owner_->submit(1, &submitInfo, fence_); result != VK_SUCCESS)
     {
-        vkDestroyFence(device_, fence, nullptr);
-        vkFreeCommandBuffers(device_, commandPool_, 1, &cmd);
         return std::unexpected(starforge::vulkan::describeFailure("vkQueueSubmit2", result));
     }
-
-    if (const VkResult result = vkWaitForFences(device_, 1, &fence, VK_TRUE, UINT64_MAX); result != VK_SUCCESS)
+    if (const VkResult result = vkWaitForFences(device_, 1, &fence_, VK_TRUE, UINT64_MAX); result != VK_SUCCESS)
     {
-        vkDestroyFence(device_, fence, nullptr);
-        vkFreeCommandBuffers(device_, commandPool_, 1, &cmd);
         return std::unexpected(starforge::vulkan::describeFailure("vkWaitForFences", result));
     }
 
-    vkDestroyFence(device_, fence, nullptr);
-    vkFreeCommandBuffers(device_, commandPool_, 1, &cmd);
+    ++operationCount_;
     return {};
 }
 

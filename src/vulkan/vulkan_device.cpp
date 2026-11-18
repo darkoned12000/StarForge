@@ -1,5 +1,7 @@
 #include "vulkan/vulkan_device.hpp"
 
+#include "vulkan/queue_sync.hpp"
+
 #include "core/log.hpp"
 #include "vulkan/vulkan_context.hpp"
 #include "vulkan/vulkan_result.hpp"
@@ -241,6 +243,14 @@ std::expected<VulkanDevice, std::string> VulkanDevice::create(const VulkanContex
 VulkanDevice::~VulkanDevice()
 {
     destroy();
+}
+
+VkResult VulkanDevice::submit(std::uint32_t submitCount,
+                              const VkSubmitInfo2* submits,
+                              VkFence fence) const
+{
+    std::lock_guard lock(submitMutex_);
+    return submit2(graphicsQueue_, submitCount, submits, fence);
 }
 
 VulkanDevice::VulkanDevice(VulkanDevice&& other) noexcept

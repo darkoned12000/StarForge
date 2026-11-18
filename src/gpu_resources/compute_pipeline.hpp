@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <expected>
+#include <mutex>
 #include <span>
 #include <string>
 
@@ -60,6 +61,9 @@ public:
 
     // Record a dispatch into an existing command buffer (no submit, no wait).
     // Caller is responsible for barriers before/after.
+    // Number of completed one-shot dispatches (for allocation-thrashing tests).
+    [[nodiscard]] std::uint64_t operationCount() const noexcept { return operationCount_; }
+
     [[nodiscard]] std::expected<void, std::string>
     recordDispatch(VkCommandBuffer cmd,
                   std::span<const Buffer* const> storageBuffers,
@@ -73,8 +77,8 @@ private:
     ComputePipeline() = default;
     void destroy() noexcept;
 
+    const starforge::vulkan::VulkanDevice* owner_ = nullptr;
     VkDevice device_ = VK_NULL_HANDLE;
-    VkQueue queue_ = VK_NULL_HANDLE;
     std::uint32_t queueFamily_ = 0;
     std::uint32_t storageBufferCount_ = 0;
     VkShaderModule shaderModule_ = VK_NULL_HANDLE;
@@ -84,6 +88,10 @@ private:
     VkDescriptorSet descriptorSet_ = VK_NULL_HANDLE;
     VkPipeline pipeline_ = VK_NULL_HANDLE;
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
+    VkCommandBuffer commandBuffer_ = VK_NULL_HANDLE;
+    VkFence fence_ = VK_NULL_HANDLE;
+    std::mutex mutex_; // serialize the cached cmd buffer/fence across threads
+    std::uint64_t operationCount_ = 0;
 };
 
 } // namespace starforge::gpu_resources

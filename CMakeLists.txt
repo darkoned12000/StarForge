@@ -204,6 +204,27 @@ starforge_add_shader(
 )
 
 starforge_add_shader(
+    SOURCE "${PROJECT_SOURCE_DIR}/shaders/compute/timestamp_scaling.slang"
+    STAGE  compute
+    ENTRY  computeMain
+    OUTPUT_NAME timestamp_scaling
+)
+
+starforge_add_shader(
+    SOURCE "${PROJECT_SOURCE_DIR}/shaders/compute/dispatch_3d.slang"
+    STAGE  compute
+    ENTRY  computeMain
+    OUTPUT_NAME dispatch_3d
+)
+
+starforge_add_shader(
+    SOURCE "${PROJECT_SOURCE_DIR}/shaders/compute/bda_deref.slang"
+    STAGE  compute
+    ENTRY  computeMain
+    OUTPUT_NAME bda_deref
+)
+
+starforge_add_shader(
     SOURCE "${PROJECT_SOURCE_DIR}/shaders/graphics/gpu_driven.vert.slang"
     STAGE  vertex
     ENTRY  vertexMain

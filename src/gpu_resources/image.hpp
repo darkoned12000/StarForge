@@ -132,54 +132,25 @@ public:
     static void transitionToColorAttachment(VkCommandBuffer cmd, VkImage image);
     static void transitionToDepthAttachment(VkCommandBuffer cmd, VkImage image, VkFormat format = VK_FORMAT_D32_SFLOAT);
 
-    // Non-static convenience: uses this image's format automatically.
-    // Updates internal layout tracking.
-    void transitionToDepthAttachment(VkCommandBuffer cmd)
-    {
-        VkImageLayout newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-        if (format_ == VK_FORMAT_D32_SFLOAT_S8_UINT ||
-            format_ == VK_FORMAT_D24_UNORM_S8_UINT ||
-            format_ == VK_FORMAT_D16_UNORM_S8_UINT)
-        {
-            newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-        }
-        transitionToDepthAttachment(cmd, image_, format_);
-        layout_ = newLayout;
-    }
+    // Non-static conveniences: the barrier's oldLayout comes from the tracked
+    // layout, so consecutive transitions never discard live content. They are
+    // safe to call repeatedly on the same Image (M5 Phase 2.1).
+    void transitionToColorAttachment(VkCommandBuffer cmd);
+    void transitionToDepthAttachment(VkCommandBuffer cmd);
+    void transitionToTransferSrc(VkCommandBuffer cmd);
+    void transitionToTransferDst(VkCommandBuffer cmd);
+    void transitionToShaderReadOnly(VkCommandBuffer cmd);
 
-    // Non-static convenience for color attachment.
-    void transitionToColorAttachment(VkCommandBuffer cmd)
-    {
-        transitionToColorAttachment(cmd, image_);
-        layout_ = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    }
-
-    // Non-static convenience for transfer src.
-    void transitionToTransferSrc(VkCommandBuffer cmd)
-    {
-        transitionToTransferSrc(cmd, image_);
-        layout_ = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    }
-
-    // Non-static convenience for transfer dst.
-    void transitionToTransferDst(VkCommandBuffer cmd)
-    {
-        transitionToTransferDst(cmd, image_);
-        layout_ = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    }
-
-    // Non-static convenience for shader read only.
-    void transitionToShaderReadOnly(VkCommandBuffer cmd)
-    {
-        transitionToShaderReadOnly(cmd, image_);
-        layout_ = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    }
-
+    // Static helpers for callers holding a raw VkImage (legacy assumption).
     static void transitionToTransferSrc(VkCommandBuffer cmd, VkImage image);
     static void transitionToTransferDst(VkCommandBuffer cmd, VkImage image);
     static void transitionToShaderReadOnly(VkCommandBuffer cmd, VkImage image);
 
 private:
+    // Uses layout_ as oldLayout, records the barrier, then updates layout_.
+    void transition(VkCommandBuffer cmd, VkImageLayout newLayout,
+                    VkPipelineStageFlags2 dstStage, VkAccessFlags2 dstAccess);
+
     VmaAllocator allocator_ = nullptr;
     VkImage image_ = VK_NULL_HANDLE;
     VmaAllocation allocation_ = nullptr;

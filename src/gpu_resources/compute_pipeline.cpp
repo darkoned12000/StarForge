@@ -56,8 +56,8 @@ ComputePipeline::create(const starforge::vulkan::VulkanDevice& device, const Cre
     }
 
     ComputePipeline cp;
+    cp.owner_ = &device;
     cp.device_ = device.device();
-    cp.queue_ = device.graphicsQueue();
     cp.queueFamily_ = device.graphicsQueueFamily();
     cp.storageBufferCount_ = info.storageBufferCount;
 
@@ -170,7 +170,29 @@ ComputePipeline::create(const starforge::vulkan::VulkanDevice& device, const Cre
     if (const VkResult result = vkCreateCommandPool(cp.device_, &cmdPoolInfo, nullptr, &cp.commandPool_);
         result != VK_SUCCESS)
     {
+        cp.destroy();
         return std::unexpected(starforge::vulkan::describeFailure("vkCreateCommandPool", result));
+    }
+
+    VkCommandBufferAllocateInfo cmdAlloc{};
+    cmdAlloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cmdAlloc.commandPool = cp.commandPool_;
+    cmdAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cmdAlloc.commandBufferCount = 1;
+    if (const VkResult result = vkAllocateCommandBuffers(cp.device_, &cmdAlloc, &cp.commandBuffer_);
+        result != VK_SUCCESS)
+    {
+        cp.destroy();
+        return std::unexpected(starforge::vulkan::describeFailure("vkAllocateCommandBuffers", result));
+    }
+
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    if (const VkResult result = vkCreateFence(cp.device_, &fenceInfo, nullptr, &cp.fence_);
+        result != VK_SUCCESS)
+    {
+        cp.destroy();
+        return std::unexpected(starforge::vulkan::describeFailure("vkCreateFence", result));
     }
 
     return cp;
@@ -182,8 +204,8 @@ ComputePipeline::~ComputePipeline()
 }
 
 ComputePipeline::ComputePipeline(ComputePipeline&& other) noexcept
-    : device_(std::exchange(other.device_, VK_NULL_HANDLE)),
-      queue_(std::exchange(other.queue_, VK_NULL_HANDLE)),
+    : owner_(std::exchange(other.owner_, nullptr)),
+      device_(std::exchange(other.device_, VK_NULL_HANDLE)),
       queueFamily_(other.queueFamily_),
       storageBufferCount_(other.storageBufferCount_),
       shaderModule_(std::exchange(other.shaderModule_, VK_NULL_HANDLE)),
@@ -192,7 +214,10 @@ ComputePipeline::ComputePipeline(ComputePipeline&& other) noexcept
       descriptorPool_(std::exchange(other.descriptorPool_, VK_NULL_HANDLE)),
       descriptorSet_(std::exchange(other.descriptorSet_, VK_NULL_HANDLE)),
       pipeline_(std::exchange(other.pipeline_, VK_NULL_HANDLE)),
-      commandPool_(std::exchange(other.commandPool_, VK_NULL_HANDLE))
+      commandPool_(std::exchange(other.commandPool_, VK_NULL_HANDLE)),
+      commandBuffer_(std::exchange(other.commandBuffer_, VK_NULL_HANDLE)),
+      fence_(std::exchange(other.fence_, VK_NULL_HANDLE)),
+      operationCount_(std::exchange(other.operationCount_, 0))
 {
 }
 
@@ -201,8 +226,8 @@ ComputePipeline& ComputePipeline::operator=(ComputePipeline&& other) noexcept
     if (this != &other)
     {
         destroy();
+        owner_ = std::exchange(other.owner_, nullptr);
         device_ = std::exchange(other.device_, VK_NULL_HANDLE);
-        queue_ = std::exchange(other.queue_, VK_NULL_HANDLE);
         queueFamily_ = other.queueFamily_;
         storageBufferCount_ = other.storageBufferCount_;
         shaderModule_ = std::exchange(other.shaderModule_, VK_NULL_HANDLE);
@@ -212,6 +237,9 @@ ComputePipeline& ComputePipeline::operator=(ComputePipeline&& other) noexcept
         descriptorSet_ = std::exchange(other.descriptorSet_, VK_NULL_HANDLE);
         pipeline_ = std::exchange(other.pipeline_, VK_NULL_HANDLE);
         commandPool_ = std::exchange(other.commandPool_, VK_NULL_HANDLE);
+        commandBuffer_ = std::exchange(other.commandBuffer_, VK_NULL_HANDLE);
+        fence_ = std::exchange(other.fence_, VK_NULL_HANDLE);
+        operationCount_ = std::exchange(other.operationCount_, 0);
     }
     return *this;
 }
@@ -220,6 +248,8 @@ void ComputePipeline::destroy() noexcept
 {
     if (device_ != VK_NULL_HANDLE)
     {
+        if (fence_ != VK_NULL_HANDLE) vkDestroyFence(device_, fence_, nullptr);
+        // Destroying the pool implicitly frees its command buffers.
         if (commandPool_ != VK_NULL_HANDLE) vkDestroyCommandPool(device_, commandPool_, nullptr);
         if (pipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(device_, pipeline_, nullptr);
         if (descriptorPool_ != VK_NULL_HANDLE) vkDestroyDescriptorPool(device_, descriptorPool_, nullptr);
@@ -227,8 +257,8 @@ void ComputePipeline::destroy() noexcept
         if (descriptorSetLayout_ != VK_NULL_HANDLE) vkDestroyDescriptorSetLayout(device_, descriptorSetLayout_, nullptr);
         if (shaderModule_ != VK_NULL_HANDLE) vkDestroyShaderModule(device_, shaderModule_, nullptr);
     }
+    owner_ = nullptr;
     device_ = VK_NULL_HANDLE;
-    queue_ = VK_NULL_HANDLE;
     queueFamily_ = 0;
     storageBufferCount_ = 0;
     shaderModule_ = VK_NULL_HANDLE;
@@ -238,6 +268,9 @@ void ComputePipeline::destroy() noexcept
     descriptorSet_ = VK_NULL_HANDLE;
     pipeline_ = VK_NULL_HANDLE;
     commandPool_ = VK_NULL_HANDLE;
+    commandBuffer_ = VK_NULL_HANDLE;
+    fence_ = VK_NULL_HANDLE;
+    operationCount_ = 0;
 }
 
 std::expected<void, std::string>
@@ -307,24 +340,21 @@ ComputePipeline::dispatchAndWait(std::span<const Buffer* const> storageBuffers,
 
     vkUpdateDescriptorSets(device_, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
 
-    VkCommandBufferAllocateInfo cmdAlloc{};
-    cmdAlloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    cmdAlloc.commandPool = commandPool_;
-    cmdAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    cmdAlloc.commandBufferCount = 1;
-
-    VkCommandBuffer cmd = VK_NULL_HANDLE;
-    if (const VkResult result = vkAllocateCommandBuffers(device_, &cmdAlloc, &cmd); result != VK_SUCCESS)
+    std::lock_guard lock(mutex_);
+    if (const VkResult result = vkResetFences(device_, 1, &fence_); result != VK_SUCCESS)
     {
-        return std::unexpected(starforge::vulkan::describeFailure("vkAllocateCommandBuffers", result));
+        return std::unexpected(starforge::vulkan::describeFailure("vkResetFences", result));
+    }
+    if (const VkResult result = vkResetCommandBuffer(commandBuffer_, 0); result != VK_SUCCESS)
+    {
+        return std::unexpected(starforge::vulkan::describeFailure("vkResetCommandBuffer", result));
     }
 
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    if (const VkResult result = vkBeginCommandBuffer(cmd, &beginInfo); result != VK_SUCCESS)
+    if (const VkResult result = vkBeginCommandBuffer(commandBuffer_, &beginInfo); result != VK_SUCCESS)
     {
-        vkFreeCommandBuffers(device_, commandPool_, 1, &cmd);
         return std::unexpected(starforge::vulkan::describeFailure("vkBeginCommandBuffer", result));
     }
 
@@ -332,58 +362,42 @@ ComputePipeline::dispatchAndWait(std::span<const Buffer* const> storageBuffers,
     preDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
     preDep.bufferMemoryBarrierCount = static_cast<std::uint32_t>(preBarriers.size());
     preDep.pBufferMemoryBarriers = preBarriers.data();
-    vkCmdPipelineBarrier2(cmd, &preDep);
+    vkCmdPipelineBarrier2(commandBuffer_, &preDep);
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout_, 0, 1, &descriptorSet_, 0, nullptr);
-    vkCmdDispatch(cmd, groupCountX, groupCountY, groupCountZ);
+    vkCmdBindPipeline(commandBuffer_, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
+    vkCmdBindDescriptorSets(commandBuffer_, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout_, 0, 1, &descriptorSet_, 0, nullptr);
+    vkCmdDispatch(commandBuffer_, groupCountX, groupCountY, groupCountZ);
 
     VkDependencyInfo postDep{};
     postDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
     postDep.bufferMemoryBarrierCount = static_cast<std::uint32_t>(postBarriers.size());
     postDep.pBufferMemoryBarriers = postBarriers.data();
-    vkCmdPipelineBarrier2(cmd, &postDep);
+    vkCmdPipelineBarrier2(commandBuffer_, &postDep);
 
-    if (const VkResult result = vkEndCommandBuffer(cmd); result != VK_SUCCESS)
+    if (const VkResult result = vkEndCommandBuffer(commandBuffer_); result != VK_SUCCESS)
     {
-        vkFreeCommandBuffers(device_, commandPool_, 1, &cmd);
         return std::unexpected(starforge::vulkan::describeFailure("vkEndCommandBuffer", result));
-    }
-
-    VkFenceCreateInfo fenceInfo{};
-    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    VkFence fence = VK_NULL_HANDLE;
-    if (const VkResult result = vkCreateFence(device_, &fenceInfo, nullptr, &fence); result != VK_SUCCESS)
-    {
-        vkFreeCommandBuffers(device_, commandPool_, 1, &cmd);
-        return std::unexpected(starforge::vulkan::describeFailure("vkCreateFence", result));
     }
 
     VkCommandBufferSubmitInfo cmdSubmit{};
     cmdSubmit.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
-    cmdSubmit.commandBuffer = cmd;
+    cmdSubmit.commandBuffer = commandBuffer_;
 
     VkSubmitInfo2 submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
     submitInfo.commandBufferInfoCount = 1;
     submitInfo.pCommandBufferInfos = &cmdSubmit;
 
-    if (const VkResult result = vkQueueSubmit2(queue_, 1, &submitInfo, fence); result != VK_SUCCESS)
+    if (const VkResult result = owner_->submit(1, &submitInfo, fence_); result != VK_SUCCESS)
     {
-        vkDestroyFence(device_, fence, nullptr);
-        vkFreeCommandBuffers(device_, commandPool_, 1, &cmd);
         return std::unexpected(starforge::vulkan::describeFailure("vkQueueSubmit2", result));
     }
-
-    if (const VkResult result = vkWaitForFences(device_, 1, &fence, VK_TRUE, UINT64_MAX); result != VK_SUCCESS)
+    if (const VkResult result = vkWaitForFences(device_, 1, &fence_, VK_TRUE, UINT64_MAX); result != VK_SUCCESS)
     {
-        vkDestroyFence(device_, fence, nullptr);
-        vkFreeCommandBuffers(device_, commandPool_, 1, &cmd);
         return std::unexpected(starforge::vulkan::describeFailure("vkWaitForFences", result));
     }
 
-    vkDestroyFence(device_, fence, nullptr);
-    vkFreeCommandBuffers(device_, commandPool_, 1, &cmd);
+    ++operationCount_;
     return {};
 }
 
@@ -456,24 +470,21 @@ ComputePipeline::dispatchAndWaitWithPushConstants(std::span<const Buffer* const>
 
     vkUpdateDescriptorSets(device_, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
 
-    VkCommandBufferAllocateInfo cmdAlloc{};
-    cmdAlloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    cmdAlloc.commandPool = commandPool_;
-    cmdAlloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    cmdAlloc.commandBufferCount = 1;
-
-    VkCommandBuffer cmd = VK_NULL_HANDLE;
-    if (const VkResult result = vkAllocateCommandBuffers(device_, &cmdAlloc, &cmd); result != VK_SUCCESS)
+    std::lock_guard lock(mutex_);
+    if (const VkResult result = vkResetFences(device_, 1, &fence_); result != VK_SUCCESS)
     {
-        return std::unexpected(starforge::vulkan::describeFailure("vkAllocateCommandBuffers", result));
+        return std::unexpected(starforge::vulkan::describeFailure("vkResetFences", result));
+    }
+    if (const VkResult result = vkResetCommandBuffer(commandBuffer_, 0); result != VK_SUCCESS)
+    {
+        return std::unexpected(starforge::vulkan::describeFailure("vkResetCommandBuffer", result));
     }
 
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    if (const VkResult result = vkBeginCommandBuffer(cmd, &beginInfo); result != VK_SUCCESS)
+    if (const VkResult result = vkBeginCommandBuffer(commandBuffer_, &beginInfo); result != VK_SUCCESS)
     {
-        vkFreeCommandBuffers(device_, commandPool_, 1, &cmd);
         return std::unexpected(starforge::vulkan::describeFailure("vkBeginCommandBuffer", result));
     }
 
@@ -481,64 +492,48 @@ ComputePipeline::dispatchAndWaitWithPushConstants(std::span<const Buffer* const>
     preDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
     preDep.bufferMemoryBarrierCount = static_cast<std::uint32_t>(preBarriers.size());
     preDep.pBufferMemoryBarriers = preBarriers.data();
-    vkCmdPipelineBarrier2(cmd, &preDep);
+    vkCmdPipelineBarrier2(commandBuffer_, &preDep);
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout_, 0, 1, &descriptorSet_, 0, nullptr);
+    vkCmdBindPipeline(commandBuffer_, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
+    vkCmdBindDescriptorSets(commandBuffer_, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout_, 0, 1, &descriptorSet_, 0, nullptr);
 
     if (pushData && pushSize > 0)
     {
-        vkCmdPushConstants(cmd, pipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, pushSize, pushData);
+        vkCmdPushConstants(commandBuffer_, pipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, pushSize, pushData);
     }
 
-    vkCmdDispatch(cmd, groupCountX, groupCountY, groupCountZ);
+    vkCmdDispatch(commandBuffer_, groupCountX, groupCountY, groupCountZ);
 
     VkDependencyInfo postDep{};
     postDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
     postDep.bufferMemoryBarrierCount = static_cast<std::uint32_t>(postBarriers.size());
     postDep.pBufferMemoryBarriers = postBarriers.data();
-    vkCmdPipelineBarrier2(cmd, &postDep);
+    vkCmdPipelineBarrier2(commandBuffer_, &postDep);
 
-    if (const VkResult result = vkEndCommandBuffer(cmd); result != VK_SUCCESS)
+    if (const VkResult result = vkEndCommandBuffer(commandBuffer_); result != VK_SUCCESS)
     {
-        vkFreeCommandBuffers(device_, commandPool_, 1, &cmd);
         return std::unexpected(starforge::vulkan::describeFailure("vkEndCommandBuffer", result));
-    }
-
-    VkFenceCreateInfo fenceInfo{};
-    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    VkFence fence = VK_NULL_HANDLE;
-    if (const VkResult result = vkCreateFence(device_, &fenceInfo, nullptr, &fence); result != VK_SUCCESS)
-    {
-        vkFreeCommandBuffers(device_, commandPool_, 1, &cmd);
-        return std::unexpected(starforge::vulkan::describeFailure("vkCreateFence", result));
     }
 
     VkCommandBufferSubmitInfo cmdSubmit{};
     cmdSubmit.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
-    cmdSubmit.commandBuffer = cmd;
+    cmdSubmit.commandBuffer = commandBuffer_;
 
     VkSubmitInfo2 submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
     submitInfo.commandBufferInfoCount = 1;
     submitInfo.pCommandBufferInfos = &cmdSubmit;
 
-    if (const VkResult result = vkQueueSubmit2(queue_, 1, &submitInfo, fence); result != VK_SUCCESS)
+    if (const VkResult result = owner_->submit(1, &submitInfo, fence_); result != VK_SUCCESS)
     {
-        vkDestroyFence(device_, fence, nullptr);
-        vkFreeCommandBuffers(device_, commandPool_, 1, &cmd);
         return std::unexpected(starforge::vulkan::describeFailure("vkQueueSubmit2", result));
     }
-
-    if (const VkResult result = vkWaitForFences(device_, 1, &fence, VK_TRUE, UINT64_MAX); result != VK_SUCCESS)
+    if (const VkResult result = vkWaitForFences(device_, 1, &fence_, VK_TRUE, UINT64_MAX); result != VK_SUCCESS)
     {
-        vkDestroyFence(device_, fence, nullptr);
-        vkFreeCommandBuffers(device_, commandPool_, 1, &cmd);
         return std::unexpected(starforge::vulkan::describeFailure("vkWaitForFences", result));
     }
 
-    vkDestroyFence(device_, fence, nullptr);
-    vkFreeCommandBuffers(device_, commandPool_, 1, &cmd);
+    ++operationCount_;
     return {};
 }
 
@@ -588,9 +583,14 @@ ComputePipeline::recordDispatch(VkCommandBuffer cmd,
         writes[i].pBufferInfo = &bufferInfos[i];
     }
 
+    // The descriptor set is shared by one-shot dispatch methods; serialize
+    // updates so recording from worker threads is safe.
+    std::lock_guard lock(mutex_);
     vkUpdateDescriptorSets(device_, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout_,
+                            0, 1, &descriptorSet_, 0, nullptr);
 
     if (pushSize > 0 && pushData != nullptr)
     {
