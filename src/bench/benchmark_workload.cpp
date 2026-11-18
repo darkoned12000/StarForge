@@ -11,34 +11,9 @@
 namespace starforge::bench
 {
 
-BenchmarkScene generateWorkloadScene(const WorkloadConfig& config)
-{
-    // Map visible fraction to scene radius. The camera is at (0,0,5) looking
-    // at origin with 60° FOV. A sphere of radius R around origin has
-    // approximately (R/5)^3 * visible_fraction instances visible.
-    // We use a continuous mapping: R = 5.0 / cbrt(visibleFraction).
-    double radius = 5.0;
-    if (config.visibleFraction > 0.0 && config.visibleFraction <= 1.0)
-    {
-        radius = 5.0 / std::cbrt(config.visibleFraction);
-    }
-    if (radius < 1.0) radius = 1.0;
-
-    return generateScene(config.seed, config.instanceCount, radius);
-}
-
-Frustum buildWorkloadFrustum(const WorkloadConfig& /*config*/)
-{
-    // Camera at (0,0,5) looking down -Z (towards origin).
-    math::Mat4d view = glm::lookAt(
-        math::Vec3d(0.0, 0.0, 5.0),
-        math::Vec3d(0.0, 0.0, 0.0),
-        math::Vec3d(0.0, 1.0, 0.0));
-    // Reverse-Z: swap near and far for reverse-Z projection.
-    math::Mat4d proj = glm::perspective(1.0, 16.0 / 9.0, 10000.0, 0.1);
-    math::Mat4d vp = proj * view;
-    return buildFrustum(vp);
-}
+// Scene generation and frustum construction live in
+// benchmark_workload_scene.cpp (starforge_bench) so CPU-only tests do not
+// pull in the vk* calls made by recordWorkloadFrame below (M5 Phase 1).
 
 WorkloadResult recordWorkloadFrame(
     const WorkloadConfig& config,

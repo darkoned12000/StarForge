@@ -221,7 +221,8 @@ TEST_CASE("Sun M15.0.7: GPU headless SunRenderer core and corona offscreen rende
 
         vkCmdBeginRendering(cmd, &renderInfo);
 
-        VkViewport viewport{0.0f, 0.0f, static_cast<float>(w), static_cast<float>(h), 0.0f, 1.0f};
+        // Vulkan Y-down viewport convention (the projection does not flip Y).
+        VkViewport viewport{0.0f, static_cast<float>(h), static_cast<float>(w), -static_cast<float>(h), 0.0f, 1.0f};
         VkRect2D scissor{{0, 0}, {w, h}};
         vkCmdSetViewport(cmd, 0, 1, &viewport);
         vkCmdSetScissor(cmd, 0, 1, &scissor);

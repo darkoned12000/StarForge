@@ -391,6 +391,14 @@ Before sequencing the milestone, five critical items must be addressed:
 Address test isolation, CMake configuration, and math contract regressions
 before writing GPU culling code.
 
+**Status: complete (2026-11-18).** Loader-free helper extraction in
+`vulkan_swapchain_selection.cpp` and `benchmark_workload_scene.cpp`; `starforge_tests`
+links no Vulkan/SDL runtime (asserted by the `cpu_tests_no_vulkan_runtime` CTest);
+public-API facade tests moved to `starforge_public_api_tests`. Frustum tests use
+the engine reverse-Z projection with exact unit-normal and randomized
+camera/orientation/scale oracle assertions. Render conventions are gated by
+`render_conventions`. Matrix row updated below.
+
 **Step 1.1: Test Suite Decoupling & CMake Fixes**
 - Split `vulkan_capabilities` and `vulkan_version` into a lightweight,
   loader-independent target (`starforge_vulkan_core`).
@@ -542,20 +550,22 @@ against M4 baselines.
 
 | Phase | Primary Deliverables | Verification Target | Blocked By |
 |-------|---------------------|---------------------|------------|
-| Phase 1 | CMake decoupling, unit frustum normals, randomized CPU oracle, viewport Y-flip | `starforge_tests` runs without Vulkan runtime; passes oracle tests | None |
+| Phase 1 ✅ | CMake decoupling, unit frustum normals, randomized CPU oracle, viewport Y-flip | `starforge_tests` runs without Vulkan runtime; passes oracle tests | None | Done: swapchain-selection and workload-scene helpers moved into loader-free libraries; `starforge_tests` no longer links Vulkan/SDL (ELF `NEEDED` gate + 321 CPU cases pass); all frustum tests use engine reverse-Z projection; exact unit-normal + randomized camera/orientation/scale oracle; negative-height viewports and CCW gate (`render_conventions`) |
 | Phase 2 | ImageView RAII, ImageUsageFlags, pool/fence recycling, 2D/3D compute & BDA tests | `starforge_gpu_tests` clean under validation; zero allocation thrashing | Phase 1 |
 | Phase 3 | Slang culling shader, SoA bounding buffers, double-buffered indirect commands | Valid indirect execution on simple cube mesh | Phase 2 |
 | Phase 4 | GPU vs CPU culling parity suite, feature fallback implementations | T2 Proof: bitwise matching visible sets; green tests with features disabled | Phase 3 |
 | Phase 5 | 10k/100k/1M benchmark profiles, baseline comparison, validated runs | T4 Proof: 1M instances beat M4; CPU submission time flat | Phase 4 |
 
 ### Deferred from testing review (must address during M5)
-- Fragile headless GPU skip (return code 77) — move hardware check to gpu_main.cpp
-- CPU tests link starforge_vulkan — split vulkan_capabilities/version into separate library
-- ${glm_SOURCE_DIR} unresolved include — use target link (already transitive via starforge_math)
+- Fragile headless GPU skip (return code 77) — done in gpu_main.cpp
+- CPU tests link starforge_vulkan — done: loader-free `starforge_vulkan_core` +
+  header-only helper extraction; CPU binary has no Vulkan NEEDED entry
+- ${glm_SOURCE_DIR} unresolved include — done (target link via starforge_math)
 - Cross-compilation POST_BUILD command — gated behind CMAKE_CROSSCOMPILING (done)
-- Randomized oracle testing for cullInstances — needed for M5 GPU culling validation
-- Projection inconsistency in frustum tests — use engine's perspective functions
-- Plane normalization check omitted — assert unit-length normals
+- Randomized oracle testing for cullInstances — done: randomized camera,
+  orientation and per-instance scale with bit-exact visibility comparison
+- Projection inconsistency in frustum tests — done: engine reverse-Z projection
+- Plane normalization check omitted — done: |A²+B²+C²−1| < 10⁻⁶ asserted
 - Silent failure on benchmark execution — needs real pipeline for validated run
 - Hardcoded relative file paths in baseline test — use CMAKE_CURRENT_BINARY_DIR
 - Validation layers disabled in baseline test — add validated run
@@ -577,14 +587,17 @@ against M4 baselines.
 - Unmanaged VkImageView lifetime — createView returns raw handle; needs RAII view type
 - Descriptor set inefficiencies — vkUpdateDescriptorSets every dispatch; move to setup phase
 - Queue thread-safety — single graphics queue; needs external synchronization for background loaders
-- Winding order via projection Y-flip — remove Y-flip from projection, use negative viewport height instead
-- Fragile headless GPU skip (return code 77) — move hardware check to gpu_main.cpp
-- CPU tests link starforge_vulkan — split vulkan_capabilities/version into separate library
-- ${glm_SOURCE_DIR} unresolved include — use target link (already transitive via starforge_math)
+- Winding order via projection Y-flip — done: no projection Y-flip, negative-height
+  viewports, CCW front face locked by the `render_conventions` CTest
+- Fragile headless GPU skip (return code 77) — done in gpu_main.cpp
+- CPU tests link starforge_vulkan — done: loader-free `starforge_vulkan_core` +
+  header-only helper extraction; CPU binary has no Vulkan NEEDED entry
+- ${glm_SOURCE_DIR} unresolved include — done (target link via starforge_math)
 - Cross-compilation POST_BUILD command — gated behind CMAKE_CROSSCOMPILING (done)
-- Randomized oracle testing for cullInstances — needed for M5 GPU culling validation
-- Projection inconsistency in frustum tests — use engine's perspective functions
-- Plane normalization check omitted — assert unit-length normals
+- Randomized oracle testing for cullInstances — done: randomized camera,
+  orientation and per-instance scale with bit-exact visibility comparison
+- Projection inconsistency in frustum tests — done: engine reverse-Z projection
+- Plane normalization check omitted — done: |A²+B²+C²−1| < 10⁻⁶ asserted
 - Silent failure on benchmark execution — replace if(result) with REQUIRE(result.has_value())
 - Hardcoded relative file paths in baseline test — use CMAKE_CURRENT_BINARY_DIR
 - Validation layers disabled in baseline test — add validated run
@@ -606,7 +619,8 @@ against M4 baselines.
 - Unmanaged VkImageView lifetime — createView returns raw handle; needs RAII view type
 - Descriptor set inefficiencies — vkUpdateDescriptorSets every dispatch; move to setup phase
 - Queue thread-safety — single graphics queue; needs external synchronization for background loaders
-- Winding order via projection Y-flip — remove Y-flip from projection, use negative viewport height instead
+- Winding order via projection Y-flip — done: no projection Y-flip, negative-height
+  viewports, CCW front face locked by the `render_conventions` CTest
 
 ## M5.5 – Job System & Multi-Threading Foundation
 

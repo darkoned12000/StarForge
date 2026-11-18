@@ -64,12 +64,6 @@ add_executable(starforge_tests
     test_audio.cpp
     test_audio_spatial.cpp
     test_audio_bridge.cpp
-    test_public_application.cpp
-    test_public_audio.cpp
-    test_public_math_world.cpp
-    test_public_renderer.cpp
-    test_public_starfield.cpp
-    test_public_toon.cpp
     test_game_controls.cpp
 )
 
@@ -83,16 +77,35 @@ target_link_libraries(starforge_tests
         starforge_math
         starforge_spatial
         starforge_stats
-        starforge_vulkan
-        starforge_gpu
-        starforge_environment
+        starforge_vulkan_core
         starforge_ecs
         starforge_ai
         starforge_physics
         starforge_audio
+        doctest::doctest
+)
+
+# M5 Phase 1: the CPU suite must not link the Vulkan loader. The public-API
+# tests exercise real renderers and are kept in their own backend-linked target.
+add_executable(starforge_public_api_tests
+    main.cpp
+    test_public_application.cpp
+    test_public_audio.cpp
+    test_public_math_world.cpp
+    test_public_renderer.cpp
+    test_public_starfield.cpp
+    test_public_toon.cpp
+)
+
+target_link_libraries(starforge_public_api_tests
+    PRIVATE
         starforge_public_api
         doctest::doctest
 )
+
+starforge_set_warnings(starforge_public_api_tests)
+
+add_test(NAME starforge_public_api_tests COMMAND starforge_public_api_tests)
 
 starforge_set_warnings(starforge_tests)
 
@@ -188,6 +201,8 @@ target_include_directories(starforge_gpu_tests SYSTEM
 target_include_directories(starforge_tests SYSTEM
     PRIVATE
         ${PROJECT_SOURCE_DIR}/third_party
+        ${PROJECT_SOURCE_DIR}/third_party/vma # instance_data.hpp includes vk_mem_alloc.h
+        ${PROJECT_SOURCE_DIR}/include          # public facade headers (audio, math, world)
 )
 
 if(TARGET starforge_shaders)
@@ -223,6 +238,14 @@ if(STARFORGE_PYTHON3)
                 ${PROJECT_SOURCE_DIR}/include/starforge)
     add_test(NAME public_leakage_selftest
         COMMAND ${STARFORGE_PYTHON3} ${CMAKE_CURRENT_SOURCE_DIR}/check_public_leakage.py --self-test)
+
+    # M5 Phase 1 gates: CPU suite must be loader-free; render conventions hold.
+    add_test(NAME cpu_tests_no_vulkan_runtime
+        COMMAND ${STARFORGE_PYTHON3} ${CMAKE_CURRENT_SOURCE_DIR}/check_cpu_tests_no_vulkan.py
+                $<TARGET_FILE:starforge_tests>)
+    add_test(NAME render_conventions
+        COMMAND ${STARFORGE_PYTHON3} ${CMAKE_CURRENT_SOURCE_DIR}/check_render_conventions.py
+                ${PROJECT_SOURCE_DIR})
 endif()
 
 add_test(NAME public_consumer_compile

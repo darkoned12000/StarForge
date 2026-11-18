@@ -5,6 +5,7 @@ add_library(starforge_bench STATIC
     benchmark_result.cpp
     benchmark_scene.cpp
     benchmark_workload.cpp
+    benchmark_workload_scene.cpp
     cpu_timer.cpp
     thread_scaling.cpp
 )
@@ -18,6 +19,7 @@ target_include_directories(starforge_bench
 
 target_link_libraries(starforge_bench
     PUBLIC
+        Vulkan::Headers # benchmark_workload.hpp uses Vulkan value types only
         starforge_core
         starforge_content
         starforge_jobs

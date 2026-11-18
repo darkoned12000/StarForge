@@ -25,12 +25,15 @@ elseif(TARGET flecs)
     )
 endif()
 
-# starforge_environment is PUBLIC: instance_stream.hpp exposes its types.
+# M5 Phase 1: instance_stream.hpp exposes environment::AsteroidInstance, a
+# plain header-only struct. Depend on the headers (Vulkan::Headers) rather than
+# the environment library so CPU-only consumers do not inherit the Vulkan
+# loader through starforge_environment -> starforge_gpu -> starforge_vulkan.
 target_link_libraries(starforge_ecs
     PUBLIC
+        Vulkan::Headers
         starforge_math
         starforge_spatial
-        starforge_environment
         starforge_content
 )
 

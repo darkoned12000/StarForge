@@ -1,5 +1,6 @@
 add_library(starforge_vulkan_core STATIC
     vulkan_capabilities.cpp
+    vulkan_swapchain_selection.cpp
 )
 
 target_include_directories(starforge_vulkan_core PUBLIC ${PROJECT_SOURCE_DIR}/src)
@@ -7,6 +8,7 @@ target_include_directories(starforge_vulkan_core PUBLIC ${PROJECT_SOURCE_DIR}/sr
 target_link_libraries(starforge_vulkan_core
     PUBLIC
         starforge_core
+        Vulkan::Headers # headers only — no loader, so CPU tests stay runtime-free
 )
 
 starforge_set_warnings(starforge_vulkan_core)

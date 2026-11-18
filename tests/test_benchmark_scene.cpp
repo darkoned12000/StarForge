@@ -121,10 +121,12 @@ TEST_CASE("Frustum: build from reverse-Z view-proj")
         {
             CHECK(std::isfinite(f.planes[i][j]));
         }
-        double len = std::sqrt(f.planes[i][0] * f.planes[i][0] +
-                               f.planes[i][1] * f.planes[i][1] +
-                               f.planes[i][2] * f.planes[i][2]);
-        CHECK(std::abs(len - 1.0) < 1e-6);
+        const double lenSq = f.planes[i][0] * f.planes[i][0] +
+                             f.planes[i][1] * f.planes[i][1] +
+                             f.planes[i][2] * f.planes[i][2];
+        // M5 Phase 1: strictly unit-length plane normals.
+        CHECK(std::abs(lenSq - 1.0) < 1e-6);
+        CHECK(std::abs(std::sqrt(lenSq) - 1.0) < 1e-6);
     }
 }
 
@@ -146,11 +148,12 @@ TEST_CASE("Frustum: reverse-Z plane extraction and culling")
     CHECK_FALSE(sphereInFrustum(f, 0.0, 0.0, -55.0, 0.2));
 }
 
-TEST_CASE("Frustum: sphereInFrustum basic (standard projection)")
+TEST_CASE("Frustum: sphereInFrustum basic (engine reverse-Z projection)")
 {
-    // Standard projection for comparison.
+    // Engine reverse-Z projection (the same one buildFrustum's plane
+    // extraction is designed for).
     Mat4d view = glm::lookAt(Vec3d(0, 0, 5), Vec3d(0, 0, 0), Vec3d(0, 1, 0));
-    Mat4d proj = glm::perspective(1.0, 1.0, 0.1, 100.0);
+    Mat4d proj = Mat4d(perspectiveVulkanReverseZ(1.0f, 1.0f, 0.1f, 100.0f)); // engine reverse-Z
     Mat4d vp = proj * view;
     Frustum f = buildFrustum(vp);
 
@@ -165,7 +168,7 @@ TEST_CASE("Cull: 100% visible scene")
 {
     auto scene = generateScene(42, 1000, 1.0); // small radius = all visible
     Mat4d view = glm::lookAt(Vec3d(0, 0, 5), Vec3d(0, 0, 0), Vec3d(0, 1, 0));
-    Mat4d proj = glm::perspective(1.0, 1.0, 0.1, 100.0);
+    Mat4d proj = Mat4d(perspectiveVulkanReverseZ(1.0f, 1.0f, 0.1f, 100.0f)); // engine reverse-Z
     Mat4d vp = proj * view;
     Frustum f = buildFrustum(vp);
 
@@ -178,7 +181,7 @@ TEST_CASE("Cull: 1% visible scene has low visibility")
 {
     auto scene = generateScene(42, 1000, 100.0); // large radius = few visible
     Mat4d view = glm::lookAt(Vec3d(0, 0, 5), Vec3d(0, 0, 0), Vec3d(0, 1, 0));
-    Mat4d proj = glm::perspective(1.0, 1.0, 0.1, 100.0);
+    Mat4d proj = Mat4d(perspectiveVulkanReverseZ(1.0f, 1.0f, 0.1f, 100.0f)); // engine reverse-Z
     Mat4d vp = proj * view;
     Frustum f = buildFrustum(vp);
 
@@ -191,7 +194,7 @@ TEST_CASE("Cull: empty scene")
 {
     auto scene = generateScene(42, 0, 10.0);
     Mat4d view = glm::lookAt(Vec3d(0, 0, 5), Vec3d(0, 0, 0), Vec3d(0, 1, 0));
-    Mat4d proj = glm::perspective(1.0, 1.0, 0.1, 100.0);
+    Mat4d proj = Mat4d(perspectiveVulkanReverseZ(1.0f, 1.0f, 0.1f, 100.0f)); // engine reverse-Z
     Mat4d vp = proj * view;
     Frustum f = buildFrustum(vp);
 
@@ -204,7 +207,7 @@ TEST_CASE("Cull: total miss (scene entirely outside frustum)")
     auto scene = generateScene(42, 100, 1.0);
     // Camera far away looking in a direction that doesn't include the origin.
     Mat4d view = glm::lookAt(Vec3d(1000, 1000, 1000), Vec3d(1001, 1001, 1001), Vec3d(0, 1, 0));
-    Mat4d proj = glm::perspective(1.0, 1.0, 0.1, 100.0);
+    Mat4d proj = Mat4d(perspectiveVulkanReverseZ(1.0f, 1.0f, 0.1f, 100.0f)); // engine reverse-Z
     Mat4d vp = proj * view;
     Frustum f = buildFrustum(vp);
 
@@ -218,7 +221,7 @@ TEST_CASE("Cull: bounding sphere grazing")
     // A sphere whose center is outside the frustum but whose radius
     // overlaps the plane boundary should be considered visible.
     Mat4d view = glm::lookAt(Vec3d(0, 0, 5), Vec3d(0, 0, 0), Vec3d(0, 1, 0));
-    Mat4d proj = glm::perspective(1.0, 1.0, 0.1, 100.0);
+    Mat4d proj = Mat4d(perspectiveVulkanReverseZ(1.0f, 1.0f, 0.1f, 100.0f)); // engine reverse-Z
     Mat4d vp = proj * view;
     Frustum f = buildFrustum(vp);
 
@@ -231,7 +234,7 @@ TEST_CASE("Cull: deterministic")
 {
     auto scene = generateScene(42, 500, 10.0);
     Mat4d view = glm::lookAt(Vec3d(0, 0, 50), Vec3d(0, 0, 0), Vec3d(0, 1, 0));
-    Mat4d proj = glm::perspective(1.0, 1.0, 0.1, 1000.0);
+    Mat4d proj = Mat4d(perspectiveVulkanReverseZ(1.0f, 1.0f, 0.1f, 1000.0f)); // engine reverse-Z
     Mat4d vp = proj * view;
     Frustum f = buildFrustum(vp);
 
@@ -267,6 +270,8 @@ TEST_CASE("Cull: randomized oracle against analytical plane half-space tester")
     std::mt19937_64 rng(1337);
     std::uniform_real_distribution<double> posDist(-50.0, 50.0);
     std::uniform_real_distribution<double> angleDist(-3.14159, 3.14159);
+    std::uniform_real_distribution<double> scaleDist(0.25, 3.0);
+    std::uniform_real_distribution<double> quatDist(-1.0, 1.0);
 
     for (int trial = 0; trial < 20; ++trial)
     {
@@ -277,6 +282,22 @@ TEST_CASE("Cull: randomized oracle against analytical plane half-space tester")
         Frustum frustum = buildFrustum(proj * view);
 
         auto scene = generateScene(static_cast<std::uint64_t>(trial), 500, 40.0);
+        // Randomize per-instance scale and orientation independently of the
+        // generator: culling is sphere-based, so orientation must not change
+        // visibility while scale must be honoured per instance.
+        for (auto& instance : scene.instances)
+        {
+            instance.scale = static_cast<float>(scaleDist(rng));
+            const float qx = static_cast<float>(quatDist(rng));
+            const float qy = static_cast<float>(quatDist(rng));
+            const float qz = static_cast<float>(quatDist(rng));
+            const float qw = static_cast<float>(quatDist(rng));
+            const float qLen = std::sqrt(qx * qx + qy * qy + qz * qz + qw * qw);
+            instance.rotX = qx / qLen;
+            instance.rotY = qy / qLen;
+            instance.rotZ = qz / qLen;
+            instance.rotW = qw / qLen;
+        }
         auto culledIndices = cullInstances(scene, frustum, 0.5);
         std::set<std::uint32_t> culledSet(culledIndices.begin(), culledIndices.end());
 
