@@ -169,6 +169,7 @@ add_executable(starforge_gpu_tests
     test_environment_effects.cpp
     test_golden_starfield.cpp
     test_golden_toon.cpp
+    test_toon_showcase.cpp
     test_atmosphere_render.cpp
     test_vulkan_retirement.cpp
     test_naive_control.cpp

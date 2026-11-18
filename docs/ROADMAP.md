@@ -588,77 +588,10 @@ prove M5 beats the M4 CPU-driven baseline and respects ADR-004.
 | Phase 4 ✅ | GPU vs CPU culling parity suite, feature fallback implementations | T2 Proof: bitwise matching visible sets; green tests with features disabled | Phase 3 | Done: strict count + sorted-index parity across 100/1k/5k/50k at 1/10/100%; `GpuDrivenDraw` BDA vs descriptor and drawIndirect vs drawIndirectCount paths; 4 fallback T2 cases + full GPU suite CTest runs with each feature disabled (12/12 CTests green) |
 | Phase 5 ✅ | 10k/100k/1M benchmark profiles, baseline comparison, validated runs | T4 Proof: 1M instances beat M4; CPU submission time flat | Phase 4 | Done: `GpuDrivenWorkload` + harness measure 10k/100k/1M (CPU submission ≤0.50 ms, 100k GPU cull 0.07 ms, 1M cull 0.60 ms); M4 CPU-driven baselines at 100k/1M committed; `benchmarks/m5-vs-budget.md` + 2 T1 comparison tests; 12/12 CTests |
 
-### Deferred from testing review (must address during M5)
-- Fragile headless GPU skip (return code 77) — done in gpu_main.cpp
-- CPU tests link starforge_vulkan — done: loader-free `starforge_vulkan_core` +
-  header-only helper extraction; CPU binary has no Vulkan NEEDED entry
-- ${glm_SOURCE_DIR} unresolved include — done (target link via starforge_math)
-- Cross-compilation POST_BUILD command — gated behind CMAKE_CROSSCOMPILING (done)
-- Randomized oracle testing for cullInstances — done: randomized camera,
-  orientation and per-instance scale with bit-exact visibility comparison
-- Projection inconsistency in frustum tests — done: engine reverse-Z projection
-- Plane normalization check omitted — done: |A²+B²+C²−1| < 10⁻⁶ asserted
-- Silent failure on benchmark execution — needs real pipeline for validated run
-- Hardcoded relative file paths in baseline test — use CMAKE_CURRENT_BINARY_DIR
-- Validation layers disabled in baseline test — add validated run
-- Baseline invariant verification — assert competent draws fewer than naive
-- N vs 2N scaling test — done: real compute kernel with push-controlled
-  iterations, frame-slot recycling and nested scopes
-- Multi-frame query pool cycling — done: both frame slots produce valid timings
-- Nested scopes — done: parent/child scopes measured and compared
-- GPU-side BDA readback/dereference — done: bda_deref.slang compute test
-- BDA alignment checks — done: 4- and 8-byte alignment asserted
-- 2D/3D dispatch tests — done: dispatch_3d.slang verifies written lanes
-- Consecutive dispatches — done: core test covers repeated dispatches on one pipeline
-- Error/validation boundary paths — done: std::unexpected cases covered
+### M5 review follow-ups
 
-### Deferred from Vulkan API review (must address during M5)
-- Uploader/ComputePipeline cmd buffer + fence caching — done: one cached
-  resettable command buffer and fence per object (the one-shot wait remains)
-- Resource allocation thrashing — done: no per-operation fence/cmd allocation;
-  `operationCount()` regression tests
-- Image layout tracking — done: non-static transitions use the tracked oldLayout
-- ImageUsage bit-flags — done: ImageUsageFlags bitmask supports combined usage
-- VkImageView RAII — done: Image::ImageView owner + createImageView() used in tests
-- Descriptor set inefficiencies — vkUpdateDescriptorSets every dispatch; move to setup phase
-- Queue thread-safety — done: VulkanDevice::submit + global submit2 mutex
-- Winding order via projection Y-flip — done: no projection Y-flip, negative-height
-  viewports, CCW front face locked by the `render_conventions` CTest
-- Fragile headless GPU skip (return code 77) — done in gpu_main.cpp
-- CPU tests link starforge_vulkan — done: loader-free `starforge_vulkan_core` +
-  header-only helper extraction; CPU binary has no Vulkan NEEDED entry
-- ${glm_SOURCE_DIR} unresolved include — done (target link via starforge_math)
-- Cross-compilation POST_BUILD command — gated behind CMAKE_CROSSCOMPILING (done)
-- Randomized oracle testing for cullInstances — done: randomized camera,
-  orientation and per-instance scale with bit-exact visibility comparison
-- Projection inconsistency in frustum tests — done: engine reverse-Z projection
-- Plane normalization check omitted — done: |A²+B²+C²−1| < 10⁻⁶ asserted
-- Silent failure on benchmark execution — replace if(result) with REQUIRE(result.has_value())
-- Hardcoded relative file paths in baseline test — use CMAKE_CURRENT_BINARY_DIR
-- Validation layers disabled in baseline test — add validated run
-- Baseline invariant verification — assert competent draws fewer than naive
-- N vs 2N scaling test — done: real compute kernel with push-controlled
-  iterations, frame-slot recycling and nested scopes
-- Multi-frame query pool cycling — done: both frame slots produce valid timings
-- Nested scopes — done: parent/child scopes measured and compared
-- GPU-side BDA readback/dereference — done: bda_deref.slang compute test
-- BDA alignment checks — done: 4- and 8-byte alignment asserted
-- 2D/3D dispatch tests — done: dispatch_3d.slang verifies written lanes
-- Consecutive dispatches — done: core test covers repeated dispatches on one pipeline
-- Error/validation boundary paths — done: std::unexpected cases covered
-
-### Deferred from Vulkan API review (must address during M5)
-- Uploader/ComputePipeline cmd buffer + fence caching — done: one cached
-  resettable command buffer and fence per object (the one-shot wait remains)
-- Resource allocation thrashing — done: no per-operation fence/cmd allocation;
-  `operationCount()` regression tests
-- Image layout tracking — done: non-static transitions use the tracked oldLayout
-- ImageUsage bit-flags — done: ImageUsageFlags bitmask supports combined usage
-- VkImageView RAII — done: Image::ImageView owner + createImageView() used in tests
-- Descriptor set inefficiencies — vkUpdateDescriptorSets every dispatch; move to setup phase
-- Queue thread-safety — done: VulkanDevice::submit + global submit2 mutex
-- Winding order via projection Y-flip — done: no projection Y-flip, negative-height
-  viewports, CCW front face locked by the `render_conventions` CTest
+All findings from the M5 testing review and Vulkan API review are resolved in
+Phases 1–5 above (see each phase's status note).
 
 ## M5.5 – Job System & Multi-Threading Foundation
 
@@ -674,7 +607,9 @@ prove M5 beats the M4 CPU-driven baseline and respects ADR-004.
 - **Scheduler:** Use a work-stealing scheduler (Chase-Lev deque per worker) with
   task batching. Avoid centralized mutex-protected task queues. Consider
   enkiTS or Taskflow as lightweight alternatives if building from scratch
-  proves too time-consuming. Decision recorded in ADR.
+  proves too time-consuming. Decision recorded in ADR. **Implementation note:**
+  the shipped scheduler uses a centralized queue with work-helping; the
+  Chase-Lev upgrade remains open (see Outstanding M5.5 follow-ups).
 
 ### 5.5.0 Decision Notes (Review)
 
@@ -771,7 +706,8 @@ Before implementation, resolve these design decisions and record them as ADRs:
 | 5.5.6d ✅ | High-concurrency stress test (1000 tasks, no deadlock) | T1 | Completes; all tasks execute; no deadlock |
 
 ### M5.5 Exit Criteria
-- Job system operational with work-stealing scheduler and configurable thread count.
+- Job system operational with a configurable thread count and work-helping
+  scheduler (centralized queue; Chase-Lev deques remain an open follow-up).
 - Content generation parallelized with bit-identical output.
 - Terrain height evaluation parallelized with SIMD.
 - Atmosphere LUT computation parallelized.
@@ -784,21 +720,24 @@ Before implementation, resolve these design decisions and record them as ADRs:
   (2.21× at 4 threads); see `benchmarks/scaling/README.md`.
 - Thread-local scratch allocators eliminate global heap contention.
 
-### Deferred from M5.5 review
-- GPU command recording multi-threading (secondary command buffers) — **done
-  in 5.5.5d** via `ParallelSecondaryRecorder` (no longer deferred).
-- Physics multi-threading (Jolt) deferred to M11 (Physics) — owner: M11.
-- Audio multi-threading (miniaudio) deferred to M12 (Audio) — owner: M12.
-- ECS multi-threaded system scheduling deferred to M10 (ECS) — owner: M10.
-- Work-stealing scheduler may be replaced with enkiTS or Taskflow if
-  implementation time exceeds budget — owner: M5.5.
+### Outstanding M5.5 follow-ups
 
-### Deferred from job_scheduler review (Google code review)
-- Chase-Lev work-stealing deques (still using centralized mutex queue with work-helping) — owner: M5.5.
-- dequeCapacity unused (pending work-stealing upgrade) — owner: M5.5.
-- Deterministic mode (SchedulerMode::Deterministic) not yet implemented — owner: M5.5.
-- Task memory leak / unbounded growth (need generational ring buffer) — owner: M5.5.
-- Epoch-based deletion partially implemented (2-frame delay; full epoch tracking pending) — owner: M5.5.
+Resolved and removed from this list: parallel secondary command recording
+(5.5.5d), Jolt job-system adapter (M11), miniaudio mixing thread (M12), and
+the conditional enkiTS/Taskflow replacement option (M5.5 complete using the
+in-house scheduler).
+
+Remaining open items:
+
+- ECS multi-threaded system scheduling — owner: M10. M10 shipped its exit proof
+  without parallel system scheduling; `src/ecs` does not submit to `JobScheduler`.
+- Chase-Lev work-stealing deques (current scheduler is a centralized mutex
+  queue with work-helping) — owner: M5.5.
+- `SchedulerConfig::dequeCapacity` is unused pending the work-stealing upgrade — owner: M5.5.
+- `SchedulerMode::Deterministic` is declared but not implemented — owner: M5.5.
+- Task storage is never reclaimed (unbounded `ownedTasks` growth; needs a
+  generational ring buffer) — owner: M5.5.
+- Epoch-based deletion uses a fixed 2-frame delay, not full epoch tracking — owner: M5.5.
 
 ## M6 – Deterministic Exploration (goal and proof)
 
@@ -821,19 +760,12 @@ Before implementation, resolve these design decisions and record them as ADRs:
   orbit to surface with bounded patch count and no cracks (T3, T4).
 
 ### Completed Features:
-- Quadtree Level-of-Detail (LOD) Management: CPU-based quadtree LOD selection for optimal geometry complexity; continuous descent from orbit to surface with bounded patch count
+- Quadtree Level-of-Detail (LOD) Management: CPU-based quadtree LOD selection for optimal geometry complexity; continuous descent from orbit to surface with bounded patch count; parallel traversal via `PlanetQuadtree::updateParallel`
 - Cubed Sphere Projection: Robust cubed sphere projection utilities for planetary geometry with seamless transitions between cube faces
-- Atmosphere Parameters: `AtmosphereParams` struct with Rayleigh/Mie scattering coefficients and sun direction (no LUT generation or rendering yet)
+- GPU Patch Pipeline: BDA vertex/index buffers and `planet_patch.slang` rendering with headless descent/seam proofs
+- Atmosphere: `AtmosphereParams`, parallel LUT generation (`generateAtmosphereLut`), and the `atmosphere.slang` scattering-shell renderer
 
-### Deferred Items (M7.1, M7.2, M7.4):
-Still deferred to later milestones:
-- M7.1 Parallel quadtree LOD traversal (current quadtree is CPU-only)
-- M7.2 GPU patch pipeline integration (no GPU patch pipeline yet)
-- M7.4 Parallel atmosphere LUT generation (atmosphere is currently
-  parameters-only; no LUT generation or rendering yet)
-
-CPU quadtree LOD selection, cubed-sphere projection, and atmosphere
-parameters are implemented; the GPU rendering half of M7 is not.
+All items formerly listed as deferred (M7.1, M7.2, M7.4) are complete; see the TODO table below.
 
 ### Status: complete (2026-11-07)
 GPU patch rendering, descent + seam proofs, parallel traversal, and
@@ -972,7 +904,7 @@ the respective milestone residuals, not new milestones.
 | 9.5.3 ✅ | Public toon material facade: `starforge::Toon` owning its pipeline/shaders, recording into `FrameContext` like `Starfield::record()` | T2 | Done: `starforge::Toon` in `include/starforge/toon.hpp` via raw-data bridge; public tests cover move-only, missing-shader API errors, render/recreate |
 | 9.5.4 ✅ | Cel-shaded proof scene + budgets: ship + nebula in toon style through the public API, golden image, frame-time budget vs ADR-004 | T3+T5 | Done: sandbox composes starfield + toon cube in one frame; `tests/goldens/toon_scene_128.png` committed; p95 frame time under the ADR-004 interval; zero validation errors |
 | 9.5.5 ✅ | Portability + material ramp: keep push constants below Vulkan's guaranteed 128-byte range and support a three-stop diffuse ramp (shadow/mid/lit colors) | T3 | Done: per-draw data lives in a host-mapped BDA buffer (one slot per frame in flight) instead of push constants; push block is 80 bytes; `midColor` alpha=0 derives the midpoint of shadow/base so existing two-color callers keep their look; custom mid tint renders exactly at the ramp midpoint; GPU and public suites stay green |
-| 9.5.6 ⬜ | **Production toon-showcase acceptance (review follow-up).** M9.5's cube+starfield proof validates the shader but does not prove the game art direction. A separate golden/budget gate is required before M19: authored/placeholder ship with outlined hull + stepped lighting + rim, glowing engine exhaust, nebula background, planet with atmosphere, asteroids with outlines, and a weapon fire/impact effect — all in one composed scene through the public API | T3+T5 | Production scene renders headlessly, golden committed, frame time within ADR-004 interval, zero validation errors. Do not mark M9.5's artistic goal done on the cube proof alone |
+| 9.5.6 ✅ | **Production toon-showcase acceptance (review follow-up).** M9.5's cube+starfield proof validates the shader but does not prove the game art direction. A separate golden/budget gate is required before M19: authored/placeholder ship with outlined hull + stepped lighting + rim, glowing engine exhaust, nebula background, planet with atmosphere, asteroids with outlines, and a weapon fire/impact effect — all in one composed scene through the public API | T3+T5 | Done: `test_toon_showcase.cpp` composes a chamfered ship hull, emissive exhaust + weapon beam, nebula/starfield backdrop, scattering-rim planet and three faceted outlined asteroids in one headless pass; golden `tests/goldens/toon_showcase_128.png`, p95 < 6.94 ms, zero validation errors. Public composition test records `Toon` mesh + `Starfield`/`Nebula` facades in one `renderFrame` |
 
 ### Material architecture (review follow-up — applies to M9.5 and M17)
 
@@ -985,20 +917,24 @@ Backgrounds (nebulae) stay soft with layered transitions and depth so the
 whole frame does not look artificially identical. Planets use stepped
 terrain lighting with atmospheric gradients.
 
-### Deferred production toon work (not done now)
+**Implementation note:** one `toon.slang` now composes these capabilities via
+a bitmask in the BDA draw data (emissive, fresnel shield, faceted, scattering
+rim, shadows/attenuation/detail) plus a fourth ramp stop. `ToonMesh` supplies
+caller-owned geometry (position / normal / baked outline normal) through BDA,
+so the showcase uses a chamfered ship hull, asteroid rocks, a planet sphere
+and emissive cones rather than cubes. Additive emissive materials use a third
+pipeline; no per-material shaders were added.
 
-These follow-ups are intentionally postponed because they need later
-architecture. Record them here so they are not lost:
+### Remaining production toon work (requires later architecture)
 
-| Item | Why later | Done when |
-|------|-----------|-----------|
-| Arbitrary/authored geometry | The current shader still uses the cube placeholder. Real mesh input, UVs/tangents, baked outline normals, textures/decals, and glTF material mapping belong to the M17 asset pipeline. | M17 step renders a glTF ship/station with the toon material |
-| Multi-stop palette textures, emissive regions, and patterned decals | M17 authored assets should supply ramps/material layers; the current 3-stop data path is the bridge, not the final material format. | Material defines at least four ramp stops plus emissive tint |
-| Screen-space crease/outline pass | Current inverted hull only draws outer silhouettes. Interior panel lines need a G-buffer/post pass with object ID, normals, and depth, including reverse-Z depth linearization. | Edge pass shows panel/crease lines without breaking inverted-hull silhouettes |
-| Shadows and richer light response | The shader currently has no shadow term, no light attenuation, and no UV/detail modulation. | A shadowed band renders correctly on ships/stations |
-| HDR/tonemap/bloom and sRGB policy | UNORM output clamps current palette colors; bloom is needed for engine glow. Decide the color-space pipeline before authoring final palette values. | HDR toon scene passes a golden/budget test without flattened highlight bands |
-| Stylized environment variants | Current starfield/nebula/dust are largely photoreal. Decide per-material vs global toon direction, then add cel styling to space backgrounds. | A toon-styled nebula/sky proof renders in the same golden test |
-| Toon HUD/panels/portraits and hero assets | UI toon styling is M16; authored hero meshes ship in M17. | Toon HUD + one authored hero mesh render with consistent outline/rim rules |
+| Item | Status | Owner / done when |
+|------|--------|-------------------|
+| Mesh input, baked outline normals, emissive tint, 4-stop ramp, shadow/attenuation/detail | **Done** in M9.5 — BDA `ToonMesh`, capability bitmask, `toon.slang` branches | — |
+| Authored glTF meshes, UVs/tangents, textures/decals and glTF→toon material mapping | Open — placeholder procedural meshes only | M17: render a glTF ship/station with the toon material |
+| Screen-space crease/outline pass | Open — inverted hull only draws outer silhouettes | Needs a G-buffer/post pass with object ID, normals, depth and reverse-Z linearization |
+| HDR/tonemap/bloom and sRGB policy | Open — UNORM output clamps palette colors | Decide the color-space pipeline; HDR toon scene passes a golden/budget test without flattened bands |
+| Stylized environment variants | Open — nebula/starfield remain photoreal | Decide per-material vs global toon direction; toon-styled sky proof in the golden test |
+| Toon HUD/panels/portraits and hero assets | Open — UI is M16, hero meshes are M17 | Toon HUD + one authored hero mesh with consistent outline/rim rules |
 
 ## Game Layer (M10+)
 

@@ -9,6 +9,7 @@
 #include <expected>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 
 namespace starforge::gpu_resources
@@ -47,13 +48,53 @@ struct ToonParams
     // Outline thickness in screen pixels (converted to view units per
     // draw from the context resolution and model distance).
     float outlineWidth = 2.0f;
+
+    // Composable material capabilities (bitmask, decoded in toon.slang).
+    // 1 = emissive, 2 = fresnel shield, 4 = faceted, 8 = scattering rim,
+    // 16 = shadows/attenuation/detail.
+    std::uint32_t capabilities = 0;
+    math::Vec4f emissiveColor{0.0f, 0.0f, 0.0f, 0.0f}; // rgb + intensity
+    math::Vec4f fresnelColor{0.0f, 0.0f, 0.0f, 0.0f};  // rgb + strength
+    math::Vec4f materialParams{0.0f, 0.0f, 0.0f, 0.0f}; // facet, shadow, attenuation, detail
+    math::Vec4f highlightColor{0.0f, 0.0f, 0.0f, 0.0f}; // fourth ramp stop + threshold
+};
+
+// One mesh vertex: position, shading normal, baked smooth outline normal.
+struct ToonVertex
+{
+    math::Vec3f position{};
+    math::Vec3f normal{};
+    math::Vec3f outlineNormal{};
+};
+
+// GPU-owned toon mesh (BDA vertex array, three float4 per vertex). Move-only.
+class ToonMesh
+{
+public:
+    ToonMesh() = default;
+    ~ToonMesh();
+    ToonMesh(ToonMesh&&) noexcept;
+    ToonMesh& operator=(ToonMesh&&) noexcept;
+    ToonMesh(const ToonMesh&) = delete;
+    ToonMesh& operator=(const ToonMesh&) = delete;
+
+    [[nodiscard]] std::uint64_t deviceAddress() const noexcept { return address_; }
+    [[nodiscard]] std::uint32_t vertexCount() const noexcept { return vertexCount_; }
+
+private:
+    friend class ToonRenderer;
+    ToonMesh(std::unique_ptr<gpu_resources::Buffer> buffer, std::uint64_t address, std::uint32_t count) noexcept;
+
+    std::unique_ptr<gpu_resources::Buffer> buffer_;
+    std::uint64_t address_ = 0;
+    std::uint32_t vertexCount_ = 0;
 };
 
 // Cel-shaded (toon) renderer: quantized diffuse bands, stepped specular,
-// rim light, and an inverted-hull outline pass, over a static cube until
-// real mesh assets land (M17). Lifetime matches StarfieldRenderer: the
-// caller must ensure the GPU is idle before destroying or recreating
-// while recorded frames may be in flight.
+// rim light, inverted-hull outlines, and composable material capabilities.
+// Geometry may be the built-in cube or a caller-created ToonMesh.
+// Lifetime matches StarfieldRenderer: the caller must ensure the GPU is
+// idle before destroying or recreating while recorded frames are in flight.
 class ToonRenderer
 {
 public:
@@ -84,6 +125,16 @@ public:
     // and scissor for the target extent.
     void render(VkCommandBuffer cmd, const ToonRenderContext& context, const ToonParams& params);
 
+    // Uploads a mesh into renderer-owned GPU memory. The renderer must
+    // outlive every mesh it creates.
+    [[nodiscard]] std::expected<ToonMesh, std::string>
+    createMesh(std::span<const ToonVertex> vertices);
+
+    // Records one draw with explicit mesh geometry. An invalid mesh falls
+    // back to the built-in cube.
+    void renderMesh(VkCommandBuffer cmd, const ToonRenderContext& context,
+                    const ToonParams& params, const ToonMesh& mesh);
+
 private:
     ToonRenderer() = default;
     void destroy() noexcept;
@@ -96,6 +147,7 @@ private:
     std::unique_ptr<gpu_resources::Buffer> drawDataBuffer_;
     std::optional<vulkan::GraphicsPipeline> toonPipeline_;
     std::optional<vulkan::GraphicsPipeline> outlinePipeline_;
+    std::optional<vulkan::GraphicsPipeline> emissivePipeline_; // additive glow
 };
 
 } // namespace starforge::environment

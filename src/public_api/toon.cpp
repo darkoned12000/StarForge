@@ -5,6 +5,7 @@
 #include "toon_bridge.hpp"
 
 #include <utility>
+#include <vector>
 
 #ifndef STARFORGE_SHADER_DIR
 #define STARFORGE_SHADER_DIR "shaders"
@@ -133,8 +134,94 @@ void Toon::record(FrameContext& frameContext, const Context& context, const Para
     rawParams.bandCount = params.bandCount;
     rawParams.rimStrength = params.rimStrength;
     rawParams.outlineWidth = params.outlineWidth;
+    rawParams.capabilities = params.capabilities;
+    rawParams.emissiveColor = toRaw(params.emissiveColor);
+    rawParams.fresnelColor = toRaw(params.fresnelColor);
+    rawParams.materialParams = toRaw(params.materialParams);
+    rawParams.highlightColor = toRaw(params.highlightColor);
 
     impl_->backend->render(RendererInternalAccess::commandBuffer(frameContext), rawContext, rawParams);
+}
+
+struct Toon::ToonMesh::Impl
+{
+    std::unique_ptr<bridge::RawToonMesh> backend;
+};
+
+Toon::ToonMesh::ToonMesh(std::unique_ptr<Impl> impl) noexcept : impl_(std::move(impl)) {}
+Toon::ToonMesh::~ToonMesh() = default;
+Toon::ToonMesh::ToonMesh(ToonMesh&&) noexcept = default;
+Toon::ToonMesh& Toon::ToonMesh::operator=(ToonMesh&&) noexcept = default;
+
+std::uint32_t Toon::ToonMesh::vertexCount() const noexcept
+{
+    return impl_ && impl_->backend ? impl_->backend->vertexCount() : 0u;
+}
+
+std::expected<Toon::ToonMesh, std::string>
+Toon::createMesh(std::span<const MeshVertex> vertices) const
+{
+    if (!impl_ || !impl_->backend)
+    {
+        return std::unexpected("Toon::createMesh failed: Toon is moved-from");
+    }
+    if (vertices.empty())
+    {
+        return std::unexpected("Toon::createMesh requires at least one vertex");
+    }
+
+    std::vector<bridge::RawToonVertex> raw(vertices.size());
+    for (std::size_t i = 0; i < vertices.size(); ++i)
+    {
+        raw[i].position[0] = vertices[i].position.x();
+        raw[i].position[1] = vertices[i].position.y();
+        raw[i].position[2] = vertices[i].position.z();
+        raw[i].normal[0] = vertices[i].normal.x();
+        raw[i].normal[1] = vertices[i].normal.y();
+        raw[i].normal[2] = vertices[i].normal.z();
+        raw[i].outlineNormal[0] = vertices[i].outlineNormal.x();
+        raw[i].outlineNormal[1] = vertices[i].outlineNormal.y();
+        raw[i].outlineNormal[2] = vertices[i].outlineNormal.z();
+    }
+    auto backend = impl_->backend->createMesh(raw.data(), static_cast<std::uint32_t>(raw.size()));
+    if (!backend) return std::unexpected(backend.error());
+
+    auto impl = std::make_unique<ToonMesh::Impl>();
+    impl->backend = std::move(*backend);
+    return ToonMesh(std::move(impl));
+}
+
+void Toon::recordMesh(FrameContext& frameContext, const Context& context,
+                      const Params& params, const ToonMesh& mesh)
+{
+    if (!impl_ || !impl_->backend || !mesh.impl_ || !mesh.impl_->backend) return;
+
+    bridge::RawToonContext rawContext;
+    rawContext.viewProj = toRaw(context.viewProj);
+    rawContext.modelView = toRaw(context.modelView);
+    rawContext.lightDirectionView = toRaw(context.lightDirectionView);
+    const Size2D extent = frameContext.extent();
+    const math::Vec2f resolution = context.resolution.x() <= 0.0f || context.resolution.y() <= 0.0f
+                                       ? math::Vec2f{static_cast<float>(extent.width),
+                                                     static_cast<float>(extent.height)}
+                                       : context.resolution;
+    rawContext.resolution = toRaw(resolution);
+
+    bridge::RawToonParams rawParams;
+    rawParams.baseColor = toRaw(params.baseColor);
+    rawParams.shadowColor = toRaw(params.shadowColor);
+    rawParams.midColor = toRaw(params.midColor);
+    rawParams.bandCount = params.bandCount;
+    rawParams.rimStrength = params.rimStrength;
+    rawParams.outlineWidth = params.outlineWidth;
+    rawParams.capabilities = params.capabilities;
+    rawParams.emissiveColor = toRaw(params.emissiveColor);
+    rawParams.fresnelColor = toRaw(params.fresnelColor);
+    rawParams.materialParams = toRaw(params.materialParams);
+    rawParams.highlightColor = toRaw(params.highlightColor);
+
+    impl_->backend->renderMesh(RendererInternalAccess::commandBuffer(frameContext),
+                               rawContext, rawParams, *mesh.impl_->backend);
 }
 
 std::expected<Renderer::FrameResult, std::string> Toon::render(Renderer& renderer, const Context& context, const Params& params)

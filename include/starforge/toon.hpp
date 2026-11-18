@@ -3,8 +3,10 @@
 #include "starforge/math.hpp"
 #include "starforge/renderer.hpp"
 
+#include <cstdint>
 #include <expected>
 #include <memory>
+#include <span>
 #include <string>
 
 namespace starforge
@@ -51,6 +53,46 @@ public:
         float bandCount = 3.0f;
         float rimStrength = 0.5f;
         float outlineWidth = 2.0f; // pixels
+
+        // Composable material capabilities (bitmask, decoded by the shader):
+        // 1 = emissive, 2 = fresnel shield, 4 = faceted, 8 = scattering rim,
+        // 16 = shadows/attenuation/detail. They are combined on one material,
+        // not exposed as separate shaders.
+        std::uint32_t capabilities = 0;
+        math::Vec4f emissiveColor{0.0f, 0.0f, 0.0f, 0.0f}; // rgb + intensity
+        math::Vec4f fresnelColor{0.0f, 0.0f, 0.0f, 0.0f};  // rgb + strength
+        math::Vec4f materialParams{0.0f, 0.0f, 0.0f, 0.0f}; // facet, shadow, attenuation, detail
+        math::Vec4f highlightColor{0.0f, 0.0f, 0.0f, 0.0f}; // fourth ramp stop + threshold
+    };
+
+    // One mesh vertex: position, shading normal, baked smooth outline normal.
+    // All values are in object space; no Vulkan types are exposed.
+    struct MeshVertex
+    {
+        math::Vec3f position{};
+        math::Vec3f normal{};
+        math::Vec3f outlineNormal{};
+    };
+
+    // GPU-owned toon mesh. Move-only; the Toon renderer that created it must
+    // outlive it. Create from object-space vertices via Toon::createMesh().
+    class ToonMesh
+    {
+    public:
+        ToonMesh() = default;
+        ~ToonMesh();
+        ToonMesh(ToonMesh&&) noexcept;
+        ToonMesh& operator=(ToonMesh&&) noexcept;
+        ToonMesh(const ToonMesh&) = delete;
+        ToonMesh& operator=(const ToonMesh&) = delete;
+
+        [[nodiscard]] std::uint32_t vertexCount() const noexcept;
+
+    private:
+        friend class Toon;
+        struct Impl;
+        explicit ToonMesh(std::unique_ptr<Impl> impl) noexcept;
+        std::unique_ptr<Impl> impl_;
     };
 
     [[nodiscard]] static std::expected<Toon, std::string> create(Renderer& renderer, const CreateInfo& info);
@@ -64,6 +106,16 @@ public:
     // Records the toon mesh (base pass, then outline pass) into an
     // active frame (inside Renderer::renderFrame).
     void record(FrameContext& frameContext, const Context& context, const Params& params);
+
+    // Uploads a mesh into renderer-owned GPU memory. The renderer must
+    // outlive every mesh it creates. Empty vertex lists are rejected.
+    [[nodiscard]] std::expected<ToonMesh, std::string>
+    createMesh(std::span<const MeshVertex> vertices) const;
+
+    // Records a draw with explicit mesh geometry (base + outline, or the
+    // additive pass for emissive materials).
+    void recordMesh(FrameContext& frameContext, const Context& context,
+                    const Params& params, const ToonMesh& mesh);
 
     // Standalone helper: clears, records the toon mesh, and presents.
     [[nodiscard]] std::expected<Renderer::FrameResult, std::string>

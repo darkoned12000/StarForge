@@ -29,9 +29,13 @@ struct alignas(16) DrawData
     // Alpha == 0 means the midpoint of shadowColor and baseColor.
     math::Vec4f midColor{0.0f, 0.0f, 0.0f, 0.0f};
     math::Vec4f params{3.0f, 0.5f, 0.02f, 0.0f};
+    math::Vec4f emissive{0.0f, 0.0f, 0.0f, 0.0f};
+    math::Vec4f fresnel{0.0f, 0.0f, 0.0f, 0.0f};
+    math::Vec4f material{0.0f, 0.0f, 0.0f, 0.0f};
+    math::Vec4f highlight{0.0f, 0.0f, 0.0f, 0.0f};
 };
 
-static_assert(sizeof(DrawData) == 144, "Toon DrawData must match the shader layout (144 bytes)");
+static_assert(sizeof(DrawData) == 208, "Toon DrawData must match the shader layout (208 bytes)");
 static_assert(offsetof(DrawData, params) == 128, "Toon DrawData params offset must be 128");
 
 // Push constants for toon.slang: clip matrix + BDA pointer + mode. 80 bytes.
@@ -39,14 +43,19 @@ struct PushConstants
 {
     math::Mat4f mvp{1.0f};
     std::uint64_t drawDataAddress = 0;
+    std::uint64_t vertexAddress = 0;
     std::uint32_t mode = 0;
-    std::uint32_t pad = 0;
+    std::uint32_t vertexCount = 0;
+    std::uint32_t pad0 = 0;
+    std::uint32_t pad1 = 0;
 };
 
-static_assert(sizeof(PushConstants) == 80, "Toon push constants must be 80 bytes");
+static_assert(sizeof(PushConstants) == 96, "Toon push constants must be 96 bytes");
 static_assert(offsetof(PushConstants, drawDataAddress) == 64, "Toon draw data address offset must be 64");
+static_assert(offsetof(PushConstants, vertexAddress) == 72, "Toon vertex address offset must be 72");
 
 constexpr std::size_t kDrawDataStride = 256;
+constexpr std::uint32_t kMaxDrawsPerFrame = 128;
 
 std::vector<char> readFile(const std::string& path)
 {
@@ -132,7 +141,7 @@ std::expected<ToonRenderer, std::string> ToonRenderer::create(const CreateInfo& 
     vkGetPhysicalDeviceProperties(info.physicalDevice, &deviceProps);
     if (deviceProps.limits.maxPushConstantsSize < sizeof(PushConstants))
     {
-        return std::unexpected("ToonRenderer: device push-constant range is smaller than 80 bytes");
+        return std::unexpected("ToonRenderer: device push-constant range is smaller than 96 bytes");
     }
 
     ToonRenderer renderer;
@@ -151,7 +160,7 @@ std::expected<ToonRenderer, std::string> ToonRenderer::create(const CreateInfo& 
         return std::unexpected(std::move(allocator.error()));
     }
     auto drawBuffer = gpu_resources::Buffer::create(*allocator, {
-        .size = static_cast<VkDeviceSize>(kDrawDataStride * info.framesInFlight),
+        .size = static_cast<VkDeviceSize>(kDrawDataStride * kMaxDrawsPerFrame * info.framesInFlight),
         .usage = gpu_resources::BufferUsage::Storage,
         .memory = gpu_resources::MemoryPlacement::CpuToGpu,
         .name = "starforge.Toon.DrawData",
@@ -229,10 +238,6 @@ std::expected<ToonRenderer, std::string> ToonRenderer::create(const CreateInfo& 
         .viewportHeight = 1.0f,
     });
 
-    // Shader modules are consumed by pipeline creation.
-    vkDestroyShaderModule(info.device, *vertModule, nullptr);
-    vkDestroyShaderModule(info.device, *fragModule, nullptr);
-
     if (!toon)
     {
         vkDestroyPipelineLayout(info.device, renderer.pipelineLayout_, nullptr);
@@ -245,8 +250,37 @@ std::expected<ToonRenderer, std::string> ToonRenderer::create(const CreateInfo& 
         renderer.pipelineLayout_ = VK_NULL_HANDLE;
         return std::unexpected(outline.error());
     }
+    auto emissive = vulkan::GraphicsPipeline::create({
+        .device = info.device,
+        .colorFormat = info.colorFormat,
+        .depthFormat = info.depthFormat,
+        .vertexShader = *vertModule,
+        .fragmentShader = *fragModule,
+        .pipelineLayout = renderer.pipelineLayout_,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+        .depthTest = true,
+        .depthWrite = false,
+        .depthCompare = VK_COMPARE_OP_LESS,
+        .backfaceCulling = false,
+        .blendEnable = true,
+        .blendSrcFactor = VK_BLEND_FACTOR_ONE,
+        .blendDstFactor = VK_BLEND_FACTOR_ONE,
+        .viewportWidth = 1.0f,
+        .viewportHeight = 1.0f,
+    });
+    if (!emissive)
+    {
+        vkDestroyPipelineLayout(info.device, renderer.pipelineLayout_, nullptr);
+        renderer.pipelineLayout_ = VK_NULL_HANDLE;
+        return std::unexpected(emissive.error());
+    }
     renderer.toonPipeline_ = std::move(*toon);
     renderer.outlinePipeline_ = std::move(*outline);
+    renderer.emissivePipeline_ = std::move(*emissive);
+
+    // Shader modules are consumed by pipeline creation.
+    vkDestroyShaderModule(info.device, *vertModule, nullptr);
+    vkDestroyShaderModule(info.device, *fragModule, nullptr);
     return renderer;
 }
 
@@ -263,7 +297,8 @@ ToonRenderer::ToonRenderer(ToonRenderer&& other) noexcept
       allocator_(std::move(other.allocator_)),
       drawDataBuffer_(std::move(other.drawDataBuffer_)),
       toonPipeline_(std::exchange(other.toonPipeline_, std::nullopt)),
-      outlinePipeline_(std::exchange(other.outlinePipeline_, std::nullopt))
+      outlinePipeline_(std::exchange(other.outlinePipeline_, std::nullopt)),
+      emissivePipeline_(std::exchange(other.emissivePipeline_, std::nullopt))
 {
 }
 
@@ -280,12 +315,14 @@ ToonRenderer& ToonRenderer::operator=(ToonRenderer&& other) noexcept
         drawDataBuffer_ = std::move(other.drawDataBuffer_);
         toonPipeline_ = std::exchange(other.toonPipeline_, std::nullopt);
         outlinePipeline_ = std::exchange(other.outlinePipeline_, std::nullopt);
+        emissivePipeline_ = std::exchange(other.emissivePipeline_, std::nullopt);
     }
     return *this;
 }
 
 void ToonRenderer::destroy() noexcept
 {
+    emissivePipeline_.reset();
     outlinePipeline_.reset();
     toonPipeline_.reset();
     if (device_ != VK_NULL_HANDLE && pipelineLayout_ != VK_NULL_HANDLE)
@@ -300,9 +337,63 @@ void ToonRenderer::destroy() noexcept
     currentDrawSlot_ = 0;
 }
 
-void ToonRenderer::render(VkCommandBuffer cmd, const ToonRenderContext& context, const ToonParams& params)
+ToonMesh::ToonMesh(std::unique_ptr<gpu_resources::Buffer> buffer, std::uint64_t address,
+                   std::uint32_t count) noexcept
+    : buffer_(std::move(buffer)), address_(address), vertexCount_(count)
 {
-    if (!toonPipeline_.has_value() || !outlinePipeline_.has_value())
+}
+
+ToonMesh::~ToonMesh() = default;
+ToonMesh::ToonMesh(ToonMesh&&) noexcept = default;
+ToonMesh& ToonMesh::operator=(ToonMesh&&) noexcept = default;
+
+std::expected<ToonMesh, std::string> ToonRenderer::createMesh(std::span<const ToonVertex> vertices)
+{
+    if (!allocator_ || vertices.empty())
+    {
+        return std::unexpected("ToonRenderer::createMesh requires a renderer and non-empty vertices");
+    }
+
+    const std::size_t size = vertices.size() * 48;
+    std::vector<char> host(size);
+    for (std::size_t i = 0; i < vertices.size(); ++i)
+    {
+        auto* out = reinterpret_cast<float*>(host.data() + i * 48);
+        out[0] = vertices[i].position.x;
+        out[1] = vertices[i].position.y;
+        out[2] = vertices[i].position.z;
+        out[4] = vertices[i].normal.x;
+        out[5] = vertices[i].normal.y;
+        out[6] = vertices[i].normal.z;
+        out[8] = vertices[i].outlineNormal.x;
+        out[9] = vertices[i].outlineNormal.y;
+        out[10] = vertices[i].outlineNormal.z;
+    }
+
+    auto buffer = gpu_resources::Buffer::create(*allocator_, {
+        .size = static_cast<VkDeviceSize>(size),
+        .usage = gpu_resources::BufferUsage::Storage,
+        .memory = gpu_resources::MemoryPlacement::CpuToGpu,
+        .name = "starforge.Toon.Mesh",
+    });
+    if (!buffer) return std::unexpected(buffer.error());
+
+    {
+        auto mapped = buffer->map();
+        if (!mapped) return std::unexpected(mapped.error());
+        std::memcpy(*mapped, host.data(), size);
+        (void)buffer->flush(0, size);
+        buffer->unmap();
+    }
+    const std::uint64_t address = buffer->deviceAddress(device_);
+    return ToonMesh(std::make_unique<gpu_resources::Buffer>(std::move(*buffer)), address,
+                    static_cast<std::uint32_t>(vertices.size()));
+}
+
+void ToonRenderer::renderMesh(VkCommandBuffer cmd, const ToonRenderContext& context,
+                              const ToonParams& params, const ToonMesh& mesh)
+{
+    if (!toonPipeline_.has_value() || !outlinePipeline_.has_value() || !drawDataBuffer_)
     {
         return;
     }
@@ -313,10 +404,12 @@ void ToonRenderer::render(VkCommandBuffer cmd, const ToonRenderContext& context,
     drawData.baseColor = params.baseColor;
     drawData.shadowColor = params.shadowColor;
     drawData.midColor = params.midColor;
+    drawData.emissive = params.emissiveColor;
+    drawData.fresnel = params.fresnelColor;
+    drawData.material = params.materialParams;
+    drawData.highlight = params.highlightColor;
 
-    // Convert the pixel outline width to object units: view units per
-    // pixel at depth d is ~2d / height, and object units scale by the
-    // modelView basis length (uniform scale).
+    // Pixel outline width -> object units (uniform scale assumed).
     const auto& translation = context.modelView[3];
     const float distance = std::sqrt(translation[0] * translation[0] + translation[1] * translation[1] +
                                      translation[2] * translation[2]);
@@ -326,12 +419,14 @@ void ToonRenderer::render(VkCommandBuffer cmd, const ToonRenderContext& context,
     const float outlineObjectWidth =
         scale > 0.0f ? params.outlineWidth * distance / height * 2.0f / scale : 0.0f;
 
-    drawData.params = math::Vec4f{std::max(params.bandCount, 2.0f), params.rimStrength, outlineObjectWidth, 0.0f};
+    drawData.params = math::Vec4f{std::max(params.bandCount, 2.0f), params.rimStrength,
+                                  outlineObjectWidth, static_cast<float>(params.capabilities)};
 
-    // Upload into this call's frame slot, then make the host write visible
-    // to both shader stages before the draws below.
-    const std::uint32_t slot = currentDrawSlot_ % std::max(1U, framesInFlight_);
-    currentDrawSlot_ = (slot + 1) % std::max(1U, framesInFlight_);
+    // Monotonic slot cursor over framesInFlight * kMaxDrawsPerFrame slots:
+    // a slot is never rewritten while an in-flight frame can still read it.
+    const std::uint32_t totalSlots = std::max(1U, framesInFlight_) * kMaxDrawsPerFrame;
+    const std::uint32_t slot = currentDrawSlot_ % totalSlots;
+    ++currentDrawSlot_;
     const VkDeviceSize slotOffset = static_cast<VkDeviceSize>(slot) * kDrawDataStride;
     {
         auto mapped = drawDataBuffer_->map();
@@ -347,18 +442,30 @@ void ToonRenderer::render(VkCommandBuffer cmd, const ToonRenderContext& context,
     PushConstants push;
     push.mvp = context.viewProj;
     push.drawDataAddress = drawDataBuffer_->deviceAddress(device_) + slotOffset;
-    push.mode = 0;
+    push.vertexAddress = mesh.deviceAddress();
+    push.vertexCount = mesh.vertexCount();
 
-    // Base pass first: writes depth, so the outline pass (which runs
-    // after without depth writes) only appears beyond the silhouette.
+    const std::uint32_t vertexCount = push.vertexCount > 0 ? push.vertexCount : 36u;
+    const bool emissive = (params.capabilities & 1u) != 0;
+
+    // Base pass first: writes depth, so the outline pass only appears beyond
+    // the silhouette. Emissive materials use the additive glow pipeline.
     vkCmdPushConstants(cmd, pipelineLayout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(push), &push);
-    toonPipeline_->bindAndDraw(cmd, 36, 0, 1);
+    (emissive ? *emissivePipeline_ : *toonPipeline_).bindAndDraw(cmd, vertexCount, 0, 1);
 
-    push.mode = 1;
-    vkCmdPushConstants(cmd, pipelineLayout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                       0, sizeof(push), &push);
-    outlinePipeline_->bindAndDraw(cmd, 36, 0, 1);
+    if (!emissive)
+    {
+        push.mode = 1;
+        vkCmdPushConstants(cmd, pipelineLayout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0, sizeof(push), &push);
+        outlinePipeline_->bindAndDraw(cmd, vertexCount, 0, 1);
+    }
+}
+
+void ToonRenderer::render(VkCommandBuffer cmd, const ToonRenderContext& context, const ToonParams& params)
+{
+    renderMesh(cmd, context, params, ToonMesh{});
 }
 
 } // namespace starforge::environment

@@ -3,6 +3,7 @@
 #include "environment/toon_renderer.hpp"
 
 #include <utility>
+#include <vector>
 
 namespace starforge::public_api_bridge
 {
@@ -43,6 +44,15 @@ namespace
     result.bandCount = value.bandCount;
     result.rimStrength = value.rimStrength;
     result.outlineWidth = value.outlineWidth;
+    result.capabilities = value.capabilities;
+    result.emissiveColor = ::starforge::math::Vec4f{value.emissiveColor.x, value.emissiveColor.y,
+                                                     value.emissiveColor.z, value.emissiveColor.w};
+    result.fresnelColor = ::starforge::math::Vec4f{value.fresnelColor.x, value.fresnelColor.y,
+                                                    value.fresnelColor.z, value.fresnelColor.w};
+    result.materialParams = ::starforge::math::Vec4f{value.materialParams.x, value.materialParams.y,
+                                                      value.materialParams.z, value.materialParams.w};
+    result.highlightColor = ::starforge::math::Vec4f{value.highlightColor.x, value.highlightColor.y,
+                                                      value.highlightColor.z, value.highlightColor.w};
     return result;
 }
 
@@ -93,6 +103,51 @@ void RawToon::render(VkCommandBuffer cmd, const RawToonContext& context, const R
     if (impl_)
     {
         impl_->renderer.render(cmd, toInternalContext(context), toInternalParams(params));
+    }
+}
+
+struct RawToonMesh::Impl
+{
+    environment::ToonMesh mesh;
+};
+
+RawToonMesh::~RawToonMesh() = default;
+RawToonMesh::RawToonMesh(RawToonMesh&&) noexcept = default;
+RawToonMesh& RawToonMesh::operator=(RawToonMesh&&) noexcept = default;
+
+std::expected<std::unique_ptr<RawToonMesh>, std::string>
+RawToon::createMesh(const RawToonVertex* vertices, std::uint32_t vertexCount)
+{
+    if (!impl_ || vertices == nullptr || vertexCount == 0)
+    {
+        return std::unexpected("RawToon::createMesh requires a renderer and vertices");
+    }
+    std::vector<environment::ToonVertex> converted(vertexCount);
+    for (std::uint32_t i = 0; i < vertexCount; ++i)
+    {
+        converted[i].position = ::starforge::math::Vec3f{vertices[i].position[0], vertices[i].position[1],
+                                                          vertices[i].position[2]};
+        converted[i].normal = ::starforge::math::Vec3f{vertices[i].normal[0], vertices[i].normal[1],
+                                                        vertices[i].normal[2]};
+        converted[i].outlineNormal = ::starforge::math::Vec3f{
+            vertices[i].outlineNormal[0], vertices[i].outlineNormal[1], vertices[i].outlineNormal[2]};
+    }
+    auto mesh = impl_->renderer.createMesh(converted);
+    if (!mesh) return std::unexpected(mesh.error());
+
+    auto result = std::unique_ptr<RawToonMesh>(new RawToonMesh());
+    result->impl_ = std::make_unique<RawToonMesh::Impl>(RawToonMesh::Impl{std::move(*mesh)});
+    result->vertexCount_ = vertexCount;
+    return result;
+}
+
+void RawToon::renderMesh(VkCommandBuffer cmd, const RawToonContext& context,
+                         const RawToonParams& params, const RawToonMesh& mesh)
+{
+    if (impl_ && mesh.impl_)
+    {
+        impl_->renderer.renderMesh(cmd, toInternalContext(context), toInternalParams(params),
+                                   mesh.impl_->mesh);
     }
 }
 

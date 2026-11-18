@@ -57,6 +57,38 @@ struct RawToonParams
     float bandCount = 3.0f;
     float rimStrength = 0.5f;
     float outlineWidth = 2.0f;
+    std::uint32_t capabilities = 0;
+    RawVec4f emissiveColor;
+    RawVec4f fresnelColor;
+    RawVec4f materialParams;
+    RawVec4f highlightColor;
+};
+
+struct RawToonVertex
+{
+    float position[3] = {};
+    float normal[3] = {};
+    float outlineNormal[3] = {};
+};
+
+// Opaque GPU mesh owned by RawToon. Must be destroyed before the renderer.
+class RawToonMesh
+{
+public:
+    RawToonMesh() = default;
+    ~RawToonMesh();
+    RawToonMesh(RawToonMesh&&) noexcept;
+    RawToonMesh& operator=(RawToonMesh&&) noexcept;
+    RawToonMesh(const RawToonMesh&) = delete;
+    RawToonMesh& operator=(const RawToonMesh&) = delete;
+
+    [[nodiscard]] std::uint32_t vertexCount() const noexcept { return vertexCount_; }
+
+private:
+    friend class RawToon;
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+    std::uint32_t vertexCount_ = 0;
 };
 
 // Owns the internal toon renderer (pipelines, shader modules).
@@ -84,6 +116,12 @@ public:
     RawToon& operator=(RawToon&& other) noexcept;
 
     void render(VkCommandBuffer cmd, const RawToonContext& context, const RawToonParams& params);
+
+    [[nodiscard]] std::expected<std::unique_ptr<RawToonMesh>, std::string>
+    createMesh(const RawToonVertex* vertices, std::uint32_t vertexCount);
+
+    void renderMesh(VkCommandBuffer cmd, const RawToonContext& context,
+                    const RawToonParams& params, const RawToonMesh& mesh);
 
 private:
     RawToon() = default;

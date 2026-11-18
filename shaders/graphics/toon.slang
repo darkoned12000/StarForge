@@ -78,15 +78,23 @@ struct DrawData
     // Optional middle color of the diffuse ramp. Alpha == 0 means the
     // midpoint of shadowColor and baseColor.
     float4 midColor;
-    float4 params; // x: bandCount, y: rimStrength, z: outline width in view units, w: reserved
+    float4 params; // x: bandCount, y: rimStrength, z: outline width in view units, w: capability bits
+    // Reusable material capabilities (combined, not seven separate shaders):
+    float4 emissive;  // rgb + intensity (engine cores, weapon fire)
+    float4 fresnel;   // rgb + strength (shield rim, atmosphere gradient)
+    float4 material;  // x: facet, y: shadow strength, z: attenuation, w: detail
+    float4 highlight; // rgb: fourth ramp stop, a: banded threshold (0 = unused)
 };
 
 struct PushConstants
 {
     float4x4 mvp;
     uint64_t drawDataAddress;
+    uint64_t vertexAddress; // 0 = built-in cube; otherwise float4 pos/normal/outline per vertex
     uint mode; // 0 = toon, 1 = outline
-    uint pad;
+    uint vertexCount;
+    uint pad0;
+    uint pad1;
 };
 
 [[vk::push_constant]] PushConstants pc;
@@ -114,6 +122,21 @@ VSOutput vertexMain(uint vertexIndex : SV_VertexID)
     uint idx = min(vertexIndex, 35u);
     float3 objectPos = kCubePositions[idx];
     float3 objectNormal = kCubeNormals[idx];
+    float3 outlineNormal = kCubeOutlineNormals[idx];
+
+    // Optional caller-owned mesh (three float4 per vertex: position, normal,
+    // baked smooth outline normal). Zero address keeps the built-in cube.
+    if (pc.vertexAddress != 0u && vertexIndex < pc.vertexCount)
+    {
+        uint64_t base = pc.vertexAddress + uint64_t(vertexIndex) * 48u;
+        typedef vk::BufferPointer<float4> Float4Ptr;
+        Float4Ptr pp = { base };
+        Float4Ptr np = { base + 16u };
+        Float4Ptr op = { base + 32u };
+        objectPos = pp.Get().xyz;
+        objectNormal = np.Get().xyz;
+        outlineNormal = op.Get().xyz;
+    }
 
     DrawDataPtr drawPtr = { pc.drawDataAddress };
     DrawData draw = drawPtr.Get();
@@ -123,7 +146,7 @@ VSOutput vertexMain(uint vertexIndex : SV_VertexID)
         // Outline extrusion along smoothed outline normals. params.z is a
         // CPU-computed object-space width derived from the desired
         // screen-pixel thickness (exact for rigid/uniform transforms).
-        objectPos += kCubeOutlineNormals[idx] * draw.params.z;
+        objectPos += outlineNormal * draw.params.z;
     }
 
     float4 viewPos = mul(draw.modelView, float4(objectPos, 1.0));
@@ -182,5 +205,55 @@ float4 fragmentMain(VSOutput input) : SV_Target
     float rim = aastep(0.6, pow(1.0 - max(dot(normal, viewDir), 0.0), 3.0)) * draw.params.y;
 
     float3 color = diffuse + (spec + rim) * draw.baseColor.rgb;
+
+    // Fourth ramp stop (authored palettes; placeholders can use it too).
+    if (draw.highlight.w > 0.0)
+    {
+        color = lerp(color, draw.highlight.rgb,
+                     smoothstep(draw.highlight.w - 0.15, draw.highlight.w + 0.15, banded));
+    }
+
+    uint caps = uint(draw.params.w + 0.5);
+    float facing = 1.0 - max(dot(normal, viewDir), 0.0);
+
+    // Emissive tint: engine exhaust, glowing cores, weapon fire/impact.
+    if ((caps & 1u) != 0u)
+    {
+        color += draw.emissive.rgb * draw.emissive.w;
+    }
+
+    // Fresnel shield rim / atmospheric scattering gradient.
+    if ((caps & 2u) != 0u || (caps & 8u) != 0u)
+    {
+        float fresnel = pow(facing, 3.0);
+        if ((caps & 2u) != 0u)
+        {
+            color = lerp(color, draw.fresnel.rgb, clamp(fresnel * draw.fresnel.w, 0.0, 1.0));
+        }
+        else
+        {
+            color += lerp(draw.shadowColor.rgb, draw.fresnel.rgb, fresnel) * draw.fresnel.w;
+        }
+    }
+
+    // Faceted asteroid lighting from macro-normal quantization.
+    if ((caps & 4u) != 0u)
+    {
+        float3 facet = normalize(floor(normal * 4.0 + 0.5) / 4.0);
+        float facetLight = max(dot(facet, lightDir), 0.0);
+        color = lerp(color, color * (0.55 + 0.45 * facetLight), draw.material.x);
+    }
+
+    // Shadows, light attenuation and surface detail modulation.
+    if ((caps & 16u) != 0u)
+    {
+        float attenuation = 1.0 / (1.0 + draw.material.z * dot(input.positionView, input.positionView));
+        color *= lerp(1.0, attenuation, step(0.001, draw.material.z));
+        color = lerp(color, draw.shadowColor.rgb,
+                     draw.material.y * (1.0 - aastep(0.25, ndotl)));
+        color *= lerp(1.0, 0.85 + 0.15 * sin(input.positionView.x * draw.material.w * 10.0),
+                      step(0.001, draw.material.w));
+    }
+
     return float4(color, draw.baseColor.a);
 }

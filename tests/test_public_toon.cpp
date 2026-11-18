@@ -2,7 +2,10 @@
 #include <doctest/doctest.h>
 
 #include "starforge/application.hpp"
+#include "starforge/nebula.hpp"
+#include "starforge/starfield.hpp"
 #include "starforge/math.hpp"
+#include "starforge/sun.hpp"
 #include "starforge/renderer.hpp"
 #include "starforge/toon.hpp"
 
@@ -11,6 +14,7 @@
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace
 {
@@ -114,6 +118,67 @@ TEST_CASE("Public Toon: renders a cel-shaded frame through the public renderer")
     auto movedRender = moved.render(*renderer, context, params);
     REQUIRE_MESSAGE(movedRender.has_value(), movedRender.error());
     CHECK(*movedRender == starforge::Renderer::FrameResult::Presented);
+
+    renderer->waitIdle();
+}
+
+TEST_CASE("Public Toon: production showcase composes through public API (9.5.6)")
+{
+    if (!hasDisplay())
+    {
+        WARN("Skipping showcase composition: no Wayland/X11 display is available");
+        return;
+    }
+
+    auto app = starforge::Application::create({
+        .title = "STARFORGE Toon Showcase", .width = 320, .height = 240, .resizable = false});
+    REQUIRE(app.has_value());
+    auto renderer = starforge::Renderer::create(*app, {.framesInFlight = 2});
+    REQUIRE(renderer.has_value());
+
+    auto toon = starforge::Toon::create(*renderer, {});
+    REQUIRE(toon.has_value());
+    auto stars = starforge::Starfield::create(*renderer, {});
+    REQUIRE(stars.has_value());
+    auto nebula = starforge::Nebula::create(*renderer, {});
+    REQUIRE(nebula.has_value());
+    auto sun = starforge::Sun::create(*renderer, {});
+    REQUIRE(sun.has_value());
+
+    // A small procedural hull (tetrahedral wedge) uploaded as a toon mesh.
+    std::vector<starforge::Toon::MeshVertex> vertices;
+    auto vertex = [](float x, float y, float z) {
+        return starforge::Toon::MeshVertex{{x, y, z}, {0.0f, 1.0f, 0.0f}, {x, y, z}};
+    };
+    vertices.push_back(vertex(0.0f, 0.5f, 0.0f));
+    vertices.push_back(vertex(-0.5f, -0.5f, 0.5f));
+    vertices.push_back(vertex(0.5f, -0.5f, 0.5f));
+    auto mesh = toon->createMesh(vertices);
+    REQUIRE(mesh.has_value());
+    CHECK(mesh->vertexCount() == 3);
+
+    auto context = demoContext();
+    starforge::Toon::Params material;
+    material.capabilities = 1u | 8u; // emissive + scattering rim, one shader
+    material.emissiveColor = {0.5f, 1.0f, 1.5f, 0.8f};
+    material.fresnelColor = {0.3f, 0.6f, 1.0f, 0.7f};
+
+    starforge::Starfield::RenderContext starContext;
+    starContext.viewProj = context.viewProj;
+    starContext.invViewProj = starforge::math::inverse(context.viewProj);
+    starContext.resolution = {320.0f, 240.0f};
+    starforge::Nebula::RenderContext nebulaContext;
+    nebulaContext.viewProj = context.viewProj;
+    nebulaContext.invViewProj = starContext.invViewProj;
+    nebulaContext.resolution = starContext.resolution;
+
+    auto frame = renderer->renderFrame({}, [&](starforge::FrameContext& fc) {
+        nebula->record(fc, nebulaContext, {});
+        stars->record(fc, starContext, {});
+        toon->recordMesh(fc, context, material, *mesh);
+    });
+    REQUIRE(frame.has_value());
+    CHECK(*frame == starforge::Renderer::FrameResult::Presented);
 
     renderer->waitIdle();
 }
