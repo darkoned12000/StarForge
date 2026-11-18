@@ -28,16 +28,22 @@
     "frustum_culling": {
       "budget": 0.30,
       "applies_to": "total_instances",
+      "metric": "",
+      "owner_milestone": "M5",
       "notes": "3 ns/instance at 100k assumes early-out, SoA layout. Revisit if naive."
     },
     "draw_submission": {
       "budget": 0.80,
       "applies_to": "visible_instances",
+      "metric": "cpu_submission_ms",
+      "owner_milestone": "M4.3",
       "notes": "Competent path (CPU culling). Naive path is baseline to beat at 2.00 ms."
     },
     "transform_composition": {
       "budget": 0.20,
       "applies_to": "visible_instances",
+      "metric": "",
+      "owner_milestone": "M4.3",
       "notes": "Double-to-float cast for camera-relative positions."
     },
     "headroom": 1.39,
@@ -49,21 +55,29 @@
     "gpu_culling": {
       "budget": 0.50,
       "applies_to": "total_instances",
+      "metric": "",
+      "owner_milestone": "M5",
       "notes": "M5 compute shader. Placeholder until measured."
     },
     "depth_prepass": {
       "budget": 0.30,
       "applies_to": "visible_triangles",
+      "metric": "",
+      "owner_milestone": "M5",
       "notes": "Optional."
     },
     "main_geometry_pass": {
       "budget": 2.50,
       "applies_to": "visible_triangles",
-      "notes": "Reverse-Z, D32_SFLOAT."
+      "metric": "",
+      "owner_milestone": "M4.3",
+      "notes": "Reverse-Z, D32_SFLOAT. M4 harness reports whole-frame GPU time only; per-pass timestamps are required before this line can be measured, so it is reported as unknown."
     },
     "reserved_future_subsystems": {
       "budget": 0.86,
       "applies_to": "placeholder",
+      "metric": "",
+      "owner_milestone": "M7-M8",
       "notes": "Single block for planets, atmosphere, environment, effects. Starting placeholder; will need to grow as M7-M8 land."
     },
     "headroom": 1.39,
@@ -76,7 +90,11 @@
     "vram_max_bytes": 4294967296,
     "upload_bandwidth_max_bytes_per_sec": 104857600,
     "upload_path": "visible_instances_only",
-    "upload_note": "At 100k total / 10k visible, camera-relative positions are 12 B each = 17 MB/s at 144 fps. Full upload would be 173 MB/s, exceeding budget. GPU-resident scene updates only moving objects."
+    "upload_note": "At 100k total / 10k visible, camera-relative positions are 12 B each = 17 MB/s at 144 fps. Full upload would be 173 MB/s, exceeding budget. GPU-resident scene updates only moving objects.",
+    "metric_overrides": {
+      "vram_max_bytes": {"metric": "vram_allocated_bytes", "unit": "bytes", "owner_milestone": "M4.5"},
+      "upload_bandwidth_max_bytes_per_sec": {"metric": "upload_bytes_per_sec", "unit": "bytes/s", "owner_milestone": "M5"}
+    }
   },
   "scaling_expectations": [
     {"cost": "cpu_submission_naive", "scales_with": "total_instances", "notes": "One draw per object. Baseline to beat."},

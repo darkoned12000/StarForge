@@ -20,6 +20,7 @@ is already implemented. Open questions remain open until a record is accepted.
 | [0011](0011-procedural-generation.md) | Procedural generation determinism, toon LOD policy, and three-tier cache | Accepted; noise wording amended by ADR-0012 |
 | [0012](0012-content-vs-effect-noise.md) | Deterministic content vs cosmetic effect noise | Accepted |
 | [0013](0013-ai-behavior.md) | AI and behavior architecture | Accepted |
+| [0014](0014-profiling.md) | Profiling wrapper macros and opt-in Tracy adoption | Accepted |
 | [002](002-m3-geometry-decisions.md) | M3 geometry and precision decisions (push constants + BDA, image format, golden policy, etc.) | Accepted |
 | [004](004-performance-budgets.md) | Performance budgets (144 fps target, CPU/GPU/memory budgets, hardware scope) | Accepted |
 
@@ -29,9 +30,8 @@ These are deliberately not settled by this index. Evaluate them at the
 milestone named below and record the alternatives, evidence, and decision in a
 numbered ADR before dependent implementation begins.
 
-| Topic | Target milestone | Existing constraint |
-|-------|-----------------|---------------------|
-| Tracy adoption | M4.4 | Decide using project profiling needs; do not add it speculatively. |
+All formerly open decisions have been recorded; see ADR-0014 for the Tracy
+adoption decision (resolved during M5.5).
 
 ## Related notes
 

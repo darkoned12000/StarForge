@@ -1,6 +1,7 @@
 #include "jobs/job_scheduler.hpp"
 
 #include "core/log.hpp"
+#include "profiling/profile.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -9,9 +10,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <format>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -32,6 +35,18 @@ struct Task
     std::atomic<bool> completed{false};
     std::atomic<bool> scheduled{false};
 };
+
+// One named zone + logical-fiber scope per executed task (5.5.1e). Both the
+// worker loop and the work-helping paths in wait()/waitAll() go through here,
+// so external profilers see every task regardless of which thread ran it.
+void runTask(Task* task)
+{
+    if (!task || !task->fn) return;
+    SF_PROFILE_ZONE("job::execute");
+    SF_PROFILE_FIBER_ENTER("job::task");
+    task->fn(task->userData);
+    SF_PROFILE_FIBER_EXIT();
+}
 
 } // namespace
 
@@ -82,8 +97,11 @@ struct JobScheduler::Impl
         return (it != taskMap.end()) ? it->second : nullptr;
     }
 
-    void workerLoop(std::uint32_t /*workerIndex*/)
+    void workerLoop(std::uint32_t workerIndex)
     {
+        const std::string threadName = std::format("SF Worker {}", workerIndex);
+        SF_PROFILE_THREAD(threadName.c_str());
+
         while (true)
         {
             Task* task = nullptr;
@@ -100,10 +118,7 @@ struct JobScheduler::Impl
 
             if (task)
             {
-                if (task->fn)
-                {
-                    task->fn(task->userData);
-                }
+                runTask(task);
                 task->completed.store(true, std::memory_order_release);
 
                 // Notify dependents
@@ -286,7 +301,7 @@ void JobScheduler::wait(TaskHandle handle)
                 }
                 for (Task* dep : ready)
                 {
-                    if (dep->fn) dep->fn(dep->userData);
+                    runTask(dep);
                     dep->completed.store(true, std::memory_order_release);
                     // Notify
                     {
@@ -304,7 +319,7 @@ void JobScheduler::wait(TaskHandle handle)
 
             if (t->pendingDeps.load() == 0 && !t->completed.load())
             {
-                if (t->fn) t->fn(t->userData);
+                runTask(t);
                 t->completed.store(true, std::memory_order_release);
                 {
                     std::lock_guard lock(impl_->tasksMutex);
@@ -341,7 +356,7 @@ void JobScheduler::wait(TaskHandle handle)
         }
         if (toRun && !toRun->completed.load())
         {
-            if (toRun->fn) toRun->fn(toRun->userData);
+            runTask(toRun);
             toRun->completed.store(true, std::memory_order_release);
 
             // Notify dependents
@@ -404,7 +419,7 @@ void JobScheduler::waitAll()
             {
                 if (t && !t->completed.load())
                 {
-                    if (t->fn) t->fn(t->userData);
+                    runTask(t);
                     t->completed.store(true, std::memory_order_release);
                     progress = true;
                 }
@@ -442,7 +457,7 @@ void JobScheduler::waitAll()
             }
             if (toRun && !toRun->completed.load())
             {
-                if (toRun->fn) toRun->fn(toRun->userData);
+                runTask(toRun);
                 toRun->completed.store(true, std::memory_order_release);
 
                 std::vector<Task*> toSchedule;

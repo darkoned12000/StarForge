@@ -54,7 +54,7 @@ std::expected<GpuTimer, std::string> GpuTimer::create(const CreateInfo& info)
     }
     else
     {
-        core::logInfo(kTag, "GPU timestamps: %u valid bits, period %.4f ns", timer.timestampValidBits_, timer.timestampPeriodNs_);
+        core::logInfo(kTag, "GPU timestamps: {} valid bits, period {:.4f} ns", timer.timestampValidBits_, timer.timestampPeriodNs_);
     }
 
     // Create per-frame query pools.

@@ -94,6 +94,13 @@ TEST_CASE("Benchmark baseline: naive and competent CPU-driven (10k instances)")
                 CHECK(result->metrics["frame_time_ms"].summary.valid);
                 CHECK(result->metrics["frame_time_ms"].summary.median > 0.0);
 
+                // A queue with no timestamp bits must not publish a bogus
+                // gpu_time_ms metric (regression: 822 ms durations).
+                if (result->gpu.timestampValidBits == 0)
+                {
+                    CHECK(result->metrics.count("gpu_time_ms") == 0);
+                }
+
                 // Write baseline file.
                 std::string json = result->toJson();
                 std::ofstream out(std::string(STARFORGE_BASELINE_DIR) + "/naive_10k.json");

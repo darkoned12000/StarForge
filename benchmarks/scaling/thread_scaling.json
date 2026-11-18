@@ -1,0 +1,56 @@
+{
+  "cpu_core_count": 28,
+  "cpu_model": "Intel(R) Core(TM) i7-14700K",
+  "generated_at_epoch_s": "1795021996",
+  "samples": [
+    {
+      "best_ms": 4.709435,
+      "bit_identical": true,
+      "checksum": 854221410329508821,
+      "median_ms": 4.722154,
+      "speedup": 1.0,
+      "thread_count": 1
+    },
+    {
+      "best_ms": 2.722461,
+      "bit_identical": true,
+      "checksum": 854221410329508821,
+      "median_ms": 2.770158,
+      "speedup": 1.7046515036326448,
+      "thread_count": 2
+    },
+    {
+      "best_ms": 1.971669,
+      "bit_identical": true,
+      "checksum": 854221410329508821,
+      "median_ms": 2.136408,
+      "speedup": 2.2103240579514774,
+      "thread_count": 4
+    },
+    {
+      "best_ms": 1.288275,
+      "bit_identical": true,
+      "checksum": 854221410329508821,
+      "median_ms": 1.499842,
+      "speedup": 3.1484343017464504,
+      "thread_count": 8
+    },
+    {
+      "best_ms": 1.017785,
+      "bit_identical": true,
+      "checksum": 854221410329508821,
+      "median_ms": 1.036076,
+      "speedup": 4.557729355761547,
+      "thread_count": 16
+    }
+  ],
+  "schema_version": 1,
+  "workload": {
+    "batch_count": 24,
+    "cells_per_batch": 32,
+    "height_samples": 20000,
+    "level": 0,
+    "repeats": 3,
+    "seed": 42
+  }
+}

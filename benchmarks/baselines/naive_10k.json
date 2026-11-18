@@ -1,0 +1,161 @@
+{
+  "benchmark_id": "naive_10k",
+  "build": {
+    "build_type": "Debug",
+    "compiler": "Clang",
+    "flags": "",
+    "validation_enabled": false
+  },
+  "cpu": {
+    "core_count": 28,
+    "governor": "powersave",
+    "model": "Intel(R) Core(TM) i7-14700K",
+    "thread_count": 28
+  },
+  "environment": {
+    "cpu_freq_mhz": 800.0,
+    "cpu_temp_c": null,
+    "gpu_clock_mhz": null,
+    "gpu_power_w": null,
+    "gpu_temp_c": null
+  },
+  "gpu": {
+    "device_name": "AMD Radeon RX 7900 XTX (RADV NAVI31)",
+    "driver_version": "109060103",
+    "timestamp_period_ns": 10.0,
+    "timestamp_valid_bits": 64,
+    "vendor_id": 4098,
+    "vulkan_api_version": "1.4.354"
+  },
+  "memory": {
+    "allocated_bytes": 0,
+    "allocation_count": 0,
+    "block_count": 0,
+    "used_bytes": 0
+  },
+  "metrics": {
+    "cpu_command_recording_ms": {
+      "raw_samples": [
+        0.077099,
+        0.077446,
+        0.074249,
+        0.076623,
+        0.073898,
+        0.077203,
+        0.073914,
+        0.073878,
+        0.076706,
+        0.073885
+      ],
+      "summary": {
+        "count": 10,
+        "max": 0.077446,
+        "mean": 0.0754901,
+        "median": 0.075436,
+        "min": 0.073878,
+        "p95": 0.07733664999999999,
+        "p99": 0.07742413,
+        "stddev": 0.0016276916477023517,
+        "valid": true
+      }
+    },
+    "cpu_submission_ms": {
+      "raw_samples": [
+        0.004409,
+        0.003966,
+        0.003482,
+        0.003602,
+        0.003528,
+        0.003591,
+        0.00361,
+        0.003525,
+        0.003564,
+        0.003446
+      ],
+      "summary": {
+        "count": 10,
+        "max": 0.004409,
+        "mean": 0.0036723000000000007,
+        "median": 0.0035775,
+        "min": 0.003446,
+        "p95": 0.00420965,
+        "p99": 0.00436913,
+        "stddev": 0.00029553982623140463,
+        "valid": true
+      }
+    },
+    "frame_time_ms": {
+      "raw_samples": [
+        0.081911,
+        0.0815,
+        0.077816,
+        0.08031,
+        0.077514,
+        0.080878,
+        0.077608,
+        0.077488,
+        0.080353,
+        0.077414
+      ],
+      "summary": {
+        "count": 10,
+        "max": 0.081911,
+        "mean": 0.0792792,
+        "median": 0.079063,
+        "min": 0.077414,
+        "p95": 0.08172605,
+        "p99": 0.08187401,
+        "stddev": 0.0018668822375524639,
+        "valid": true
+      }
+    },
+    "gpu_time_ms": {
+      "raw_samples": [
+        0.00212,
+        0.00084,
+        0.0008,
+        0.0008,
+        0.0008,
+        0.0008,
+        0.0008,
+        0.0008,
+        800.0,
+        800.0
+      ],
+      "summary": {
+        "count": 10,
+        "max": 800.0,
+        "mean": 160.000776,
+        "median": 0.0008,
+        "min": 0.0008,
+        "p95": 800.0,
+        "p99": 800.0,
+        "stddev": 337.30920809696556,
+        "valid": true
+      }
+    }
+  },
+  "schema_version": 1,
+  "source": {
+    "commit_hash": "unknown",
+    "diff_hash": null,
+    "dirty": false
+  },
+  "system": {
+    "kernel": "Linux version 7.3.4-arch1-2 (linux@archlinux) (gcc (GCC) 16.2.1 20260810, GNU ld (GNU Binutils) 2.47) #1 SMP PREEMPT_DYNAMIC Thu, 12 Nov 2026 20:11:37 +0000",
+    "os": "Linux",
+    "ram_bytes": 67156860928
+  },
+  "timing_mode": "throughput",
+  "workload": {
+    "instance_count": 0,
+    "material_count": 0,
+    "mesh_complexity": "",
+    "resolution_height": 0,
+    "resolution_width": 0,
+    "scene_id": "",
+    "seed": 0,
+    "visible_fraction": 1.0
+  },
+  "workload_id": "submission_stress"
+}

@@ -12,6 +12,12 @@ M4.4 defines performance budgets: the target frame interval and per-subsystem
 allocations that M5+ must meet. Budgets are committed *before* reviewing M4.3
 baseline results to avoid fitting targets to existing performance.
 
+> Note (2026-11-18): the numbers were authored before baseline results were
+> reviewed, but the ADR and the M4.3 baseline infrastructure landed in the same
+> milestone commit, so literal commit order does not prove that sequence. The
+> committed comparison in `benchmarks/baseline-vs-budget.md` (4.4b) is the
+> record of what was actually measured.
+
 ## Target frame interval
 
 - **Target:** 144 fps = 6.94 ms maximum frame interval.
@@ -122,9 +128,15 @@ or the target frame interval increased.
 
 ## Machine-readable budgets
 
-Budgets are also stored in `benchmarks/budgets.json` for use by the compare
-tool (4.2c). The compare tool reports "over budget by X ms" as an advisory
-warning, not a test gate.
+Budgets are also stored in `benchmarks/budgets.json`. Each timing line carries
+an optional `metric` (the `BenchmarkResult` metric that measures it) and an
+`owner_milestone` (the milestone that addresses a gap). `src/bench/budget_compare.*`
+and the `starforge_bench_report` tool generate the 4.4b report at
+`benchmarks/baseline-vs-budget.md`: one row per line with p95 measured value,
+met/over/unknown status, margin, and owning milestone. An over-budget row is
+advisory, not a test gate. Lines without a measuring metric stay `unknown` —
+for example the GPU pass lines need per-pass timestamps, which the M4 harness
+does not yet emit.
 
 ## Exit criteria
 

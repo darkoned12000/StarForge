@@ -235,6 +235,11 @@ BenchmarkHarness::run(const HarnessConfig& config,
         return std::unexpected(timer.error());
     }
 
+    // A queue with zero timestampValidBits cannot produce durations. Skipping
+    // the query pool entirely keeps unmeasurable GPU time as an explicit
+    // absent metric instead of publishing garbage values (ADR-0004.1c).
+    const bool gpuTimestampsAvailable = timer->supported();
+
     // Create command pools (one per frame in flight).
     std::vector<VkCommandPool> cmdPools(effectiveConfig.framesInFlight);
     std::vector<VkCommandBuffer> cmdBuffers(effectiveConfig.framesInFlight);
@@ -305,7 +310,10 @@ BenchmarkHarness::run(const HarnessConfig& config,
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         vkBeginCommandBuffer(cmd, &beginInfo);
 
-        timer->resetQueryPool(cmd, frameIndex, timer->maxScopes() * 2);
+        if (gpuTimestampsAvailable)
+        {
+            timer->resetQueryPool(cmd, frameIndex, timer->maxScopes() * 2);
+        }
 
         WorkloadContext ctx;
         ctx.device = device.device();
@@ -347,7 +355,7 @@ BenchmarkHarness::run(const HarnessConfig& config,
         vkResetFences(device.device(), 1, &fences[frameIndex]);
 
         // Collect GPU results from previous use of this frame slot BEFORE resetting.
-        if (timer->collectResults(frameIndex))
+        if (gpuTimestampsAvailable && timer->collectResults(frameIndex))
         {
             double gpuDurationNs = timer->scopeDurationNs(frameIndex, 0);
             if (gpuDurationNs >= 0.0)
@@ -364,7 +372,10 @@ BenchmarkHarness::run(const HarnessConfig& config,
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         vkBeginCommandBuffer(cmd, &beginInfo);
 
-        timer->resetQueryPool(cmd, frameIndex, timer->maxScopes() * 2);
+        if (gpuTimestampsAvailable)
+        {
+            timer->resetQueryPool(cmd, frameIndex, timer->maxScopes() * 2);
+        }
 
         // CPU timing.
         CpuTimer cpuTimer;
@@ -378,12 +389,18 @@ BenchmarkHarness::run(const HarnessConfig& config,
         ctx.frameIndex = frameIndex;
         ctx.framesInFlight = effectiveConfig.framesInFlight;
 
-        // Begin a named scope for the workload.
-        timer->beginScope(cmd, frameIndex, "workload");
+        // Begin a named scope for the workload (timestamps only when supported).
+        if (gpuTimestampsAvailable)
+        {
+            timer->beginScope(cmd, frameIndex, "workload");
+        }
 
         workload(ctx);
 
-        timer->endScope(cmd, frameIndex);
+        if (gpuTimestampsAvailable)
+        {
+            timer->endScope(cmd, frameIndex);
+        }
 
         cpuTimer.endCommandRecording();
         cpuTimer.beginSubmission();
@@ -416,14 +433,17 @@ BenchmarkHarness::run(const HarnessConfig& config,
     // Wait for all measured frames to complete.
     vkWaitForFences(device.device(), effectiveConfig.framesInFlight, fences.data(), VK_TRUE, UINT64_MAX);
 
-    // Collect any remaining GPU results.
-    for (std::uint32_t i = 0; i < effectiveConfig.framesInFlight; ++i)
+    // Collect any remaining GPU results (only when timestamps are supported).
+    if (gpuTimestampsAvailable)
     {
-        timer->collectResults(i);
-        double gpuDuration = timer->scopeDurationNs(i, 0);
-        if (gpuDuration >= 0.0)
+        for (std::uint32_t i = 0; i < effectiveConfig.framesInFlight; ++i)
         {
-            gpuDurations.push_back(gpuDuration);
+            timer->collectResults(i);
+            double gpuDuration = timer->scopeDurationNs(i, 0);
+            if (gpuDuration >= 0.0)
+            {
+                gpuDurations.push_back(gpuDuration);
+            }
         }
     }
 
@@ -440,6 +460,8 @@ BenchmarkHarness::run(const HarnessConfig& config,
     result.source.dirty = false;
 
     result.gpu = collectGpuInfo(context);
+    result.gpu.timestampValidBits = timer->validBits();
+    result.gpu.timestampPeriodNs = timer->periodNs();
     result.cpu = collectCpuInfo();
     result.system = collectSystemInfo();
     result.build = collectBuildInfo();
@@ -464,7 +486,7 @@ BenchmarkHarness::run(const HarnessConfig& config,
     subMetric.rawSamples = collector.submissionSamples();
     result.metrics["cpu_submission_ms"] = subMetric;
 
-    if (!gpuDurations.empty())
+    if (gpuTimestampsAvailable && !gpuDurations.empty())
     {
         // Compute GPU stats from collected durations.
         stats::Statistics gpuStats = stats::compute(gpuDurations);

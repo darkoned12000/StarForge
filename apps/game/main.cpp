@@ -13,6 +13,7 @@
 #include "starforge/nebula.hpp"
 #include "starforge/renderer.hpp"
 #include "starforge/starfield.hpp"
+#include "starforge/sun.hpp"
 #include "starforge/toon.hpp"
 #include "starforge/world.hpp"
 
@@ -176,6 +177,13 @@ int main()
         return EXIT_FAILURE;
     }
 
+    auto sun = starforge::Sun::create(*renderer, {});
+    if (!sun)
+    {
+        logError(sun.error().c_str());
+        return EXIT_FAILURE;
+    }
+
     // Game layer: ECS world holds the player ship (raw bridge).
     starforge::game::GameWorld world;
     starforge::game::FlightState flight;
@@ -243,6 +251,11 @@ int main()
                 if (auto nb = nebula->recreate(*renderer); !nb)
                 {
                     logError(nb.error().c_str());
+                    return EXIT_FAILURE;
+                }
+                if (auto s = sun->recreate(*renderer); !s)
+                {
+                    logError(s.error().c_str());
                     return EXIT_FAILURE;
                 }
                 if (auto t = toon->recreate(*renderer); !t)
@@ -429,10 +442,17 @@ int main()
             const double pdy = 8000.0 - ship.position.y;
             const double pdz = -60000.0 - ship.position.z;
             const double planetDist = std::sqrt(pdx * pdx + pdy * pdy + pdz * pdz);
+
+            // World-anchored celestial sun (~80 km from spawn).
+            const double sdx = (1047000.0 - 300000.0) - ship.position.x;
+            const double sdy = 25000.0 - ship.position.y;
+            const double sdz = -360000.0 - ship.position.z;
+            const double sunDist = std::sqrt(sdx * sdx + sdy * sdy + sdz * sdz);
+
             std::printf(
-                "[HUD] throttle %.0f%% speed %.0f m/s pos (%.0f, %.0f, %.0f) cell (%.0f,%.0f,%.0f) rocks %zu planet %.0f m mode %s%s\n",
+                "[HUD] throttle %.0f%% speed %.0f m/s pos (%.0f, %.0f, %.0f) cell (%.0f,%.0f,%.0f) rocks %zu planet %.0f m sun %.0f m mode %s%s\n",
                 flight.throttle * 100.0f, effectiveSpeed, ship.position.x, ship.position.y,
-                ship.position.z, cell.x, cell.y, cell.z, world.mountedAsteroidCount(), planetDist,
+                ship.position.z, cell.x, cell.y, cell.z, world.mountedAsteroidCount(), planetDist, sunDist,
                 flight.mode == starforge::game::FlightMode::Ui ? "UI" : "FLIGHT",
                 flight.paused ? " PAUSED" : "");
             std::fflush(stdout);
@@ -469,7 +489,7 @@ int main()
 
         const float aspect = static_cast<float>(size.width) / std::max(static_cast<float>(size.height), 1.0f);
         const auto view = starforge::math::lookAt(eyeOffset, lookAhead, shipUp);
-        // Far plane covers the world-anchored planet (~63 km); rocks live within 2.5 km.
+        // Far plane covers the world-anchored planet (~63 km) and sun (~80 km); rocks live within 2.5 km.
         const auto proj = starforge::math::perspectiveVulkan(cameraFov, aspect, 0.1f, 150000.0f);
         // Ship sits at the ship-relative origin; lookAt already places it
         // 8 m ahead of the camera. Adding another translation would
@@ -486,14 +506,11 @@ int main()
             starContext.clearColor = {.red = 0.25f, .green = 0.0f, .blue = 0.0f, .alpha = 1.0f};
         }
 
-        starforge::Starfield::Params sunParams;
-        // Sun is a distant-star direction (translation-invariant like
-        // the starfield sky), deliberately in a different patch of sky
-        // from the planet (~35° away) so the two read as separate
-        // objects with sensible relative scale (star dominates).
-        sunParams.worldPosition = {-5000.0f, 2500.0f, -6000.0f};
-        sunParams.radius = 800.0f; // dominant disc (~11° at 8.6 km)
-        sunParams.intensity = 1.0f;
+        // Flat billboard sun is disabled (intensity = 0.0f) in favor of the real 3D celestial sun (M15.0.7).
+        starforge::Starfield::Params sunBillboardParams;
+        sunBillboardParams.worldPosition = {-5000.0f, 2500.0f, -6000.0f};
+        sunBillboardParams.radius = 800.0f;
+        sunBillboardParams.intensity = 0.0f;
 
         starforge::Toon::Context toonContext;
         toonContext.viewProj = proj * view * model;
@@ -530,9 +547,7 @@ int main()
 
         // --- Environment showcase (M15.0.4) ---
         // Nebula backdrop first (fullscreen FBM), then stars, then
-        // planet dish placeholder + ship + asteroids. Planet patch
-        // renderer with atmosphere shell wiring is future 15.0.4 work
-        // (documented placeholder until the GPU patch facade lands).
+        // 3D visitable sun (M15.0.7), then planet dish placeholder + ship + asteroids.
         starforge::Nebula::RenderContext nebContext;
         nebContext.viewProj = proj * view;
         nebContext.invViewProj = starforge::math::inverse(nebContext.viewProj);
@@ -546,10 +561,34 @@ int main()
         nebParams.scattering = 0.45f;
         nebParams.time = time;
 
+        // --- 3D Visitable Celestial Sun (M15.0.7) ---
+        // Real 3D celestial mesh with M7 quadtree LOD (LargeObjectSetup),
+        // Eddington limb darkening (1 - u(1 - μ)), and additive corona shell at 6x radius.
+        // Anchored at world coordinates (~80 km from spawn).
+        starforge::Sun::RenderContext sunContext;
+        sunContext.viewProj = proj * view;
+        sunContext.cameraPosition = starforge::WorldPosition::fromMeters(
+            ship.position.x + eyeOffset.x(),
+            ship.position.y + eyeOffset.y(),
+            ship.position.z + eyeOffset.z()).value_or(starforge::WorldPosition{});
+        sunContext.resolution = {static_cast<float>(size.width), static_cast<float>(size.height)};
+        sunContext.time = time;
+
+        constexpr starforge::game::RawVec3d kSunWorld{1047000.0 - 300000.0, 25000.0, -360000.0};
+        starforge::Sun::Params sun3DParams;
+        sun3DParams.worldPosition = starforge::WorldPosition::fromMeters(
+            kSunWorld.x, kSunWorld.y, kSunWorld.z).value_or(starforge::WorldPosition{});
+        sun3DParams.radius = 50000.0; // 50 km celestial photosphere radius
+        sun3DParams.coronaRadiusMultiplier = 6.0; // Corona reaches out to 300 km
+        sun3DParams.coreColor = {1.0f, 0.95f, 0.82f, 1.0f}; // Blazing yellow-white core
+        sun3DParams.limbColor = {0.95f, 0.40f, 0.05f, 1.0f}; // Deep amber solar rim
+        sun3DParams.coronaColor = {1.0f, 0.65f, 0.20f, 1.0f}; // Glowing outer corona
+        sun3DParams.limbDarkeningCoeff = 0.6f;
+        sun3DParams.coronaIntensity = 1.0f;
+        sun3DParams.time = time;
+
         // Planet dish placeholder: WORLD-anchored (~63 km from spawn),
-        // computed ship-relative each frame like the sun used to be,
-        // so it stays put in the world and grows as the ship approaches.
-        // (Patch renderer + atmosphere shell remain future work.)
+        // computed ship-relative each frame, so it stays put in the world and grows as the ship approaches.
         constexpr starforge::game::RawVec3d kPlanetWorld{1067000.0, 8000.0, -60000.0};
         starforge::math::Vec3f planetRel{
             static_cast<float>(kPlanetWorld.x - ship.position.x),
@@ -569,11 +608,13 @@ int main()
         planetParams.rimStrength = 1.0f;
         planetParams.outlineWidth = 1.0f;
 
-        // Composition order: starfield base (opaque), then nebula
-        // additive over it, then planet/ship/rocks depth-tested.
+        // Composition order: starfield base (opaque stars), then nebula
+        // additive over it, then 3D celestial sun (opaque core + additive corona),
+        // then planet/ship/rocks depth-tested.
         auto frame = renderer->renderFrame(starContext.clearColor, [&](starforge::FrameContext& fc) {
-            starfield->record(fc, starContext, sunParams);
+            starfield->record(fc, starContext, sunBillboardParams);
             nebula->record(fc, nebContext, nebParams);
+            sun->record(fc, sunContext, sun3DParams);
             toon->record(fc, planetContext, planetParams);
             toon->record(fc, toonContext, toonParams);
             std::size_t shown = 0;

@@ -17,6 +17,7 @@ add_library(starforge_environment STATIC
     shield_effect.cpp
     asteroid_field.cpp
     toon_renderer.cpp
+    sun_renderer.cpp
 )
 
 target_include_directories(starforge_environment PUBLIC
@@ -28,6 +29,8 @@ target_link_libraries(starforge_environment PRIVATE
     starforge_math
     starforge_gpu
     starforge_vulkan
+    starforge_planets
+    starforge_spatial
 )
 
 starforge_set_warnings(starforge_environment)

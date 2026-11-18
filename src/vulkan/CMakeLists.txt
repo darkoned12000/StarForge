@@ -17,6 +17,7 @@ add_library(starforge_vulkan STATIC
     vulkan_physical_device.cpp
     vulkan_pipeline.cpp
     vulkan_renderer.cpp
+    parallel_secondary.cpp
     threaded_command_pools.cpp
     vulkan_retirement.cpp
     vulkan_swapchain.cpp
@@ -28,6 +29,7 @@ target_include_directories(starforge_vulkan PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(starforge_vulkan
     PUBLIC
         starforge_core
+        starforge_jobs
         starforge_vulkan_core
         Vulkan::Vulkan
 )

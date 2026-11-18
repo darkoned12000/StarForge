@@ -65,6 +65,16 @@ option(STARFORGE_USE_MINIAUDIO
     ON
 )
 
+option(STARFORGE_ENABLE_PROFILING
+    "Compile the internal SF_PROFILE_* instrumentation (5.5.1e); OFF compiles it out entirely"
+    ON
+)
+
+option(STARFORGE_ENABLE_TRACY
+    "Emit Tracy thread/fiber/zone instrumentation through the profiling macros (needs PROFILING)"
+    OFF
+)
+
 # --------------------------------------------------
 # Helper modules
 # --------------------------------------------------
@@ -80,6 +90,23 @@ include(StarforgeShaders)
 
 find_package(Vulkan REQUIRED)
 find_package(SDL3 CONFIG REQUIRED)
+
+# Tracy (optional profiler, 5.5.1e / ADR-0014). The project wrapper macros are
+# always available; Tracy itself is opt-in and compiled out by default.
+if(STARFORGE_ENABLE_TRACY)
+    if(NOT STARFORGE_ENABLE_PROFILING)
+        message(FATAL_ERROR "STARFORGE_ENABLE_TRACY requires STARFORGE_ENABLE_PROFILING=ON")
+    endif()
+    include(FetchContent)
+    set(TRACY_ENABLE ON CACHE BOOL "" FORCE)
+    set(TRACY_ON_DEMAND OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(tracy
+        GIT_REPOSITORY https://github.com/wolfpld/tracy.git
+        GIT_TAG        v0.13.1
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(tracy)
+endif()
 
 # Flecs (ECS) — FetchContent, pinned like doctest.
 if(STARFORGE_USE_FLECS)
@@ -290,7 +317,7 @@ starforge_add_shader(
     OUTPUT_NAME starfield.frag
 )
 
-foreach(effect_shaders IN ITEMS nebula dust sun_distortion wormhole ftl storm billboard asteroid)
+foreach(effect_shaders IN ITEMS nebula dust sun_distortion wormhole ftl storm billboard asteroid sun sun_corona)
     starforge_add_shader(
         SOURCE "${PROJECT_SOURCE_DIR}/shaders/graphics/${effect_shaders}.slang"
         STAGE  vertex
@@ -318,6 +345,9 @@ endif()
 if(STARFORGE_BUILD_GAME)
     add_subdirectory(apps/game)
 endif()
+
+add_subdirectory(apps/bench_report)
+add_subdirectory(apps/scaling_bench)
 
 if(STARFORGE_BUILD_TESTS)
     enable_testing()

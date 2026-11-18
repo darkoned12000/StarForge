@@ -10,6 +10,7 @@ target_include_directories(starforge_jobs
 target_link_libraries(starforge_jobs
     PUBLIC
         starforge_core
+        starforge_profiling
 )
 
 starforge_set_warnings(starforge_jobs)

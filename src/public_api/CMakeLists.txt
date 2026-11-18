@@ -9,6 +9,8 @@ add_library(starforge_public_api STATIC
     starfield_bridge.cpp
     nebula.cpp
     nebula_bridge.cpp
+    sun.cpp
+    sun_bridge.cpp
     toon.cpp
     toon_bridge.cpp
     world.cpp

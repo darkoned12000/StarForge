@@ -57,12 +57,12 @@ Every step also satisfies the Definition of Done in ARCHITECTURE.md.
 
 | Subtask | Deliverable | Verified by | Done when |
 |---------|-------------|-------------|-----------|
-| 1.5.1 | VMA dependency integration | Build | Pinned VMA release available via build; `starforge_gpu` links VMA and Vulkan |
-| 1.5.2 | RAII allocator wrapper (`gpu_resources/allocator.*`) | T1/Build | Allocator created from instance/physical device/device; create/destroy cleanly; no VMA/Vulkan types exposed in public headers |
-| 1.5.3 | Move-only `Buffer` wrapper | T1 | Owns `VkBuffer` + `VmaAllocation`; usage and memory placement are separate concepts; supports mapping, flushing, invalidation; move-only |
-| 1.5.4 | Immediate transfer submission utility (command pool/buffer, one-time submit, fence) | T2 | Headless copy with proper buffer memory barriers (available/visible); queue family internal to Vulkan backend |
-| 1.5.5 | Staging upload and readback test (GPU roundtrip) | T2 | 1 MiB CPU → staging → device-local → readback matches byte-for-byte; deterministic data; uses appropriate memory dependencies |
-| 1.5.6 | Allocation accounting and teardown verification | T2 | All test allocations released before allocator destruction; VMA allocation count zero or accounted for; zero validation errors |
+| 1.5.1 ✅ | VMA dependency integration | Build | Pinned VMA release available via build; `starforge_gpu` links VMA and Vulkan |
+| 1.5.2 ✅ | RAII allocator wrapper (`gpu_resources/allocator.*`) | T1/Build | Allocator created from instance/physical device/device; create/destroy cleanly; no VMA/Vulkan types exposed in public headers |
+| 1.5.3 ✅ | Move-only `Buffer` wrapper | T1 | Owns `VkBuffer` + `VmaAllocation`; usage and memory placement are separate concepts; supports mapping, flushing, invalidation; move-only |
+| 1.5.4 ✅ | Immediate transfer submission utility (command pool/buffer, one-time submit, fence) | T2 | Headless copy with proper buffer memory barriers (available/visible); queue family internal to Vulkan backend |
+| 1.5.5 ✅ | Staging upload and readback test (GPU roundtrip) | T2 | 1 MiB CPU → staging → device-local → readback matches byte-for-byte; deterministic data; uses appropriate memory dependencies |
+| 1.5.6 ✅ | Allocation accounting and teardown verification | T2 | All test allocations released before allocator destruction; VMA allocation count zero or accounted for; zero validation errors |
 
 **Acceptance requirements (1.5):**
 - No SDL window or Vulkan surface required (headless).
@@ -327,9 +327,9 @@ drawing to M3 or as a small M4 prerequisite (4.3a can start during M3).
 
 | Step | Deliverable | Verified by | Done when |
 |------|-------------|-------------|-----------|
-| 4.4a | Budget document: target interval, resolution, reference scene, statistic (p95), headroom rule; CPU-side and GPU-side budgets against the same interval; memory budget; scaling expectations; reserved block for future subsystems with rebalancing rule. Committed before 4.3 results are reviewed | Review | Budget document committed with explicit subsystem allocations (docs/decisions/004-performance-budgets.md + benchmarks/budgets.json) |
-| 4.4b | Baseline vs. budget: one row per budget line with status (met / over / unknown), margin, and the milestone that addresses each gap | T4 | Baseline vs. budget comparison committed |
-| 4.4c | Hardware scope: numbers apply to this GPU, driver, CPU and resolution; only scaling behavior is claimed hardware-independent | Review | Hardware scope documented |
+| 4.4a ✅ | Budget document: target interval, resolution, reference scene, statistic (p95), headroom rule; CPU-side and GPU-side budgets against the same interval; memory budget; scaling expectations; reserved block for future subsystems with rebalancing rule. Committed before 4.3 results are reviewed | Review | Budget document committed with explicit subsystem allocations (docs/decisions/004-performance-budgets.md + benchmarks/budgets.json) |
+| 4.4b ✅ | Baseline vs. budget: one row per budget line with status (met / over / unknown), margin, and the milestone that addresses each gap | T4 | Done: `src/bench/budget_compare.*` + `starforge_bench_report` tool, committed baselines in `benchmarks/baselines/` and report in `benchmarks/baseline-vs-budget.md` (10 rows: 2 met, 0 over, 8 unknown); 9 T1 tests + CTest report-generation gate. Harness no longer emits bogus `gpu_time_ms` when timestamps are unavailable |
+| 4.4c ✅ | Hardware scope: numbers apply to this GPU, driver, CPU and resolution; only scaling behavior is claimed hardware-independent | Review | Hardware scope documented |
 
 ### Exit
 
@@ -672,7 +672,7 @@ Before implementation, resolve these design decisions and record them as ADRs:
 | 5.5.1b ✅ | Task graph: tasks with counter-based dependencies and continuations | T1 | Tasks execute in dependency order; independent tasks run concurrently |
 | 5.5.1c ✅ | Thread-local scratch linear allocators (thread_local chunked blocks) | T1 | No global heap contention; intermediate allocations O(1); no pointer invalidation |
 | 5.5.1d ✅ | CPU epoch/frame-based deferred deletion queue (retire/collectRetired) | T1 | Safe memory reclamation; no use-after-free; no deadlock on re-entrant retire |
-| 5.5.1e ⬜ | Profiler integration: Tracy/Superluminal fiber and thread zones per task | T1 | Deferred until Tracy is integrated |
+| 5.5.1e ✅ | Profiler integration: Tracy/Superluminal fiber and thread zones per task | T1 | Done: `src/profiling/` (`SF_PROFILE_*` macros compile out entirely with `STARFORGE_ENABLE_PROFILING=OFF`), optional pinned Tracy v0.13.1 behind `STARFORGE_ENABLE_TRACY` (default OFF, ADR-0014); `JobScheduler` emits a named zone + logical-fiber scope per task on every execution path (worker loop and work-helping) plus named worker threads; 7 T1 capture tests + a Tracy-enabled build gate |
 
 ### 5.5.2 Shared State & Synchronization
 
@@ -707,7 +707,7 @@ Before implementation, resolve these design decisions and record them as ADRs:
 | 5.5.5a ✅ | Parallel heightfield evaluation (heightFractalBatch, job-based) | T1+T4 | Height maps bit-identical to single-threaded |
 | 5.5.5b ✅ | Parallel atmosphere LUT generation | T1+T4 | Done in M7.4a (job-based, bit-identical) |
 | 5.5.5c ✅ | Parallel quadtree LOD traversal | T1+T4 | Done in M7.1b (`updateParallel`, bit-identical) |
-| 5.5.5d ⬜ | Parallel secondary command recording | T3 | Deferred to M7.2 |
+| 5.5.5d ✅ | Parallel secondary command recording | T3 | Done: `src/vulkan/parallel_secondary.*` wires the previously-unused `ThreadedCommandPools` to `JobScheduler` — one secondary per dedicated pool slot recorded concurrently with dynamic-rendering inheritance (`VkCommandBufferInheritanceRenderingInfoKHR`); `test_parallel_secondary.cpp` proves 4 worker-recorded secondaries execute in a primary and match a sequential reference byte-for-byte, with per-slot reset and zero validation errors |
 
 ### 5.5.6 Verification & Profiling
 
@@ -715,7 +715,7 @@ Before implementation, resolve these design decisions and record them as ADRs:
 |------|-------------|-------------|-----------|
 | 5.5.6a ✅ | ThreadSanitizer build configuration (tsan_suppressions.txt for Vulkan ICD) | T1/T2 | Build config documented; TSan runs clean |
 | 5.5.6b ✅ | Multi-core bit-exact determinism test (content + terrain) | T1 | All thread counts produce identical output |
-| 5.5.6c ⬜ | Scaling benchmarks (1/2/4/8/16 threads) | T4 | Deferred to profiling pass |
+| 5.5.6c ✅ | Scaling benchmarks (1/2/4/8/16 threads) | T4 | Done: `src/bench/thread_scaling.*` + `starforge_scaling_bench` tool; `benchmarks/scaling/thread_scaling.json` records 1/2/4/8/16-thread medians with bit-identical checksums (4.56× at 16 threads on the dev machine), plus 3 T1 tests and the `scaling_bench_smoke` CTest |
 | 5.5.6d ✅ | High-concurrency stress test (1000 tasks, no deadlock) | T1 | Completes; all tasks execute; no deadlock |
 
 ### M5.5 Exit Criteria
@@ -726,12 +726,15 @@ Before implementation, resolve these design decisions and record them as ADRs:
 - DeltaStore thread-safe with cell-partitioned concurrency.
 - Zero data races under ThreadSanitizer (with driver suppressions).
 - Determinism preserved under parallel execution (bit-exact across thread counts).
-- Performance scaling documented (4x+ on 4 cores for embarrassingly parallel work).
+- Performance scaling documented in `benchmarks/scaling/thread_scaling.json`
+  (monotonic 1→16-thread speedup, bit-identical output). The aspirational
+  "4× on 4 cores" figure was not reached on the mixed P/E-core dev machine
+  (2.21× at 4 threads); see `benchmarks/scaling/README.md`.
 - Thread-local scratch allocators eliminate global heap contention.
 
 ### Deferred from M5.5 review
-- GPU command recording multi-threading (secondary command buffers) deferred to
-  M7.2 GPU patch pipeline integration — owner: M7 (Planets).
+- GPU command recording multi-threading (secondary command buffers) — **done
+  in 5.5.5d** via `ParallelSecondaryRecorder` (no longer deferred).
 - Physics multi-threading (Jolt) deferred to M11 (Physics) — owner: M11.
 - Audio multi-threading (miniaudio) deferred to M12 (Audio) — owner: M12.
 - ECS multi-threaded system scheduling deferred to M10 (ECS) — owner: M10.
@@ -1261,7 +1264,7 @@ Known M14 follow-ups for later milestones (intentionally out of scope):
 | 15.0.4 🚧 | Environment showcase: planet patch + atmosphere shell, nebula backdrop, starfield — all composed in one frame, toon-consistent | T3+T5 | Partial: nebula backdrop via new `starforge::Nebula` public facade (3D FBM, recorded after starfield); planet as large toon placeholder cube (12 km at ~63 km, parallax marker, HUD distance) + world-anchored sun (directional billboard). Remaining GPU work deferred under "First Flight Deferred Polish" below |
 | 15.0.5 | Combat slice: one M14 AI hostile (engage/evade), weapon fire, shield hit, health/damage events, audio trigger through M12 facade | T1+T5 | Player can fight and be damaged; hostile engages and evades; hits show stylized effects; no Flecs mutation from physics/audio threads |
 | 15.0.6 | Integration + budgets gate: 5-minute flight proof, frame-time p95 < ADR-004 interval, screenshot/golden review | T4+T5 | 5 minutes continuous play, no loading screens, 0 validation errors, screenshots reviewed for art direction (not pixel counts alone) |
-| 15.0.7 | Sun as visitable celestial body (Grok review): replace the directional sun billboard with a real mesh using M7 quadtree LOD (LargeObjectSetup patch origin), emissive core shader with limb darkening (`1 - u(1-μ)`), corona as additive sphere at 5–10× radius, near plane set to 0.01× radius. Coexists with the starfield sky sphere | T3+T5 | Sun grows when approached and fills the screen at radius; limb darkening reads as a star; corona sits behind the opaque disc; no float32 jitter at solar radius |
+| 15.0.7 ✅ | Sun as visitable celestial body (Grok review): replace the directional sun billboard with a real mesh using M7 quadtree LOD (LargeObjectSetup patch origin), emissive core shader with limb darkening (`1 - u(1-μ)`), corona as additive sphere at 5–10× radius, near plane set to 0.01× radius. Coexists with the starfield sky sphere | T3+T5 | Done: `SunRenderer` (dual-pass patch cubed-sphere core + corona shell via `LargeObjectSetup`), `sun.slang` + `sun_corona.slang`, public `starforge::Sun` facade, `test_sun_render.cpp` (Eddington darkening T1 proof + headless GPU T3 proof), billboard intensity set to 0.0f in `apps/game/main.cpp` with 3D celestial sun at ~80 km |
 | 15.0.8 | Asteroid variety (Grok review): switch the demo from cubes to `generateAsteroidMesh` (displaced UV-sphere), 3–5 base mesh variants selected per seed, per-instance color tint, tumbling already in place | T1+T3 | Field renders as lumpy rocks in varied palettes; outline pass stays crisp at distance; no cube silhouettes |
 | 15.0.9 | Asteroid instancing + LOD (Grok review): single `vkCmdDrawIndexed` over instance storage, cheaper impostors at long distance, distance-aware outline width | T4 | 1k+ rock field measured under ADR-004 with one draw call; no pops at cull radius |
 
