@@ -351,7 +351,8 @@ established noise threshold.
 
 ### Missing architectural & implementation requirements (must integrate)
 
-Before sequencing the milestone, five critical items must be addressed:
+Before sequencing the milestone, five critical items must be addressed.
+Items 1–4 are done in Phase 3; item 5 belongs to Phase 4.
 
 1. **Culling synchronization barriers (compute-to-indirect / compute-to-vertex):**
    GPU culling writes directly to an indirect command buffer and an instance
@@ -385,6 +386,10 @@ Before sequencing the milestone, five critical items must be addressed:
      while vertexCount remains static (36).
    - `bindless` disabled: fall back to a single global storage buffer bound via
      BDA or descriptor set 0, indexed by the compacted instance IDs.
+
+**Status (2026-11-18):** items 1–4 are implemented in Phase 3 (in-place
+fill/barrier/dispatch/barrier sequence, SoA bounds, per-frame double buffering);
+item 5 is the Phase 4 fallback work and remains open.
 
 ### Phase 1: Foundation & Deferred Hygiene (T1 / CPU Focus)
 
@@ -469,6 +474,13 @@ timestamp scaling/nesting. Matrix row updated below.
 ### Phase 3: GPU Culling Pipeline Implementation (M5 Core)
 
 Implement the GPU-driven culling and indirect generation path.
+
+**Status: complete (2026-11-18).** `GpuCulling::recordCulling` now records
+`vkCmdFillBuffer` → compute barriers → inline `recordDispatch` → compute→indirect/
+vertex barriers into the frame's own command buffer (no CPU map or per-frame
+submit). A headless test renders an indirect cube draw from the compacted
+visible IDs for two frame slots and checks GPU instanceCount against the CPU
+oracle. Matrix row updated below.
 
 **Step 3.1: Scene Data Layout & Double-Buffered Storage**
 - Define instance layout:
@@ -558,7 +570,7 @@ against M4 baselines.
 |-------|---------------------|---------------------|------------|
 | Phase 1 ✅ | CMake decoupling, unit frustum normals, randomized CPU oracle, viewport Y-flip | `starforge_tests` runs without Vulkan runtime; passes oracle tests | None | Done: swapchain-selection and workload-scene helpers moved into loader-free libraries; `starforge_tests` no longer links Vulkan/SDL (ELF `NEEDED` gate + 321 CPU cases pass); all frustum tests use engine reverse-Z projection; exact unit-normal + randomized camera/orientation/scale oracle; negative-height viewports and CCW gate (`render_conventions`) |
 | Phase 2 ✅ | ImageView RAII, ImageUsageFlags, pool/fence recycling, 2D/3D compute & BDA tests | `starforge_gpu_tests` clean under validation; zero allocation thrashing | Phase 1 | Done: tracked `Image` layouts + RAII `ImageView`, cached resettable cmd buffers/fences in `Uploader`/`ComputePipeline` (`operationCount()` tests), synchronized `VulkanDevice::submit`/`submit2`; new BDA-deref, 2D/3D-lane, real N-vs-2N/frame-1/nested timestamp tests. 48 GPU cases green under validation |
-| Phase 3 | Slang culling shader, SoA bounding buffers, double-buffered indirect commands | Valid indirect execution on simple cube mesh | Phase 2 |
+| Phase 3 ✅ | Slang culling shader, SoA bounding buffers, double-buffered indirect commands | Valid indirect execution on simple cube mesh | Phase 2 | Done: `GpuCulling::recordCulling` performs GPU-side fill/barriers/dispatch in-frame; `test_gpu_indirect_cull.cpp` renders two frame slots with `vkCmdDrawIndirect`, verifies GPU `instanceCount` against the CPU frustum oracle and lit pixels, validation-clean |
 | Phase 4 | GPU vs CPU culling parity suite, feature fallback implementations | T2 Proof: bitwise matching visible sets; green tests with features disabled | Phase 3 |
 | Phase 5 | 10k/100k/1M benchmark profiles, baseline comparison, validated runs | T4 Proof: 1M instances beat M4; CPU submission time flat | Phase 4 |
 

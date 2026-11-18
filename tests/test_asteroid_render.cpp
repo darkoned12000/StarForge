@@ -125,7 +125,7 @@ TEST_CASE("Asteroid field: instanced rocks render with depth (8.6)")
                 .usage = ImageUsageFlags::ColorAttachment,
             });
             REQUIRE(colorImage.has_value());
-            auto colorView = colorImage->createView(device->device());
+            auto colorView = colorImage->createImageView(device->device());
             REQUIRE(colorView.has_value());
 
             VkFormat depthFormat = findDepthFormat(context->physicalDevice());
@@ -137,7 +137,7 @@ TEST_CASE("Asteroid field: instanced rocks render with depth (8.6)")
                 .usage = ImageUsageFlags::DepthAttachment,
             });
             REQUIRE(depthImage.has_value());
-            auto depthView = depthImage->createView(device->device(), VK_IMAGE_ASPECT_DEPTH_BIT);
+            auto depthView = depthImage->createImageView(device->device(), VK_IMAGE_ASPECT_DEPTH_BIT);
             REQUIRE(depthView.has_value());
 
             auto readback = Buffer::create(*allocator, {
@@ -308,8 +308,6 @@ TEST_CASE("Asteroid field: instanced rocks render with depth (8.6)")
             readback->unmap();
 
             vkDestroyFence(device->device(), fence, nullptr);
-            vkDestroyImageView(device->device(), *colorView, nullptr);
-            vkDestroyImageView(device->device(), *depthView, nullptr);
             vkFreeCommandBuffers(device->device(), cmdPool, 1, &cmd);
             vkDestroyCommandPool(device->device(), cmdPool, nullptr);
 

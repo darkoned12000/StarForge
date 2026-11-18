@@ -122,7 +122,7 @@ TEST_CASE("ECS render: 10k entities stepped, collected, and rendered within budg
         .usage = ImageUsageFlags::ColorAttachment,
     });
     REQUIRE(colorImage.has_value());
-    auto colorView = colorImage->createView(device->device());
+    auto colorView = colorImage->createImageView(device->device());
     REQUIRE(colorView.has_value());
 
     const VkFormat depthFormat = findDepthFormat(context->physicalDevice());
@@ -134,7 +134,7 @@ TEST_CASE("ECS render: 10k entities stepped, collected, and rendered within budg
         .usage = ImageUsageFlags::DepthAttachment,
     });
     REQUIRE(depthImage.has_value());
-    auto depthView = depthImage->createView(device->device(), VK_IMAGE_ASPECT_DEPTH_BIT);
+    auto depthView = depthImage->createImageView(device->device(), VK_IMAGE_ASPECT_DEPTH_BIT);
     REQUIRE(depthView.has_value());
 
     auto readback = Buffer::create(*allocator, {
@@ -341,8 +341,6 @@ TEST_CASE("ECS render: 10k entities stepped, collected, and rendered within budg
     CHECK(p95 < 6.94);
 
     vkDestroyFence(device->device(), fence, nullptr);
-    vkDestroyImageView(device->device(), *colorView, nullptr);
-    vkDestroyImageView(device->device(), *depthView, nullptr);
     vkFreeCommandBuffers(device->device(), cmdPool, 1, &cmd);
     vkDestroyCommandPool(device->device(), cmdPool, nullptr);
 

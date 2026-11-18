@@ -52,7 +52,7 @@ TEST_CASE("Starfield render: procedural stars appear in offscreen image")
             });
             REQUIRE(colorImage.has_value());
 
-            auto colorView = colorImage->createView(device->device());
+            auto colorView = colorImage->createImageView(device->device());
             REQUIRE(colorView.has_value());
 
             auto readback = Buffer::create(*allocator, {
@@ -227,7 +227,6 @@ TEST_CASE("Starfield render: procedural stars appear in offscreen image")
                 readback->unmap();
 
                 vkDestroyFence(device->device(), fence, nullptr);
-                vkDestroyImageView(device->device(), *colorView, nullptr);
                 vkFreeCommandBuffers(device->device(), cmdPool, 1, &cmd);
                 vkDestroyCommandPool(device->device(), cmdPool, nullptr);
 
@@ -274,7 +273,7 @@ TEST_CASE("Starfield render: secondary command buffer executes identically (7.2d
                 .usage = ImageUsageFlags::ColorAttachment,
             });
             REQUIRE(colorImage.has_value());
-            auto colorView = colorImage->createView(device->device());
+            auto colorView = colorImage->createImageView(device->device());
             REQUIRE(colorView.has_value());
 
             auto readback = Buffer::create(*allocator, {
@@ -471,7 +470,6 @@ TEST_CASE("Starfield render: secondary command buffer executes identically (7.2d
             readback->unmap();
 
             vkDestroyFence(device->device(), fence, nullptr);
-            vkDestroyImageView(device->device(), *colorView, nullptr);
             vkFreeCommandBuffers(device->device(), cmdPool, 1, &cmd);
             vkFreeCommandBuffers(device->device(), cmdPool, 1, &secondary);
             vkDestroyCommandPool(device->device(), cmdPool, nullptr);

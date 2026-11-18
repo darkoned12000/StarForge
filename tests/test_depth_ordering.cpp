@@ -80,7 +80,7 @@ RenderResult renderDepthOrder(VkDevice device, VkPhysicalDevice physDevice,
         .usage = ImageUsageFlags::ColorAttachment,
     });
 
-    auto colorView = colorImage->createView(device);
+    auto colorView = colorImage->createImageView(device);
 
     // Create depth image.
     VkFormat depthFormat = findDepthFormat(physDevice);
@@ -89,7 +89,7 @@ RenderResult renderDepthOrder(VkDevice device, VkPhysicalDevice physDevice,
         .format = depthFormat,
         .usage = ImageUsageFlags::DepthAttachment,
     });
-    auto depthView = depthImage->createView(device, VK_IMAGE_ASPECT_DEPTH_BIT);
+    auto depthView = depthImage->createImageView(device, VK_IMAGE_ASPECT_DEPTH_BIT);
 
     // Readback buffer.
     auto readback = Buffer::create(allocator, {
@@ -304,8 +304,6 @@ RenderResult renderDepthOrder(VkDevice device, VkPhysicalDevice physDevice,
     vkDestroyShaderModule(device, vertModule, nullptr);
     vkDestroyShaderModule(device, fragModule, nullptr);
     vkDestroyPipelineLayout(device, *pipelineLayout, nullptr);
-    vkDestroyImageView(device, *colorView, nullptr);
-    vkDestroyImageView(device, *depthView, nullptr);
     vkFreeCommandBuffers(device, cmdPool, 1, &cmd);
     vkDestroyCommandPool(device, cmdPool, nullptr);
 

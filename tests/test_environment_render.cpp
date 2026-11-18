@@ -52,7 +52,7 @@ std::uint32_t renderAndCountLit(Allocator& allocator, VulkanDevice& device,
         .usage = ImageUsageFlags::ColorAttachment,
     });
     REQUIRE(colorImage.has_value());
-    auto colorView = colorImage->createView(device.device());
+    auto colorView = colorImage->createImageView(device.device());
     REQUIRE(colorView.has_value());
     auto readback = Buffer::create(allocator, {
         .size = kW * kH * 4,
@@ -184,7 +184,6 @@ std::uint32_t renderAndCountLit(Allocator& allocator, VulkanDevice& device,
     readback->unmap();
 
     vkDestroyFence(device.device(), fence, nullptr);
-    vkDestroyImageView(device.device(), *colorView, nullptr);
     vkFreeCommandBuffers(device.device(), cmdPool, 1, &cmd);
     vkDestroyCommandPool(device.device(), cmdPool, nullptr);
     colorImage = std::expected<Image, std::string>();

@@ -53,8 +53,8 @@ struct Scene
     std::unique_ptr<Buffer> readback;
     std::optional<StarfieldRenderer> starRenderer;
     std::optional<ToonRenderer> toonRenderer;
-    VkImageView colorView = VK_NULL_HANDLE;
-    VkImageView depthView = VK_NULL_HANDLE;
+    Image::ImageView colorView;
+    Image::ImageView depthView;
     VkCommandPool cmdPool = VK_NULL_HANDLE;
     VkCommandBuffer cmd = VK_NULL_HANDLE;
     VkFence fence = VK_NULL_HANDLE;
@@ -79,7 +79,7 @@ void recordScene(Scene& scene)
 
     VkRenderingAttachmentInfo colorAttachment{};
     colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    colorAttachment.imageView = scene.colorView;
+    colorAttachment.imageView = scene.colorView.handle();
     colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -87,7 +87,7 @@ void recordScene(Scene& scene)
 
     VkRenderingAttachmentInfo depthAttachment{};
     depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    depthAttachment.imageView = scene.depthView;
+    depthAttachment.imageView = scene.depthView.handle();
     depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
     depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -227,9 +227,9 @@ void submitAndWait(Scene& scene)
     });
     REQUIRE(colorImage.has_value());
     scene.colorImage = std::make_unique<Image>(std::move(*colorImage));
-    auto colorView = scene.colorImage->createView(scene.device->device());
+    auto colorView = scene.colorImage->createImageView(scene.device->device());
     REQUIRE(colorView.has_value());
-    scene.colorView = *colorView;
+    scene.colorView = std::move(*colorView);
 
     const VkFormat depthFormat = findDepthFormat(scene.context->physicalDevice());
     REQUIRE(depthFormat != VK_FORMAT_UNDEFINED);
@@ -241,9 +241,9 @@ void submitAndWait(Scene& scene)
     });
     REQUIRE(depthImage.has_value());
     scene.depthImage = std::make_unique<Image>(std::move(*depthImage));
-    auto depthView = scene.depthImage->createView(scene.device->device(), VK_IMAGE_ASPECT_DEPTH_BIT);
+    auto depthView = scene.depthImage->createImageView(scene.device->device(), VK_IMAGE_ASPECT_DEPTH_BIT);
     REQUIRE(depthView.has_value());
-    scene.depthView = *depthView;
+    scene.depthView = std::move(*depthView);
 
     auto readback = Buffer::create(*scene.allocator, {
         .size = kW * kH * 4,
@@ -300,10 +300,11 @@ void destroyScene(Scene& scene)
     scene.toonRenderer.reset();
     scene.starRenderer.reset();
     vkDestroyFence(scene.device->device(), scene.fence, nullptr);
-    vkDestroyImageView(scene.device->device(), scene.colorView, nullptr);
-    vkDestroyImageView(scene.device->device(), scene.depthView, nullptr);
     vkFreeCommandBuffers(scene.device->device(), scene.cmdPool, 1, &scene.cmd);
     vkDestroyCommandPool(scene.device->device(), scene.cmdPool, nullptr);
+    // Views must be released while the device is still alive (RAII ownership).
+    scene.colorView = Image::ImageView{};
+    scene.depthView = Image::ImageView{};
     scene.readback.reset();
     scene.depthImage.reset();
     scene.colorImage.reset();

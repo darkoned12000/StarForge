@@ -47,7 +47,7 @@ TEST_CASE("Image: allocate, transition, and read back a 4x4 RGBA8 image")
             CHECK(image->format() == VK_FORMAT_R8G8B8A8_UNORM);
             CHECK(image->aspectMask() == VK_IMAGE_ASPECT_COLOR_BIT);
 
-            auto view = image->createView(device->device());
+            auto view = image->createImageView(device->device());
             REQUIRE(view.has_value());
             CHECK(*view != VK_NULL_HANDLE);
 
@@ -168,7 +168,6 @@ TEST_CASE("Image: allocate, transition, and read back a 4x4 RGBA8 image")
 
             // Cleanup.
             vkDestroyFence(device->device(), fence, nullptr);
-            vkDestroyImageView(device->device(), *view, nullptr);
             vkFreeCommandBuffers(device->device(), cmdPool, 1, &cmd);
             vkDestroyCommandPool(device->device(), cmdPool, nullptr);
         }

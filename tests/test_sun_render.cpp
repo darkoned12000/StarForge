@@ -115,7 +115,7 @@ TEST_CASE("Sun M15.0.7: GPU headless SunRenderer core and corona offscreen rende
         });
         REQUIRE(colorImage.has_value());
 
-        auto colorView = colorImage->createView(device->device());
+        auto colorView = colorImage->createImageView(device->device());
         REQUIRE(colorView.has_value());
 
         auto depthImage = Image::create(*allocator, {
@@ -126,7 +126,7 @@ TEST_CASE("Sun M15.0.7: GPU headless SunRenderer core and corona offscreen rende
         });
         REQUIRE(depthImage.has_value());
 
-        auto depthView = depthImage->createView(device->device());
+        auto depthView = depthImage->createImageView(device->device());
         REQUIRE(depthView.has_value());
 
         auto sunRenderer = SunRenderer::create({
@@ -257,7 +257,5 @@ TEST_CASE("Sun M15.0.7: GPU headless SunRenderer core and corona offscreen rende
         REQUIRE(vkQueueWaitIdle(device->graphicsQueue()) == VK_SUCCESS);
 
         vkDestroyCommandPool(device->device(), cmdPool, nullptr);
-        vkDestroyImageView(device->device(), *colorView, nullptr);
-        vkDestroyImageView(device->device(), *depthView, nullptr);
     }
 }

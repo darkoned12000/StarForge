@@ -57,6 +57,21 @@ GpuCulling::create(Allocator& allocator, const CreateInfo& info)
             return std::unexpected(result.error());
         }
         gc.indirectBuffers_[i] = std::move(*result);
+
+        // Initialize the static part once: VkDrawIndirectCommand.vertexCount.
+        // Only instanceCount is reset every frame (by vkCmdFillBuffer).
+        auto mapped = gc.indirectBuffers_[i].map();
+        if (!mapped)
+        {
+            return std::unexpected(mapped.error());
+        }
+        auto* command = static_cast<std::uint32_t*>(*mapped);
+        command[0] = 36; // vertexCount (cube: 12 triangles)
+        command[1] = 0;  // instanceCount
+        command[2] = 0;  // firstVertex
+        command[3] = 0;  // firstInstance
+        (void)gc.indirectBuffers_[i].flush(0, VK_WHOLE_SIZE);
+        gc.indirectBuffers_[i].unmap();
     }
 
     // Double-buffered visible indices buffers (uint32_t per instance).
@@ -198,132 +213,98 @@ GpuCulling::recordCulling(VkCommandBuffer cmd,
                           const float* frustumPlanes,
                           std::uint32_t totalInstanceCount)
 {
-    // Step 1: Reset indirect command buffer (zero instanceCount).
-    auto resetResult = resetIndirectBuffer(frameIndex);
-    if (!resetResult)
+    if (totalInstanceCount > instanceCount_)
     {
-        return resetResult;
+        return std::unexpected("totalInstanceCount exceeds allocated instance bounds");
+    }
+    if (frustumPlanes == nullptr)
+    {
+        return std::unexpected("frustumPlanes is null");
     }
 
-    // Barrier: bounds buffer host write → compute read (ensure upload visible).
-    // Also: indirect buffer transfer write → compute read/write.
-    {
-        VkBufferMemoryBarrier2 barriers[3]{};
+    // Step 1: GPU-side reset of VkDrawIndirectCommand.instanceCount (byte offset
+    // 4). vertexCount was initialized once at creation and is never touched.
+    vkCmdFillBuffer(cmd, indirectBuffer(frameIndex).handle(),
+                    sizeof(std::uint32_t), sizeof(std::uint32_t), 0u);
 
-        // Bounds buffer.
+    // Step 2: TRANSFER_WRITE -> COMPUTE_SHADER_READ_WRITE for the indirect
+    // command, plus host-written bounds -> COMPUTE_SHADER_READ.
+    {
+        VkBufferMemoryBarrier2 barriers[2]{};
         barriers[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
-        barriers[0].srcStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
-        barriers[0].srcAccessMask = VK_ACCESS_2_HOST_WRITE_BIT;
+        barriers[0].srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        barriers[0].srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
         barriers[0].dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-        barriers[0].dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT;
-        barriers[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barriers[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barriers[0].buffer = boundsBuffer().handle();
-        barriers[0].offset = 0;
+        barriers[0].dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                                    VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+        barriers[0].buffer = indirectBuffer(frameIndex).handle();
         barriers[0].size = VK_WHOLE_SIZE;
 
-        // Indirect buffer.
         barriers[1].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
         barriers[1].srcStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
         barriers[1].srcAccessMask = VK_ACCESS_2_HOST_WRITE_BIT;
         barriers[1].dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-        barriers[1].dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
-        barriers[1].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barriers[1].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barriers[1].buffer = indirectBuffer(frameIndex).handle();
-        barriers[1].offset = 0;
+        barriers[1].dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT;
+        barriers[1].buffer = boundsBuffer().handle();
         barriers[1].size = VK_WHOLE_SIZE;
-
-        // Visible indices buffer.
-        barriers[2].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
-        barriers[2].srcStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
-        barriers[2].srcAccessMask = VK_ACCESS_2_HOST_WRITE_BIT;
-        barriers[2].dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-        barriers[2].dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
-        barriers[2].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barriers[2].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barriers[2].buffer = visibleIndicesBuffer(frameIndex).handle();
-        barriers[2].offset = 0;
-        barriers[2].size = VK_WHOLE_SIZE;
 
         VkDependencyInfo dep{};
         dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-        dep.bufferMemoryBarrierCount = 3;
+        dep.bufferMemoryBarrierCount = 2;
         dep.pBufferMemoryBarriers = barriers;
         vkCmdPipelineBarrier2(cmd, &dep);
     }
 
-    // Step 2: Bind pipeline, push constants, dispatch.
-    // Push constants: 6 planes (96 bytes) + totalInstanceCount (4 bytes) + boundsBufferAddress (8 bytes)
-    // Total: 108 bytes (padded to 112 for alignment)
+    // Step 3: push constants + inline dispatch into the caller's command
+    // buffer. No submit/wait here — the caller records the draw afterwards.
     struct PushData
     {
-        float planes[24]; // 6 planes × 4 floats (96 bytes)
-        std::uint32_t totalInstanceCount; // 4 bytes (offset 96)
-        std::uint32_t _padding; // 4 bytes padding
-    } pushData;
-
-    for (int i = 0; i < 24; ++i)
-    {
-        pushData.planes[i] = frustumPlanes[i];
-    }
+        float planes[24];
+        std::uint32_t totalInstanceCount;
+        std::uint32_t padding;
+    } pushData{};
+    std::memcpy(pushData.planes, frustumPlanes, sizeof(pushData.planes));
     pushData.totalInstanceCount = totalInstanceCount;
-    pushData._padding = 0;
-
-    // Need device for BDA — store it. Actually, we need to pass device.
-    // For now, use the buffer's stored allocator handle approach.
-    // The device address should be queried from the buffer's VkBuffer handle.
 
     const Buffer* storageBuffers[] = {
         &boundsBuffer(),
         &indirectBuffer(frameIndex),
         &visibleIndicesBuffer(frameIndex),
     };
-
-    std::span<const Buffer* const> span(storageBuffers, 3);
-
-    auto dispatchResult = cullPipeline.dispatchAndWaitWithPushConstants(
-        span, &pushData, sizeof(pushData), (totalInstanceCount + 63) / 64, 1, 1);
-    if (!dispatchResult)
+    if (auto recorded = cullPipeline.recordDispatch(
+            cmd, storageBuffers, &pushData, sizeof(pushData),
+            (totalInstanceCount + 63u) / 64u, 1, 1);
+        !recorded)
     {
-        return dispatchResult;
+        return recorded;
     }
 
-    // Step 3: Barrier: COMPUTE_SHADER_WRITE → INDIRECT_COMMAND_READ + VERTEX_SHADER_READ
+    // Step 4: COMPUTE_SHADER_WRITE -> DRAW_INDIRECT_READ (instanceCount) and
+    // VERTEX_SHADER_READ (compacted indices).
     {
-        std::vector<VkBufferMemoryBarrier2> barriers(2);
-
-        // Indirect command buffer: compute write → indirect read
+        VkBufferMemoryBarrier2 barriers[2]{};
         barriers[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
         barriers[0].srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
         barriers[0].srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
         barriers[0].dstStageMask = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
         barriers[0].dstAccessMask = VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT;
-        barriers[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barriers[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barriers[0].buffer = indirectBuffer(frameIndex).handle();
-        barriers[0].offset = 0;
         barriers[0].size = VK_WHOLE_SIZE;
 
-        // Visible indices buffer: compute write → vertex shader read
         barriers[1].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
         barriers[1].srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
         barriers[1].srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
         barriers[1].dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
         barriers[1].dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT;
-        barriers[1].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barriers[1].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barriers[1].buffer = visibleIndicesBuffer(frameIndex).handle();
-        barriers[1].offset = 0;
         barriers[1].size = VK_WHOLE_SIZE;
 
         VkDependencyInfo dep{};
         dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
         dep.bufferMemoryBarrierCount = 2;
-        dep.pBufferMemoryBarriers = barriers.data();
+        dep.pBufferMemoryBarriers = barriers;
         vkCmdPipelineBarrier2(cmd, &dep);
     }
-
     return {};
 }
 

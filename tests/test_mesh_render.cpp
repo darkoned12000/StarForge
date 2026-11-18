@@ -175,7 +175,7 @@ TEST_CASE("Mesh render: cube with per-face colors and depth buffer")
             });
             REQUIRE(colorImage.has_value());
 
-            auto colorView = colorImage->createView(device->device());
+            auto colorView = colorImage->createImageView(device->device());
             REQUIRE(colorView.has_value());
 
             // Create depth image.
@@ -190,7 +190,7 @@ TEST_CASE("Mesh render: cube with per-face colors and depth buffer")
             });
             REQUIRE(depthImage.has_value());
 
-            auto depthView = depthImage->createView(device->device(), VK_IMAGE_ASPECT_DEPTH_BIT);
+            auto depthView = depthImage->createImageView(device->device(), VK_IMAGE_ASPECT_DEPTH_BIT);
             REQUIRE(depthView.has_value());
 
             // Create readback buffer.
@@ -409,8 +409,6 @@ TEST_CASE("Mesh render: cube with per-face colors and depth buffer")
             vkDestroyShaderModule(device->device(), vertModule, nullptr);
             vkDestroyShaderModule(device->device(), fragModule, nullptr);
             vkDestroyPipelineLayout(device->device(), *pipelineLayout, nullptr);
-            vkDestroyImageView(device->device(), *colorView, nullptr);
-            vkDestroyImageView(device->device(), *depthView, nullptr);
             vkFreeCommandBuffers(device->device(), cmdPool, 1, &cmd);
             vkDestroyCommandPool(device->device(), cmdPool, nullptr);
 

@@ -158,6 +158,8 @@ TEST_CASE("Resource pooling: ComputePipeline reuses its command buffer and fence
                 readback->unmap();
             }
             CHECK(pipeline->operationCount() == 5);
+            // Descriptors are set up once, then reused for every dispatch.
+            CHECK(pipeline->descriptorUpdateCount() == 1);
         }
         CHECK(allocator->allocationCount() == 0);
     }

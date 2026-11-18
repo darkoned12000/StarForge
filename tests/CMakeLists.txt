@@ -153,6 +153,7 @@ add_executable(starforge_gpu_tests
     test_toon_render.cpp
     test_ecs_render.cpp
     test_gpu_cull_parity.cpp
+    test_gpu_indirect_cull.cpp
     test_gpu_driven_benchmark.cpp
     test_depth_ordering.cpp
     test_starfield_render.cpp

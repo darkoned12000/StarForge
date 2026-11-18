@@ -165,7 +165,7 @@ TEST_CASE("5.5.5d: parallel secondary recording matches sequential rendering (T3
                 .format = kColorFormat, .usage = ImageUsageFlags::ColorAttachment,
             });
             REQUIRE(parallelImage.has_value());
-            auto parallelView = parallelImage->createView(device->device());
+            auto parallelView = parallelImage->createImageView(device->device());
             REQUIRE(parallelView.has_value());
 
             auto referenceImage = Image::create(*allocator, {
@@ -173,7 +173,7 @@ TEST_CASE("5.5.5d: parallel secondary recording matches sequential rendering (T3
                 .format = kColorFormat, .usage = ImageUsageFlags::ColorAttachment,
             });
             REQUIRE(referenceImage.has_value());
-            auto referenceView = referenceImage->createView(device->device());
+            auto referenceView = referenceImage->createImageView(device->device());
             REQUIRE(referenceView.has_value());
 
             auto parallelReadback = Buffer::create(*allocator, {
@@ -328,8 +328,6 @@ TEST_CASE("5.5.5d: parallel secondary recording matches sequential rendering (T3
             CHECK(secondaries2->size() == kSlots);
 
             vkDestroyCommandPool(device->device(), pool, nullptr);
-            vkDestroyImageView(device->device(), *parallelView, nullptr);
-            vkDestroyImageView(device->device(), *referenceView, nullptr);
         }
 
         CHECK(allocator->allocationCount() == 0);

@@ -46,11 +46,10 @@ TEST_CASE("Depth format: findDepthFormat returns a supported format")
             CHECK(depthImage->format() == depthFormat);
             CHECK(depthImage->aspectMask() == VK_IMAGE_ASPECT_DEPTH_BIT);
 
-            auto view = depthImage->createView(device->device());
+            auto view = depthImage->createImageView(device->device());
             REQUIRE(view.has_value());
             CHECK(*view != VK_NULL_HANDLE);
 
-            vkDestroyImageView(device->device(), *view, nullptr);
         }
 
         CHECK(allocator->allocationCount() == 0);

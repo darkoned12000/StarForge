@@ -10,6 +10,7 @@
 #include <mutex>
 #include <span>
 #include <string>
+#include <vector>
 
 namespace starforge::gpu_resources
 {
@@ -61,8 +62,15 @@ public:
 
     // Record a dispatch into an existing command buffer (no submit, no wait).
     // Caller is responsible for barriers before/after.
+    // Bind storage buffers into the descriptor set once. Repeated dispatches
+    // with the same buffer handles skip vkUpdateDescriptorSets entirely.
+    [[nodiscard]] std::expected<void, std::string>
+    bind(std::span<const Buffer* const> storageBuffers);
+
     // Number of completed one-shot dispatches (for allocation-thrashing tests).
     [[nodiscard]] std::uint64_t operationCount() const noexcept { return operationCount_; }
+    // Number of descriptor-set updates actually issued (setup-phase proof).
+    [[nodiscard]] std::uint64_t descriptorUpdateCount() const noexcept { return descriptorUpdateCount_; }
 
     [[nodiscard]] std::expected<void, std::string>
     recordDispatch(VkCommandBuffer cmd,
@@ -90,8 +98,11 @@ private:
     VkCommandPool commandPool_ = VK_NULL_HANDLE;
     VkCommandBuffer commandBuffer_ = VK_NULL_HANDLE;
     VkFence fence_ = VK_NULL_HANDLE;
-    std::mutex mutex_; // serialize the cached cmd buffer/fence across threads
+    std::mutex mutex_;            // serialize the cached cmd buffer/fence
+    std::mutex descriptorMutex_;  // serialize descriptor updates
     std::uint64_t operationCount_ = 0;
+    std::uint64_t descriptorUpdateCount_ = 0;
+    std::vector<VkBuffer> boundBuffers_; // handles currently written into the set
 };
 
 } // namespace starforge::gpu_resources

@@ -46,7 +46,7 @@ TEST_CASE("Offscreen render target: color + depth clear and readback")
             });
             REQUIRE(colorImage.has_value());
 
-            auto colorView = colorImage->createView(device->device());
+            auto colorView = colorImage->createImageView(device->device());
             REQUIRE(colorView.has_value());
 
             // Create depth image with format fallback.
@@ -61,7 +61,7 @@ TEST_CASE("Offscreen render target: color + depth clear and readback")
             });
             REQUIRE(depthImage.has_value());
 
-            auto depthView = depthImage->createView(device->device(), VK_IMAGE_ASPECT_DEPTH_BIT);
+            auto depthView = depthImage->createImageView(device->device(), VK_IMAGE_ASPECT_DEPTH_BIT);
             REQUIRE(depthView.has_value());
 
             // Create readback buffer.
@@ -196,8 +196,6 @@ TEST_CASE("Offscreen render target: color + depth clear and readback")
 
             readback->unmap();
 
-            vkDestroyImageView(device->device(), *colorView, nullptr);
-            vkDestroyImageView(device->device(), *depthView, nullptr);
         }
 
         CHECK(allocator->allocationCount() == 0);

@@ -217,7 +217,9 @@ ComputePipeline::ComputePipeline(ComputePipeline&& other) noexcept
       commandPool_(std::exchange(other.commandPool_, VK_NULL_HANDLE)),
       commandBuffer_(std::exchange(other.commandBuffer_, VK_NULL_HANDLE)),
       fence_(std::exchange(other.fence_, VK_NULL_HANDLE)),
-      operationCount_(std::exchange(other.operationCount_, 0))
+      operationCount_(std::exchange(other.operationCount_, 0)),
+      descriptorUpdateCount_(std::exchange(other.descriptorUpdateCount_, 0)),
+      boundBuffers_(std::move(other.boundBuffers_))
 {
 }
 
@@ -240,6 +242,8 @@ ComputePipeline& ComputePipeline::operator=(ComputePipeline&& other) noexcept
         commandBuffer_ = std::exchange(other.commandBuffer_, VK_NULL_HANDLE);
         fence_ = std::exchange(other.fence_, VK_NULL_HANDLE);
         operationCount_ = std::exchange(other.operationCount_, 0);
+        descriptorUpdateCount_ = std::exchange(other.descriptorUpdateCount_, 0);
+        boundBuffers_ = std::move(other.boundBuffers_);
     }
     return *this;
 }
@@ -271,6 +275,51 @@ void ComputePipeline::destroy() noexcept
     commandBuffer_ = VK_NULL_HANDLE;
     fence_ = VK_NULL_HANDLE;
     operationCount_ = 0;
+    descriptorUpdateCount_ = 0;
+    boundBuffers_.clear();
+}
+
+std::expected<void, std::string>
+ComputePipeline::bind(std::span<const Buffer* const> storageBuffers)
+{
+    if (storageBuffers.size() != storageBufferCount_)
+    {
+        return std::unexpected("storageBuffers count does not match pipeline descriptor layout");
+    }
+
+    std::vector<VkBuffer> handles;
+    handles.reserve(storageBuffers.size());
+    for (const Buffer* buffer : storageBuffers)
+    {
+        if (!buffer || buffer->handle() == VK_NULL_HANDLE)
+        {
+            return std::unexpected("Null storage buffer passed to bind");
+        }
+        handles.push_back(buffer->handle());
+    }
+
+    std::lock_guard lock(descriptorMutex_);
+    if (handles == boundBuffers_) return {}; // already bound — no update needed
+
+    std::vector<VkDescriptorBufferInfo> infos(storageBuffers.size());
+    std::vector<VkWriteDescriptorSet> writes(storageBuffers.size());
+    for (std::size_t i = 0; i < storageBuffers.size(); ++i)
+    {
+        infos[i].buffer = handles[i];
+        infos[i].offset = 0;
+        infos[i].range = storageBuffers[i]->size();
+
+        writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[i].dstSet = descriptorSet_;
+        writes[i].dstBinding = static_cast<std::uint32_t>(i);
+        writes[i].descriptorCount = 1;
+        writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[i].pBufferInfo = &infos[i];
+    }
+    vkUpdateDescriptorSets(device_, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
+    boundBuffers_ = std::move(handles);
+    ++descriptorUpdateCount_;
+    return {};
 }
 
 std::expected<void, std::string>
@@ -292,8 +341,9 @@ ComputePipeline::dispatchAndWait(std::span<const Buffer* const> storageBuffers,
         return std::unexpected("dispatch dimensions must be > 0 on all axes");
     }
 
-    std::vector<VkDescriptorBufferInfo> bufferInfos(storageBuffers.size());
-    std::vector<VkWriteDescriptorSet> writes(storageBuffers.size());
+    // Descriptor setup is cached: repeated dispatches reuse the bound set.
+    if (auto bound = bind(storageBuffers); !bound) return bound;
+
     std::vector<VkBufferMemoryBarrier2> preBarriers(storageBuffers.size());
     std::vector<VkBufferMemoryBarrier2> postBarriers(storageBuffers.size());
 
@@ -303,17 +353,6 @@ ComputePipeline::dispatchAndWait(std::span<const Buffer* const> storageBuffers,
         {
             return std::unexpected("Null storage buffer passed to dispatchAndWait");
         }
-
-        bufferInfos[i].buffer = storageBuffers[i]->handle();
-        bufferInfos[i].offset = 0;
-        bufferInfos[i].range = storageBuffers[i]->size();
-
-        writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[i].dstSet = descriptorSet_;
-        writes[i].dstBinding = static_cast<std::uint32_t>(i);
-        writes[i].descriptorCount = 1;
-        writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[i].pBufferInfo = &bufferInfos[i];
 
         preBarriers[i].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
         preBarriers[i].srcStageMask = VK_PIPELINE_STAGE_2_HOST_BIT | VK_PIPELINE_STAGE_2_TRANSFER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
@@ -337,8 +376,6 @@ ComputePipeline::dispatchAndWait(std::span<const Buffer* const> storageBuffers,
         postBarriers[i].offset = 0;
         postBarriers[i].size = VK_WHOLE_SIZE;
     }
-
-    vkUpdateDescriptorSets(device_, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
 
     std::lock_guard lock(mutex_);
     if (const VkResult result = vkResetFences(device_, 1, &fence_); result != VK_SUCCESS)
@@ -422,8 +459,9 @@ ComputePipeline::dispatchAndWaitWithPushConstants(std::span<const Buffer* const>
         return std::unexpected("dispatch dimensions must be > 0 on all axes");
     }
 
-    std::vector<VkDescriptorBufferInfo> bufferInfos(storageBuffers.size());
-    std::vector<VkWriteDescriptorSet> writes(storageBuffers.size());
+    // Descriptor setup is cached: repeated dispatches reuse the bound set.
+    if (auto bound = bind(storageBuffers); !bound) return bound;
+
     std::vector<VkBufferMemoryBarrier2> preBarriers(storageBuffers.size());
     std::vector<VkBufferMemoryBarrier2> postBarriers(storageBuffers.size());
 
@@ -433,17 +471,6 @@ ComputePipeline::dispatchAndWaitWithPushConstants(std::span<const Buffer* const>
         {
             return std::unexpected("Null storage buffer passed to dispatchAndWait");
         }
-
-        bufferInfos[i].buffer = storageBuffers[i]->handle();
-        bufferInfos[i].offset = 0;
-        bufferInfos[i].range = storageBuffers[i]->size();
-
-        writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[i].dstSet = descriptorSet_;
-        writes[i].dstBinding = static_cast<std::uint32_t>(i);
-        writes[i].descriptorCount = 1;
-        writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[i].pBufferInfo = &bufferInfos[i];
 
         preBarriers[i].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
         preBarriers[i].srcStageMask = VK_PIPELINE_STAGE_2_HOST_BIT | VK_PIPELINE_STAGE_2_TRANSFER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
@@ -467,8 +494,6 @@ ComputePipeline::dispatchAndWaitWithPushConstants(std::span<const Buffer* const>
         postBarriers[i].offset = 0;
         postBarriers[i].size = VK_WHOLE_SIZE;
     }
-
-    vkUpdateDescriptorSets(device_, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
 
     std::lock_guard lock(mutex_);
     if (const VkResult result = vkResetFences(device_, 1, &fence_); result != VK_SUCCESS)
@@ -561,33 +586,10 @@ ComputePipeline::recordDispatch(VkCommandBuffer cmd,
         return std::unexpected("dispatch dimensions must be > 0 on all axes");
     }
 
-    std::vector<VkDescriptorBufferInfo> bufferInfos(storageBuffers.size());
-    std::vector<VkWriteDescriptorSet> writes(storageBuffers.size());
+    if (auto bound = bind(storageBuffers); !bound) return bound;
 
-    for (std::size_t i = 0; i < storageBuffers.size(); ++i)
-    {
-        if (!storageBuffers[i] || storageBuffers[i]->handle() == VK_NULL_HANDLE)
-        {
-            return std::unexpected("Null storage buffer passed to recordDispatch");
-        }
-
-        bufferInfos[i].buffer = storageBuffers[i]->handle();
-        bufferInfos[i].offset = 0;
-        bufferInfos[i].range = storageBuffers[i]->size();
-
-        writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[i].dstSet = descriptorSet_;
-        writes[i].dstBinding = static_cast<std::uint32_t>(i);
-        writes[i].descriptorCount = 1;
-        writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        writes[i].pBufferInfo = &bufferInfos[i];
-    }
-
-    // The descriptor set is shared by one-shot dispatch methods; serialize
-    // updates so recording from worker threads is safe.
+    // The descriptor set is shared by all records; bind() serialized its update.
     std::lock_guard lock(mutex_);
-    vkUpdateDescriptorSets(device_, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
-
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout_,
                             0, 1, &descriptorSet_, 0, nullptr);

@@ -69,7 +69,7 @@ TEST_CASE("Golden: starfield matches reference image (8.8)")
             .usage = ImageUsageFlags::ColorAttachment,
         });
         REQUIRE(colorImage.has_value());
-        auto colorView = colorImage->createView(device->device());
+        auto colorView = colorImage->createImageView(device->device());
         REQUIRE(colorView.has_value());
 
         auto readback = Buffer::create(*allocator, {
@@ -238,7 +238,6 @@ TEST_CASE("Golden: starfield matches reference image (8.8)")
         readback->unmap();
 
         vkDestroyFence(device->device(), fence, nullptr);
-        vkDestroyImageView(device->device(), *colorView, nullptr);
         vkFreeCommandBuffers(device->device(), cmdPool, 1, &cmd);
         vkDestroyCommandPool(device->device(), cmdPool, nullptr);
 
@@ -280,7 +279,7 @@ TEST_CASE("Budget: starfield frame time under ADR-004 interval (8.8)")
             .usage = ImageUsageFlags::ColorAttachment,
         });
         REQUIRE(colorImage.has_value());
-        auto colorView = colorImage->createView(device->device());
+        auto colorView = colorImage->createImageView(device->device());
         REQUIRE(colorView.has_value());
 
         auto starRenderer = StarfieldRenderer::create({
@@ -392,7 +391,6 @@ TEST_CASE("Budget: starfield frame time under ADR-004 interval (8.8)")
         CHECK(p95 < 6.94);
 
         vkDestroyFence(device->device(), fence, nullptr);
-        vkDestroyImageView(device->device(), *colorView, nullptr);
         vkFreeCommandBuffers(device->device(), cmdPool, 1, &cmd);
         vkDestroyCommandPool(device->device(), cmdPool, nullptr);
         colorImage = std::expected<Image, std::string>();
