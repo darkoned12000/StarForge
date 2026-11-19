@@ -51,6 +51,7 @@ enum class PlatformKey
     Equal,
     Minus,
     M,
+    T,
     Count,
 };
 

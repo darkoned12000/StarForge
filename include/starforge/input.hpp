@@ -27,6 +27,7 @@ enum class Key
     Equal,
     Minus,
     M,
+    T,
     Count,
 };
 

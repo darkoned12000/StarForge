@@ -5,18 +5,21 @@ namespace starforge::game
 
 UiRect stationPanelRect(float windowWidth, float windowHeight)
 {
-    return UiRect{windowWidth * 0.5f - 420.0f, windowHeight * 0.5f - 160.0f, 280.0f, 320.0f};
+    constexpr float w = 360.0f;
+    constexpr float h = 400.0f;
+    return UiRect{windowWidth * 0.5f - w * 0.5f, windowHeight * 0.5f - h * 0.5f, w, h};
 }
 
 std::vector<StationButton> stationButtons()
 {
-    return {{"dock", "DOCK", 20.0f, 40.0f, 110.0f, 34.0f},
-            {"undock", "UNDOCK", 140.0f, 40.0f, 110.0f, 34.0f},
-            {"buy-5", "BUY 5 ORE", 20.0f, 90.0f, 110.0f, 34.0f},
-            {"sell-5", "SELL 5 ORE", 140.0f, 90.0f, 110.0f, 34.0f},
-            {"accept", "ACCEPT HAUL", 20.0f, 140.0f, 230.0f, 34.0f},
-            {"complete", "COMPLETE HAUL", 20.0f, 190.0f, 230.0f, 34.0f},
-            {"jump", "JUMP", 20.0f, 240.0f, 230.0f, 34.0f}};
+    // Two-column rows with generous vertical spacing; no text overlap.
+    return {{"dock", "DOCK", 18.0f, 86.0f, 155.0f, 38.0f},
+            {"undock", "UNDOCK", 187.0f, 86.0f, 155.0f, 38.0f},
+            {"buy-5", "BUY 5 ORE", 18.0f, 140.0f, 155.0f, 38.0f},
+            {"sell-5", "SELL 5 ORE", 187.0f, 140.0f, 155.0f, 38.0f},
+            {"accept", "ACCEPT HAUL", 18.0f, 202.0f, 324.0f, 38.0f},
+            {"complete", "COMPLETE HAUL", 18.0f, 258.0f, 324.0f, 38.0f},
+            {"jump", "JUMP", 18.0f, 314.0f, 324.0f, 38.0f}};
 }
 
 bool applyStationAction(std::string_view id, GameSimulation& simulation, CommsLog& comms)

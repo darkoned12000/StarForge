@@ -37,3 +37,18 @@ TEST_CASE("M16.9: jump range gates reachability")
     CHECK(projectSystem(target, origin, 50.0f, 5.0f).reachable);
     CHECK(projectSystem(target, origin, 50.0f, 10.0f).reachable);
 }
+
+TEST_CASE("M16 polish: sector drill-in lists notable objects")
+{
+    const auto sol = starforge::game::sectorObjects("sol");
+    REQUIRE(sol.size() >= 3);
+    bool hasStation = false, hasHostile = false;
+    for (const auto& o : sol)
+    {
+        if (o.kind == "station") hasStation = true;
+        if (o.kind == "hostile") hasHostile = true;
+    }
+    CHECK(hasStation);
+    CHECK(hasHostile);
+    CHECK_FALSE(starforge::game::sectorObjects("unknown").empty());
+}

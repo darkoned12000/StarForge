@@ -86,3 +86,18 @@ TEST_CASE("M16.5: clearing handles empty contact lists")
     state.clearSelection();
     CHECK(state.count() == 0);
 }
+
+TEST_CASE("M16 polish: T lock prefers the nearest hostile")
+{
+    TargetingState state;
+    state.setContacts(contacts());
+    state.lockNearest();
+    REQUIRE(state.selected() != nullptr);
+    CHECK(state.selected()->id == "hostile-1"); // hostile beats nearer rock
+
+    state.setContacts({{"far-hostile", true, 500.0f, 10.0f, 10.0f},
+                       {"near-rock", false, 50.0f, 0.0f, 0.0f},
+                       {"close-hostile", true, 120.0f, 10.0f, 10.0f}});
+    state.lockNearest();
+    CHECK(state.selected()->id == "close-hostile");
+}

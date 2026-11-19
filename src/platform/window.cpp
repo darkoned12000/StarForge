@@ -194,6 +194,9 @@ void Window::pollEvents()
             case SDL_SCANCODE_M:
                 keyDown_[static_cast<std::size_t>(PlatformKey::M)] = down;
                 break;
+            case SDL_SCANCODE_T:
+                keyDown_[static_cast<std::size_t>(PlatformKey::T)] = down;
+                break;
             default:
                 break;
             }

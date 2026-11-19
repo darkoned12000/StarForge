@@ -25,6 +25,8 @@ public:
 
     void cycleNext() noexcept;
     void cyclePrevious() noexcept;
+    // Selects the nearest contact, preferring in-range hostiles.
+    void lockNearest() noexcept;
     void clearSelection() noexcept;
 
     [[nodiscard]] const TargetContact* selected() const noexcept;

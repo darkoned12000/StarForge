@@ -78,6 +78,7 @@ add_executable(starforge_tests
     test_ui_station.cpp
     test_ui_map.cpp
     test_m16_exit_proof.cpp
+    test_ui_menu.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/game_bridge.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/game_simulation.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/ui_state.cpp
@@ -85,6 +86,7 @@ add_executable(starforge_tests
     ${PROJECT_SOURCE_DIR}/apps/game/ui_comms.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/ui_station.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/ui_map.cpp
+    ${PROJECT_SOURCE_DIR}/apps/game/ui_menu.cpp
 )
 
 target_link_libraries(starforge_tests

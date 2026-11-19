@@ -1331,6 +1331,15 @@ decision if any step below proves unachievable. Commits follow one-per-step
 | 16.9 ✅ | Menus, maps, prompts, toasts: pause menu, galaxy & sector maps with current location/jump range, contextual interaction prompts, toast queue replacing console logs | T1 + T3 | Done: pure-CPU `ui_map.hpp/.cpp` (projection + jump reachability) + T1 `test_ui_map.cpp`; `M` toggles a sector map with reachable dots, toasts render top-centre from a TTL queue, pause menu shows controls; comms log doubles as the docking/progress prompt; golden extended with map/toast primitives. Also fixed the UI vanishing after a kill: `UiRenderer` now grows its vertex buffer instead of silently dropping the frame (T3 regression `large text draw survives buffer growth`); radar contacts rotate into the ship frame (T1 180-turn test) |
 | 16.10 ✅ | Full-loop UI proof + budget gate: launch → fly → fight → dock → buy/sell → mission → jump → repeat entirely through UI; 5-minute run, p95 < ADR-004, zero validation errors, screenshots reviewed | T4 + T5 | Done: `test_m16_exit_proof.cpp` drives the full loop through `UiState` hit-testing + `applyStationAction` (repeatable buy/sell, mission/unlock/jump) and a 5-minute p95 < 6.94 ms gate; T4 busy-HUD golden/budget test in `test_ui_render.cpp`; goldens visually reviewed; all 16.x steps ✅ |
 
+**M16 UI polish (post-exit, 2026-11-19):** user review fixes — comms panel
+is now always visible bottom-left (combat alerts appear only as top-centre
+toasts); station panel is centred with roomy buttons; `T` locks the nearest
+hostile and a box tracks the hostile on screen with a direction chevron;
+radar threat dots are larger/pulsing; pause menu has a real Quit button;
+sector map is clickable with system selection, a JUMP HERE button, clamped
+labels, drill-in object list and a pulsing current-system marker; the NAV
+readout is labelled.
+
 ### M17 – Asset Pipeline
 
 - **Goal:** Mesh/material/audio loading (stb, tinygltf, meshoptimizer),

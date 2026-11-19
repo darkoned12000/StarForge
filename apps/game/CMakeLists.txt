@@ -11,6 +11,7 @@ add_executable(starforge_game
     ui_comms.cpp
     ui_station.cpp
     ui_map.cpp
+    ui_menu.cpp
 )
 
 target_link_libraries(starforge_game

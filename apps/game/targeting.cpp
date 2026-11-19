@@ -36,6 +36,28 @@ void TargetingState::cyclePrevious() noexcept
     lockProgress_ = 0.0f;
 }
 
+void TargetingState::lockNearest() noexcept
+{
+    if (contacts_.empty()) return;
+    std::size_t best = 0;
+    bool bestHostile = contacts_[0].hostile;
+    float bestDistance = contacts_[0].distance;
+    for (std::size_t i = 1; i < contacts_.size(); ++i)
+    {
+        const auto& c = contacts_[i];
+        const bool better = (c.hostile && !bestHostile) ||
+                            (c.hostile == bestHostile && c.distance < bestDistance);
+        if (better)
+        {
+            best = i;
+            bestHostile = c.hostile;
+            bestDistance = c.distance;
+        }
+    }
+    index_ = best;
+    lockProgress_ = 0.0f;
+}
+
 void TargetingState::clearSelection() noexcept
 {
     index_ = 0;
