@@ -366,7 +366,7 @@ starforge_add_shader(
     OUTPUT_NAME starfield.frag
 )
 
-foreach(effect_shaders IN ITEMS nebula dust sun_distortion wormhole ftl storm billboard asteroid sun sun_corona texture_blit hdr_tonemap hdr_bright hdr_blur gbuffer edge_detect hud planet_sphere planet_atmosphere rock_field rock_outline rock_impostor nebula_noise3d)
+foreach(effect_shaders IN ITEMS nebula dust sun_distortion wormhole ftl storm billboard asteroid sun sun_corona texture_blit hdr_tonemap hdr_bright hdr_blur gbuffer edge_detect hud planet_sphere planet_atmosphere rock_field rock_outline rock_impostor nebula_noise3d ui_text)
     starforge_add_shader(
         SOURCE "${PROJECT_SOURCE_DIR}/shaders/graphics/${effect_shaders}.slang"
         STAGE  vertex

@@ -9,6 +9,7 @@
 #include "starforge/sun.hpp"
 #include "starforge/renderer.hpp"
 #include "starforge/toon.hpp"
+#include "starforge/ui.hpp"
 
 #include <cmath>
 #include <cstdlib>
@@ -185,4 +186,38 @@ TEST_CASE("Public Toon: production showcase composes through public API (9.5.6)"
     CHECK(*frame == starforge::Renderer::FrameResult::Presented);
 
     renderer->waitIdle();
+}
+
+TEST_CASE("Public UiCanvas: move-only and records text through the renderer")
+{
+    if (!hasDisplay())
+    {
+        WARN("Skipping UI canvas: no Wayland/X11 display is available");
+        return;
+    }
+
+    auto app = starforge::Application::create({
+        .title = "STARFORGE UI", .width = 320, .height = 240, .resizable = false});
+    REQUIRE_MESSAGE(app.has_value(), app.error());
+    auto renderer = starforge::Renderer::create(*app, {});
+    REQUIRE_MESSAGE(renderer.has_value(), renderer.error());
+    auto canvas = starforge::UiCanvas::create(*renderer, {});
+    REQUIRE_MESSAGE(canvas.has_value(), canvas.error());
+
+    canvas->clear();
+    canvas->addText({.x = 16.0f, .y = 16.0f, .scale = 2.0f,
+                     .color = {1.0f, 0.9f, 0.2f, 1.0f}, .text = "UI"});
+    CHECK(canvas->vertexCount() == 0); // built at record time
+
+    auto frame = renderer->renderFrame({}, [&](starforge::FrameContext& fc) {
+        canvas->record(fc);
+    });
+    REQUIRE_MESSAGE(frame.has_value(), frame.error());
+    CHECK(canvas->vertexCount() > 0);
+    renderer->waitIdle();
+
+    auto moved = std::move(*canvas);
+    canvas->clear();
+    CHECK(canvas->vertexCount() == 0);
+    CHECK(moved.vertexCount() > 0);
 }

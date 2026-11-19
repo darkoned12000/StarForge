@@ -21,6 +21,8 @@ add_library(starforge_public_api STATIC
     sun_bridge.cpp
     toon.cpp
     toon_bridge.cpp
+    ui.cpp
+    ui_bridge.cpp
     world.cpp
     world_bridge.cpp
 )

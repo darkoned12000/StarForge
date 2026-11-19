@@ -70,6 +70,7 @@ add_executable(starforge_tests
     test_gameplay.cpp
     test_game_simulation.cpp
     test_public_input_edges.cpp
+    test_ui_text.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/game_bridge.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/game_simulation.cpp
 )
@@ -182,6 +183,7 @@ add_executable(starforge_gpu_tests
     test_hdr_pipeline.cpp
     test_toon_crease.cpp
     test_hud.cpp
+    test_ui_render.cpp
     test_planet_render.cpp
     test_rock_field.cpp
     test_nebula_optimized.cpp

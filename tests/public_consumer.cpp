@@ -11,6 +11,7 @@
 #include "starforge/renderer.hpp"
 #include "starforge/starfield.hpp"
 #include "starforge/toon.hpp"
+#include "starforge/ui.hpp"
 #include "starforge/world.hpp"
 
 #include <type_traits>
@@ -24,6 +25,7 @@ static_assert(std::is_move_constructible_v<starforge::Planet>);
 static_assert(std::is_move_constructible_v<starforge::Renderer>);
 static_assert(std::is_move_constructible_v<starforge::Starfield>);
 static_assert(std::is_move_constructible_v<starforge::Toon>);
+static_assert(std::is_move_constructible_v<starforge::UiCanvas>);
 static_assert(!std::is_copy_constructible_v<starforge::Asset>);
 static_assert(!std::is_copy_constructible_v<starforge::Audio>);
 static_assert(!std::is_copy_constructible_v<starforge::AsteroidField>);
@@ -31,6 +33,7 @@ static_assert(!std::is_copy_constructible_v<starforge::Planet>);
 static_assert(!std::is_copy_constructible_v<starforge::Renderer>);
 static_assert(!std::is_copy_constructible_v<starforge::Starfield>);
 static_assert(!std::is_copy_constructible_v<starforge::Toon>);
+static_assert(!std::is_copy_constructible_v<starforge::UiCanvas>);
 
 namespace
 {
