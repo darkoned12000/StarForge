@@ -4,6 +4,7 @@
 #include "audio_bridge.hpp"
 
 #include <cstdint>
+#include <fstream>
 #include <string>
 #include <utility>
 
@@ -144,6 +145,23 @@ std::expected<Audio::VoiceHandle, std::string> Audio::loadFromMemory(std::span<c
         return std::unexpected<std::string>(handle.error());
     }
     return VoiceHandle{(*handle).index};
+}
+
+std::expected<Audio::VoiceHandle, std::string> Audio::loadFromFile(const std::string& path)
+{
+    return loadFromFile(path, SoundParams{});
+}
+
+std::expected<Audio::VoiceHandle, std::string>
+Audio::loadFromFile(const std::string& path, const SoundParams& params)
+{
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file) return std::unexpected<std::string>("Cannot open audio file: " + path);
+    const auto size = static_cast<std::size_t>(file.tellg());
+    file.seekg(0);
+    std::vector<std::uint8_t> bytes(size);
+    file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size));
+    return loadFromMemory(bytes, params);
 }
 
 bool Audio::play(VoiceHandle voice, bool restartIfPlaying) noexcept

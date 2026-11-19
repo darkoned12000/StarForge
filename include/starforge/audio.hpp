@@ -100,6 +100,12 @@ public:
     [[nodiscard]] std::expected<VoiceHandle, std::string>
     loadFromMemory(std::span<const std::uint8_t> data, const SoundParams& params);
 
+    // M17.6: reads a WAV/FLAC/MP3 file and decodes it through the same
+    // backend path as loadFromMemory.
+    [[nodiscard]] std::expected<VoiceHandle, std::string> loadFromFile(const std::string& path);
+    [[nodiscard]] std::expected<VoiceHandle, std::string>
+    loadFromFile(const std::string& path, const SoundParams& params);
+
     bool play(VoiceHandle voice, bool restartIfPlaying = false) noexcept;
     bool stop(VoiceHandle voice) noexcept;
     [[nodiscard]] bool isPlaying(VoiceHandle voice) const noexcept;

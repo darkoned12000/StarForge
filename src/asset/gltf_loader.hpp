@@ -58,4 +58,9 @@ struct GltfAsset
 // Parses a binary glTF (GLB) byte buffer. Embedded textures are decoded to RGBA.
 [[nodiscard]] std::expected<GltfAsset, std::string> loadGlb(const std::uint8_t* data, std::size_t size);
 
+// Parses either GLB or ASCII .gltf. External buffer/image URIs are resolved
+// relative to `baseDir`; data: URIs are decoded in memory.
+[[nodiscard]] std::expected<GltfAsset, std::string>
+loadGltf(const std::uint8_t* data, std::size_t size, const std::string& baseDir);
+
 } // namespace starforge::asset

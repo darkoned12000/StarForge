@@ -80,13 +80,46 @@ std::expected<Asset, std::string> Asset::loadFromMemory(std::span<const std::uin
 
 std::expected<Asset, std::string> Asset::loadFromFile(const std::string& path)
 {
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file) return std::unexpected("Cannot open glTF file: " + path);
-    const auto size = static_cast<std::size_t>(file.tellg());
-    file.seekg(0);
-    std::vector<std::uint8_t> bytes(size);
-    file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size));
-    return loadFromMemory(bytes);
+    // The bridge resolves external .gltf buffer/image URIs relative to path;
+    // loadFromMemory remains the GLB-only entry point.
+    auto decoded = bridge::RawAsset::loadFromFile(path);
+    if (!decoded) return std::unexpected(decoded.error());
+
+    auto impl = std::make_unique<Impl>();
+    for (const auto& raw : (*decoded)->meshes())
+    {
+        MeshData mesh;
+        mesh.name = raw.name;
+        mesh.indices = raw.indices;
+        mesh.material.baseColorFactor = math::Vec4f{
+            raw.material.baseColorFactor[0], raw.material.baseColorFactor[1],
+            raw.material.baseColorFactor[2], raw.material.baseColorFactor[3]};
+        mesh.material.emissiveFactor = math::Vec4f{
+            raw.material.emissiveFactor[0], raw.material.emissiveFactor[1],
+            raw.material.emissiveFactor[2], raw.material.emissiveFactor[3]};
+        mesh.material.metallicFactor = raw.material.metallicFactor;
+        mesh.material.roughnessFactor = raw.material.roughnessFactor;
+        mesh.material.hasBaseColorTexture = raw.material.hasBaseColorTexture;
+        mesh.material.hasNormalTexture = raw.material.hasNormalTexture;
+        mesh.material.hasMetallicRoughnessTexture = raw.material.hasMetallicRoughnessTexture;
+        mesh.material.hasOcclusionTexture = raw.material.hasOcclusionTexture;
+        mesh.material.hasEmissiveTexture = raw.material.hasEmissiveTexture;
+        mesh.material.doubleSided = raw.material.doubleSided;
+        mesh.material.alphaMode = raw.material.alphaMode;
+        mesh.material.textureWidth = raw.material.textureWidth;
+        mesh.material.textureHeight = raw.material.textureHeight;
+        mesh.material.textureRGBA = raw.material.textureRGBA;
+        mesh.material.name = raw.material.name;
+        mesh.vertices.reserve(raw.vertices.size());
+        for (const auto& vertex : raw.vertices)
+            mesh.vertices.push_back(MeshVertexData{
+                math::Vec3f{vertex.position[0], vertex.position[1], vertex.position[2]},
+                math::Vec3f{vertex.normal[0], vertex.normal[1], vertex.normal[2]},
+                math::Vec2f{vertex.uv[0], vertex.uv[1]},
+                math::Vec4f{vertex.tangent[0], vertex.tangent[1], vertex.tangent[2], vertex.tangent[3]}});
+        impl->meshes.push_back(std::move(mesh));
+    }
+    return Asset(std::move(impl));
 }
 
 std::span<const MeshData> Asset::meshes() const noexcept

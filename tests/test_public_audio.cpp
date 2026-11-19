@@ -6,6 +6,8 @@
 #include "starforge/math.hpp"
 #include "starforge/world.hpp"
 
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -138,4 +140,28 @@ TEST_CASE("Public Audio: moved-from instance is inert")
     auto rejected = audio->loadFromMemory(toneWav());
     CHECK(!rejected.has_value());
     CHECK(!audio->play(starforge::Audio::VoiceHandle{}));
+}
+
+TEST_CASE("M17.6: Public Audio loads WAV files from disk")
+{
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "starforge_m17_audio";
+    fs::create_directories(dir);
+    const fs::path path = dir / "tone.wav";
+
+    const auto wav = starforge::generateToneWav(48000, 1, 440.0f, 0.1f, 0.5f);
+    {
+        std::ofstream file(path, std::ios::binary);
+        file.write(reinterpret_cast<const char*>(wav.data()), static_cast<std::streamsize>(wav.size()));
+    }
+
+    auto audio = starforge::Audio::create(silentInfo());
+    REQUIRE(audio.has_value());
+    const auto voice = audio->loadFromFile(path.string());
+    REQUIRE(voice.has_value());
+    CHECK(voice->isValid());
+    CHECK(audio->stop(*voice));
+
+    CHECK_FALSE(audio->loadFromFile((dir / "missing.wav").string()).has_value());
+    fs::remove(path);
 }

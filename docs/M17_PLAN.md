@@ -28,9 +28,9 @@ material model.
    residency, request/eviction, `starforge::StreamingTexture` public facade,
    and a `Toon::createMeshFromAsset` overload that uploads a chosen mip. T1
    + public API tests.
-6. **M17.6 External glTF + audio files** — FetchContent tinygltf for ASCII
-   `.gltf`/external-URI loading; file-based audio loading via miniaudio's
-   decoder. Tests for both paths.
+6. **M17.6 External glTF + audio files** — ASCII `.gltf` loading with
+   external buffer/image URIs (file and `data:`); file-based audio loading
+   via miniaudio's decoder. Tests for both paths.
 7. **M17.7 Authored content** — deterministic generator script producing a
    stylised hero ship and station `.glb` (multiple meshes, materials and
    embedded textures) committed under `assets/models/`. Loader tests.
@@ -43,8 +43,10 @@ material model.
    errors; final commit.
 
 ## Decisions
-- Keep the hand-rolled GLB decoder (it is proven by GPU tests) and add
-  tinygltf only for the external `.gltf` path, selected by file extension.
+- Keep and extend the in-house nlohmann/stb decoder for both GLB and ASCII
+  `.gltf` (external + data URIs). tinygltf v3 is now a C library with no
+  CMake target; adopting it would duplicate the GPU-proven decoder for no
+  extra capability, so it is intentionally not a dependency.
 - Textures stay in the toon BDA packed-RGBA8 storage buffer; streaming means
   on-demand mip generation/residency, not a new VkImage sampler pipeline.
 - Asset manager and watcher stay CPU-only and Vulkan-loader-free so they run

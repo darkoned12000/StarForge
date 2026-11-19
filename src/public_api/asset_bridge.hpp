@@ -50,6 +50,7 @@ class RawAsset
 {
 public:
     static std::expected<std::unique_ptr<RawAsset>, std::string> loadFromMemory(const std::uint8_t* data, std::size_t size);
+    static std::expected<std::unique_ptr<RawAsset>, std::string> loadFromFile(const std::string& path);
     ~RawAsset();
     RawAsset(RawAsset&&) noexcept;
     RawAsset& operator=(RawAsset&&) noexcept;
@@ -60,6 +61,8 @@ public:
 
 private:
     RawAsset() = default;
+    static std::expected<std::unique_ptr<RawAsset>, std::string>
+    fromMeshes(std::vector<RawAssetMesh> meshes);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

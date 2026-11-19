@@ -7,6 +7,9 @@
 
 #include <algorithm>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <limits>
 
 namespace starforge::asset
@@ -78,9 +81,110 @@ float readComponent(const std::uint8_t* p, std::uint32_t componentType)
     }
 }
 
+// Holds every binary buffer and decoded image for one glTF file. GLB supplies
+// a single embedded buffer; ASCII .gltf may reference external files/URIs.
+struct LoadContext
+{
+    std::vector<std::vector<std::uint8_t>> buffers;
+    std::vector<TextureData> images;
+
+    [[nodiscard]] const std::uint8_t* bufferData(std::size_t index) const noexcept
+    {
+        return index < buffers.size() ? buffers[index].data() : nullptr;
+    }
+    [[nodiscard]] std::size_t bufferSize(std::size_t index) const noexcept
+    {
+        return index < buffers.size() ? buffers[index].size() : 0;
+    }
+};
+
+int base64Value(char c) noexcept
+{
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1;
+}
+
+std::vector<std::uint8_t> decodeDataUri(const std::string& uri)
+{
+    const auto comma = uri.find(',');
+    if (comma == std::string::npos || uri.rfind("data:", 0) != 0) return {};
+    std::vector<std::uint8_t> out;
+    std::size_t accumulator = 0;
+    int bits = 0;
+    for (std::size_t i = comma + 1; i < uri.size(); ++i)
+    {
+        const int six = base64Value(uri[i]);
+        if (six < 0) continue; // '=', whitespace or other metadata
+        accumulator = (accumulator << 6) | static_cast<std::size_t>(six);
+        bits += 6;
+        if (bits >= 8)
+        {
+            bits -= 8;
+            out.push_back(static_cast<std::uint8_t>((accumulator >> bits) & 0xFFu));
+        }
+    }
+    return out;
+}
+
+std::vector<std::uint8_t> readUriBytes(const std::string& uri, const std::string& baseDir)
+{
+    if (uri.rfind("data:", 0) == 0) return decodeDataUri(uri);
+    std::ifstream file(std::filesystem::path(baseDir) / uri, std::ios::binary | std::ios::ate);
+    if (!file) return {};
+    const auto size = static_cast<std::size_t>(file.tellg());
+    file.seekg(0);
+    std::vector<std::uint8_t> bytes(size);
+    file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size));
+    return bytes;
+}
+
+TextureData decodeImageBytes(const std::uint8_t* data, std::size_t size)
+{
+    TextureData result;
+    if (!data || size == 0) return result;
+    int w = 0, h = 0, channels = 0;
+    stbi_uc* pixels = stbi_load_from_memory(data, static_cast<int>(size), &w, &h, &channels, 4);
+    if (!pixels) return result;
+    result.width = static_cast<std::uint32_t>(w);
+    result.height = static_cast<std::uint32_t>(h);
+    result.rgba.assign(pixels, pixels + static_cast<std::size_t>(w) * h * 4);
+    stbi_image_free(pixels);
+    return result;
+}
+
+void resolveImages(const json& root, const std::string& baseDir, LoadContext& context)
+{
+    if (!root.contains("images")) return;
+    context.images.resize(root["images"].size());
+    for (std::size_t i = 0; i < root["images"].size(); ++i)
+    {
+        const auto& image = root["images"][i];
+        if (image.contains("bufferView"))
+        {
+            const auto viewIndex = image["bufferView"].get<std::size_t>();
+            if (viewIndex >= root.at("bufferViews").size()) continue;
+            const auto& view = root["bufferViews"][viewIndex];
+            const auto bufferIndex = view.value("buffer", std::size_t{0});
+            const auto offset = view.value("byteOffset", std::size_t{0});
+            const auto length = view.value("byteLength", std::size_t{0});
+            if (offset + length <= context.bufferSize(bufferIndex))
+                context.images[i] = decodeImageBytes(context.bufferData(bufferIndex) + offset, length);
+        }
+        else if (image.contains("uri"))
+        {
+            const auto bytes = readUriBytes(image["uri"].get<std::string>(), baseDir);
+            context.images[i] = decodeImageBytes(bytes.data(), bytes.size());
+        }
+    }
+}
+
 // Reads one accessor into a flat float array (count * components).
-bool readAccessor(const json& root, int accessorIndex, const std::uint8_t* bin,
-                  std::size_t binSize, std::vector<float>& out)
+bool readAccessor(const json& root, int accessorIndex, const LoadContext& context,
+                  std::vector<float>& out)
 {
     if (accessorIndex < 0) return false;
     const auto& accessors = root.at("accessors");
@@ -91,6 +195,7 @@ bool readAccessor(const json& root, int accessorIndex, const std::uint8_t* bin,
     const std::size_t count = accessor.value("count", std::size_t{0});
     if (components == 0 || count == 0 || componentSize(componentType) == 0) return false;
 
+    std::size_t bufferIndex = 0;
     std::size_t base = accessor.value("byteOffset", std::size_t{0});
     std::size_t stride = components * componentSize(componentType);
     if (accessor.contains("bufferView"))
@@ -99,10 +204,14 @@ bool readAccessor(const json& root, int accessorIndex, const std::uint8_t* bin,
         const std::size_t viewIndex = accessor["bufferView"].get<std::size_t>();
         if (viewIndex >= views.size()) return false;
         const auto& view = views[viewIndex];
+        bufferIndex = view.value("buffer", std::size_t{0});
         base += view.value("byteOffset", std::size_t{0});
         if (view.contains("byteStride")) stride = view["byteStride"].get<std::size_t>();
     }
     if (stride < components * componentSize(componentType)) return false;
+    const auto* bin = context.bufferData(bufferIndex);
+    const auto binSize = context.bufferSize(bufferIndex);
+    if (!bin) return false;
 
     out.assign(count * components, 0.0f);
     for (std::size_t i = 0; i < count; ++i)
@@ -110,41 +219,12 @@ bool readAccessor(const json& root, int accessorIndex, const std::uint8_t* bin,
         const std::size_t offset = base + i * stride;
         if (offset + components * componentSize(componentType) > binSize) return false;
         for (std::size_t c = 0; c < components; ++c)
-        {
             out[i * components + c] = readComponent(bin + offset + c * componentSize(componentType), componentType);
-        }
     }
     return true;
 }
 
-TextureData decodeEmbeddedTexture(const json& root, int imageIndex, const std::uint8_t* bin,
-                                  std::size_t binSize)
-{
-    TextureData result;
-    if (imageIndex < 0) return result;
-    const auto& images = root.at("images");
-    if (static_cast<std::size_t>(imageIndex) >= images.size()) return result;
-    const auto& image = images[imageIndex];
-    if (!image.contains("bufferView")) return result;
-    const auto& views = root.at("bufferViews");
-    const std::size_t viewIndex = image["bufferView"].get<std::size_t>();
-    if (viewIndex >= views.size()) return result;
-    const auto& view = views[viewIndex];
-    const std::size_t offset = view.value("byteOffset", std::size_t{0});
-    const std::size_t length = view.value("byteLength", std::size_t{0});
-    if (offset + length > binSize) return result;
-    int w = 0, h = 0, channels = 0;
-    stbi_uc* pixels = stbi_load_from_memory(bin + offset, static_cast<int>(length), &w, &h, &channels, 4);
-    if (!pixels) return result;
-    result.width = static_cast<std::uint32_t>(w);
-    result.height = static_cast<std::uint32_t>(h);
-    result.rgba.assign(pixels, pixels + static_cast<std::size_t>(w) * h * 4);
-    stbi_image_free(pixels);
-    return result;
-}
-
-MaterialData readMaterial(const json& root, int materialIndex, const std::uint8_t* bin,
-                          std::size_t binSize)
+MaterialData readMaterial(const json& root, int materialIndex, const LoadContext& context)
 {
     MaterialData material;
     if (materialIndex < 0) return material;
@@ -173,9 +253,7 @@ MaterialData readMaterial(const json& root, int materialIndex, const std::uint8_
         {
             const auto& factor = pbr["baseColorFactor"];
             for (std::size_t i = 0; i < std::min<std::size_t>(4, factor.size()); ++i)
-            {
                 material.baseColorFactor[i] = factor[i].get<float>();
-            }
         }
         material.metallicFactor = pbr.value("metallicFactor", 0.0f);
         material.roughnessFactor = pbr.value("roughnessFactor", 1.0f);
@@ -190,57 +268,20 @@ MaterialData readMaterial(const json& root, int materialIndex, const std::uint8_
             if (textureIndex < textures.size() && textures[textureIndex].contains("source"))
             {
                 const int imageIndex = textures[textureIndex]["source"].get<int>();
-                material.baseColorTexture = decodeEmbeddedTexture(root, imageIndex, bin, binSize);
-                material.hasBaseColorTexture = material.baseColorTexture.width > 0;
+                if (imageIndex >= 0 && static_cast<std::size_t>(imageIndex) < context.images.size())
+                {
+                    material.baseColorTexture = context.images[imageIndex];
+                    material.hasBaseColorTexture = material.baseColorTexture.width > 0;
+                }
             }
         }
     }
     return material;
 }
 
-} // namespace
-
-std::expected<GltfAsset, std::string> loadGlb(const std::uint8_t* data, std::size_t size)
+std::expected<GltfAsset, std::string> decodeMeshes(const json& root, const LoadContext& context)
 {
-    if (!data || size < 20) return std::unexpected("GLB buffer is too small");
-    if (readU32(data) != kGlbMagic) return std::unexpected("GLB magic mismatch");
-    if (readU32(data + 4) != kGlbVersion) return std::unexpected("Only glTF 2.0 is supported");
-
-    std::size_t offset = 12;
-    std::string jsonText;
-    const std::uint8_t* binary = nullptr;
-    std::size_t binarySize = 0;
-    while (offset + 8 <= size)
-    {
-        const std::uint32_t chunkLength = readU32(data + offset);
-        const std::uint32_t chunkType = readU32(data + offset + 4);
-        offset += 8;
-        if (chunkLength > size - offset) return std::unexpected("GLB chunk overruns buffer");
-        if (chunkType == kJsonChunk)
-        {
-            jsonText.assign(reinterpret_cast<const char*>(data + offset), chunkLength);
-        }
-        else if (chunkType == kBinChunk)
-        {
-            binary = data + offset;
-            binarySize = chunkLength;
-        }
-        offset += chunkLength;
-    }
-    if (jsonText.empty()) return std::unexpected("GLB has no JSON chunk");
-    if (!binary) return std::unexpected("GLB has no binary chunk");
-
-    json root;
-    try
-    {
-        root = json::parse(jsonText);
-    }
-    catch (const json::exception& e)
-    {
-        return std::unexpected(std::string("Invalid glTF JSON: ") + e.what());
-    }
     if (!root.contains("meshes")) return std::unexpected("glTF has no meshes");
-
     GltfAsset asset;
     for (const auto& sourceMesh : root["meshes"])
     {
@@ -251,24 +292,24 @@ std::expected<GltfAsset, std::string> loadGlb(const std::uint8_t* data, std::siz
             const auto& attributes = primitive["attributes"];
 
             std::vector<float> positions, normals, uvs, tangents, indices;
-            if (!readAccessor(root, attributes["POSITION"].get<int>(), binary, binarySize, positions))
+            if (!readAccessor(root, attributes["POSITION"].get<int>(), context, positions))
                 return std::unexpected("Failed to read POSITION accessor");
             const std::size_t vertexCount = positions.size() / 3;
             if (vertexCount == 0) continue;
 
             if (attributes.contains("NORMAL"))
-                readAccessor(root, attributes["NORMAL"].get<int>(), binary, binarySize, normals);
+                readAccessor(root, attributes["NORMAL"].get<int>(), context, normals);
             if (attributes.contains("TEXCOORD_0"))
-                readAccessor(root, attributes["TEXCOORD_0"].get<int>(), binary, binarySize, uvs);
+                readAccessor(root, attributes["TEXCOORD_0"].get<int>(), context, uvs);
             if (attributes.contains("TANGENT"))
-                readAccessor(root, attributes["TANGENT"].get<int>(), binary, binarySize, tangents);
+                readAccessor(root, attributes["TANGENT"].get<int>(), context, tangents);
             if (primitive.contains("indices"))
-                readAccessor(root, primitive["indices"].get<int>(), binary, binarySize, indices);
+                readAccessor(root, primitive["indices"].get<int>(), context, indices);
 
             MeshData mesh;
             mesh.name = sourceMesh.value("name", "");
             mesh.material = readMaterial(root,
-                primitive.contains("material") ? primitive["material"].get<int>() : -1, binary, binarySize);
+                primitive.contains("material") ? primitive["material"].get<int>() : -1, context);
 
             // Expand indices so the toon BDA path (SV_VertexID, no index
             // buffer) consumes a flat vertex stream, while keeping UV/tangent
@@ -290,26 +331,81 @@ std::expected<GltfAsset, std::string> loadGlb(const std::uint8_t* data, std::siz
                     vertex.uv[1] = uvs[i * 2 + 1];
                 }
                 if (tangents.size() >= (i + 1) * 4)
-                {
                     for (std::size_t c = 0; c < 4; ++c) vertex.tangent[c] = tangents[i * 4 + c];
-                }
                 mesh.vertices.push_back(vertex);
                 mesh.indices.push_back(static_cast<std::uint32_t>(mesh.vertices.size() - 1));
             };
 
             if (!indices.empty())
-            {
                 for (float index : indices) emitVertex(static_cast<std::size_t>(index));
-            }
             else
-            {
                 for (std::size_t i = 0; i < vertexCount; ++i) emitVertex(i);
-            }
             asset.meshes.push_back(std::move(mesh));
         }
     }
     if (asset.meshes.empty()) return std::unexpected("glTF contained no drawable primitives");
     return asset;
+}
+
+} // namespace
+
+std::expected<GltfAsset, std::string> loadGlb(const std::uint8_t* data, std::size_t size)
+{
+    if (!data || size < 20) return std::unexpected("GLB buffer is too small");
+    if (readU32(data) != kGlbMagic) return std::unexpected("GLB magic mismatch");
+    if (readU32(data + 4) != kGlbVersion) return std::unexpected("Only glTF 2.0 is supported");
+
+    std::size_t offset = 12;
+    std::string jsonText;
+    LoadContext context;
+    while (offset + 8 <= size)
+    {
+        const std::uint32_t chunkLength = readU32(data + offset);
+        const std::uint32_t chunkType = readU32(data + offset + 4);
+        offset += 8;
+        if (chunkLength > size - offset) return std::unexpected("GLB chunk overruns buffer");
+        if (chunkType == kJsonChunk)
+            jsonText.assign(reinterpret_cast<const char*>(data + offset), chunkLength);
+        else if (chunkType == kBinChunk)
+            context.buffers.push_back({data + offset, data + offset + chunkLength});
+        offset += chunkLength;
+    }
+    if (jsonText.empty()) return std::unexpected("GLB has no JSON chunk");
+    if (context.buffers.empty()) return std::unexpected("GLB has no binary chunk");
+
+    json root;
+    try { root = json::parse(jsonText); }
+    catch (const json::exception& e) { return std::unexpected(std::string("Invalid glTF JSON: ") + e.what()); }
+    resolveImages(root, {}, context);
+    return decodeMeshes(root, context);
+}
+
+std::expected<GltfAsset, std::string> loadGltf(const std::uint8_t* data, std::size_t size,
+                                              const std::string& baseDir)
+{
+    if (!data || size == 0) return std::unexpected("glTF buffer is empty");
+    if (size >= 4 && readU32(data) == kGlbMagic) return loadGlb(data, size);
+
+    json root;
+    try
+    {
+        root = json::parse(reinterpret_cast<const char*>(data),
+                           reinterpret_cast<const char*>(data) + size);
+    }
+    catch (const json::exception& e) { return std::unexpected(std::string("Invalid glTF JSON: ") + e.what()); }
+
+    LoadContext context;
+    if (root.contains("buffers"))
+        for (const auto& buffer : root["buffers"])
+        {
+            if (!buffer.contains("uri"))
+                return std::unexpected("External glTF requires buffer URIs");
+            auto bytes = readUriBytes(buffer["uri"].get<std::string>(), baseDir);
+            if (bytes.empty()) return std::unexpected("Failed to resolve glTF buffer URI");
+            context.buffers.push_back(std::move(bytes));
+        }
+    resolveImages(root, baseDir, context);
+    return decodeMeshes(root, context);
 }
 
 } // namespace starforge::asset

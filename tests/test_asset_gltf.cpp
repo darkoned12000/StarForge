@@ -330,3 +330,47 @@ TEST_CASE("Asset: textured glTF mesh renders through the toon material (T3)")
     vkDestroyCommandPool(device->device(), pool, nullptr);
 }
 #endif // STARFORGE_GPU_TESTS
+
+TEST_CASE("M17.6: external .gltf files with URI buffers load through the shared decoder")
+{
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "starforge_m17_gltf";
+    fs::create_directories(dir);
+
+    // One triangle, positions in a separate .bin file.
+    const float positions[] = {0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f};
+    {
+        std::ofstream bin(dir / "triangle.bin", std::ios::binary);
+        bin.write(reinterpret_cast<const char*>(positions), sizeof(positions));
+    }
+
+    nlohmann::json root;
+    root["asset"] = {{"version", "2.0"}};
+    root["buffers"] = {{{"uri", "triangle.bin"}, {"byteLength", sizeof(positions)}}};
+    root["bufferViews"] = {{{"buffer", 0}, {"byteOffset", 0}, {"byteLength", sizeof(positions)}}};
+    root["accessors"] = {{{"bufferView", 0}, {"componentType", 5126},
+                          {"count", 3}, {"type", "VEC3"}}};
+    root["meshes"] = {{{"name", "external-triangle"},
+                       {"primitives", {{{"attributes", {{"POSITION", 0}}}}}}}};
+    {
+        std::ofstream gltf(dir / "triangle.gltf");
+        gltf << root.dump();
+    }
+
+    std::ifstream file(dir / "triangle.gltf", std::ios::binary | std::ios::ate);
+    REQUIRE(file.good());
+    const auto size = static_cast<std::size_t>(file.tellg());
+    file.seekg(0);
+    std::vector<std::uint8_t> bytes(size);
+    file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size));
+
+    auto asset = loadGltf(bytes.data(), bytes.size(), dir.generic_string());
+    REQUIRE(asset.has_value());
+    REQUIRE(asset->meshes.size() == 1);
+    CHECK(asset->meshes[0].name == "external-triangle");
+    CHECK(asset->meshes[0].vertices.size() == 3);
+    CHECK(asset->meshes[0].vertices[1].position[0] == doctest::Approx(1.0f));
+
+    // The same bytes are also accepted by the auto-detecting entry point.
+    CHECK_FALSE(loadGltf(nullptr, 0, dir.generic_string()).has_value());
+}
