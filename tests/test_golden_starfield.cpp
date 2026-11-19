@@ -398,3 +398,275 @@ TEST_CASE("Budget: starfield frame time under ADR-004 interval (8.8)")
 
     CHECK(context->validationErrorCount() == 0);
 }
+
+// Regression: disabling the sun billboard (intensity = 0) must not also
+// disable the stars. They use independent intensity fields.
+TEST_CASE("Starfield: stars render with sun billboard disabled (M15.0)")
+{
+    ContextCreateInfo info;
+    info.enableValidation = kValidationDefault;
+    info.requiredExtensions.clear();
+    auto context = VulkanContext::create(info);
+    REQUIRE(context.has_value());
+    auto device = VulkanDevice::create(*context);
+    REQUIRE(device.has_value());
+    auto allocator = Allocator::create({
+        .instance = context->instance(), .physicalDevice = context->physicalDevice(),
+        .device = device->device()});
+    REQUIRE(allocator.has_value());
+
+    auto image = Image::create(*allocator, {
+        .width = kW, .height = kH, .format = VK_FORMAT_R8G8B8A8_UNORM,
+        .usage = ImageUsageFlags::ColorAttachment | ImageUsageFlags::TransferSrc});
+    REQUIRE(image.has_value());
+    auto view = image->createImageView(device->device());
+    REQUIRE(view.has_value());
+    auto readback = Buffer::create(*allocator, {
+        .size = kW * kH * 4, .usage = BufferUsage::TransferDst,
+        .memory = MemoryPlacement::GpuToCpu});
+    REQUIRE(readback.has_value());
+    auto renderer = StarfieldRenderer::create({
+        .device = device->device(), .colorFormat = VK_FORMAT_R8G8B8A8_UNORM,
+        .shaderDirectory = std::string(STARFORGE_SHADER_DIR)});
+    REQUIRE(renderer.has_value());
+
+    VkCommandPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    poolInfo.queueFamilyIndex = device->graphicsQueueFamily();
+    VkCommandPool pool = VK_NULL_HANDLE;
+    REQUIRE(vkCreateCommandPool(device->device(), &poolInfo, nullptr, &pool) == VK_SUCCESS);
+    VkCommandBufferAllocateInfo alloc{};
+    alloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    alloc.commandPool = pool;
+    alloc.commandBufferCount = 1;
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    REQUIRE(vkAllocateCommandBuffers(device->device(), &alloc, &cmd) == VK_SUCCESS);
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    VkFence fence = VK_NULL_HANDLE;
+    REQUIRE(vkCreateFence(device->device(), &fenceInfo, nullptr, &fence) == VK_SUCCESS);
+
+    VkCommandBufferBeginInfo begin{};
+    begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    REQUIRE(vkBeginCommandBuffer(cmd, &begin) == VK_SUCCESS);
+    Image::transitionToColorAttachment(cmd, image->handle());
+    VkRenderingAttachmentInfo attachment{};
+    attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    attachment.imageView = view->handle();
+    attachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    attachment.clearValue.color = VkClearColorValue{{0.0f, 0.0f, 0.0f, 1.0f}};
+    VkRenderingInfo rendering{};
+    rendering.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    rendering.renderArea.extent = {kW, kH};
+    rendering.layerCount = 1;
+    rendering.colorAttachmentCount = 1;
+    rendering.pColorAttachments = &attachment;
+    vkCmdBeginRendering(cmd, &rendering);
+    VkViewport viewport{0.0f, static_cast<float>(kH), static_cast<float>(kW),
+                        -static_cast<float>(kH), 0.0f, 1.0f};
+    VkRect2D scissor{{0, 0}, {kW, kH}};
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+    StarfieldRenderContext ctx;
+    ctx.viewProj = starforge::math::perspectiveVulkan(glm::radians(60.0f), 1.0f, 0.1f, 100.0f) *
+                   glm::lookAt(starforge::math::Vec3f{0.0f, 0.0f, 5.0f},
+                               starforge::math::Vec3f{0.0f, 0.0f, 0.0f},
+                               starforge::math::Vec3f{0.0f, 1.0f, 0.0f});
+    ctx.resolution = {static_cast<float>(kW), static_cast<float>(kH)};
+    StarfieldParams params;
+    params.intensity = 0.0f;  // sun billboard off (as in apps/game)
+    params.starIntensity = 1.0f;
+    renderer->render(cmd, ctx, params);
+    vkCmdEndRendering(cmd);
+    Image::transitionToTransferSrc(cmd, image->handle());
+    VkBufferImageCopy copy{};
+    copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy.imageSubresource.layerCount = 1;
+    copy.imageExtent = {kW, kH, 1};
+    vkCmdCopyImageToBuffer(cmd, image->handle(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           readback->handle(), 1, &copy);
+    VkBufferMemoryBarrier2 barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+    barrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    barrier.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+    barrier.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
+    barrier.buffer = readback->handle();
+    barrier.size = VK_WHOLE_SIZE;
+    VkDependencyInfo dep{};
+    dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dep.bufferMemoryBarrierCount = 1;
+    dep.pBufferMemoryBarriers = &barrier;
+    vkCmdPipelineBarrier2(cmd, &dep);
+    REQUIRE(vkEndCommandBuffer(cmd) == VK_SUCCESS);
+    VkCommandBufferSubmitInfo submitCmd{};
+    submitCmd.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+    submitCmd.commandBuffer = cmd;
+    VkSubmitInfo2 submit{};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+    submit.commandBufferInfoCount = 1;
+    submit.pCommandBufferInfos = &submitCmd;
+    REQUIRE(device->submit(1, &submit, fence) == VK_SUCCESS);
+    REQUIRE(vkWaitForFences(device->device(), 1, &fence, VK_TRUE, UINT64_MAX) == VK_SUCCESS);
+
+    auto mapped = readback->map();
+    REQUIRE(mapped.has_value());
+    (void)readback->invalidate(0, kW * kH * 4);
+    const auto* pixels = static_cast<const std::uint8_t*>(*mapped);
+    std::size_t bright = 0;
+    for (std::size_t i = 0; i < kW * kH * 4; i += 4)
+        if (pixels[i] + pixels[i + 1] + pixels[i + 2] > 30) ++bright;
+    readback->unmap();
+    CHECK(bright >= 5); // stars still visible with the billboard disabled
+    CHECK(context->validationErrorCount() == 0);
+
+    vkDestroyFence(device->device(), fence, nullptr);
+    vkFreeCommandBuffers(device->device(), pool, 1, &cmd);
+    vkDestroyCommandPool(device->device(), pool, nullptr);
+}
+
+// Regression: stars are world-direction pinned. Translating the camera
+// without rotating must produce an identical sky (no parallax / drift).
+TEST_CASE("Starfield: stars are pinned under camera translation (M15.0)")
+{
+    ContextCreateInfo info;
+    info.enableValidation = kValidationDefault;
+    info.requiredExtensions.clear();
+    auto context = VulkanContext::create(info);
+    REQUIRE(context.has_value());
+    auto device = VulkanDevice::create(*context);
+    REQUIRE(device.has_value());
+    auto allocator = Allocator::create({
+        .instance = context->instance(), .physicalDevice = context->physicalDevice(),
+        .device = device->device()});
+    REQUIRE(allocator.has_value());
+    auto image = Image::create(*allocator, {
+        .width = kW, .height = kH, .format = VK_FORMAT_R8G8B8A8_UNORM,
+        .usage = ImageUsageFlags::ColorAttachment | ImageUsageFlags::TransferSrc});
+    REQUIRE(image.has_value());
+    auto view = image->createImageView(device->device());
+    REQUIRE(view.has_value());
+    auto readback = Buffer::create(*allocator, {
+        .size = kW * kH * 4, .usage = BufferUsage::TransferDst,
+        .memory = MemoryPlacement::GpuToCpu});
+    REQUIRE(readback.has_value());
+    auto renderer = StarfieldRenderer::create({
+        .device = device->device(), .colorFormat = VK_FORMAT_R8G8B8A8_UNORM,
+        .shaderDirectory = std::string(STARFORGE_SHADER_DIR)});
+    REQUIRE(renderer.has_value());
+    VkCommandPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    poolInfo.queueFamilyIndex = device->graphicsQueueFamily();
+    poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    VkCommandPool pool = VK_NULL_HANDLE;
+    REQUIRE(vkCreateCommandPool(device->device(), &poolInfo, nullptr, &pool) == VK_SUCCESS);
+    VkCommandBufferAllocateInfo alloc{};
+    alloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    alloc.commandPool = pool;
+    alloc.commandBufferCount = 1;
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    REQUIRE(vkAllocateCommandBuffers(device->device(), &alloc, &cmd) == VK_SUCCESS);
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    VkFence fence = VK_NULL_HANDLE;
+    REQUIRE(vkCreateFence(device->device(), &fenceInfo, nullptr, &fence) == VK_SUCCESS);
+
+    auto renderAt = [&](float cameraX, std::vector<std::uint8_t>& out) {
+        REQUIRE(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
+        VkCommandBufferBeginInfo begin{};
+        begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        REQUIRE(vkBeginCommandBuffer(cmd, &begin) == VK_SUCCESS);
+        Image::transitionToColorAttachment(cmd, image->handle());
+        VkRenderingAttachmentInfo attachment{};
+        attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        attachment.imageView = view->handle();
+        attachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        attachment.clearValue.color = VkClearColorValue{{0.0f, 0.0f, 0.0f, 1.0f}};
+        VkRenderingInfo rendering{};
+        rendering.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+        rendering.renderArea.extent = {kW, kH};
+        rendering.layerCount = 1;
+        rendering.colorAttachmentCount = 1;
+        rendering.pColorAttachments = &attachment;
+        vkCmdBeginRendering(cmd, &rendering);
+        VkViewport viewport{0.0f, static_cast<float>(kH), static_cast<float>(kW),
+                            -static_cast<float>(kH), 0.0f, 1.0f};
+        VkRect2D scissor{{0, 0}, {kW, kH}};
+        vkCmdSetViewport(cmd, 0, 1, &viewport);
+        vkCmdSetScissor(cmd, 0, 1, &scissor);
+        StarfieldRenderContext ctx;
+        ctx.viewProj = starforge::math::perspectiveVulkan(glm::radians(60.0f), 1.0f, 0.1f, 1000.0f) *
+                       glm::lookAt(starforge::math::Vec3f{cameraX, 0.0f, 5.0f},
+                                   starforge::math::Vec3f{cameraX, 0.0f, 4.0f},
+                                   starforge::math::Vec3f{0.0f, 1.0f, 0.0f});
+        ctx.resolution = {static_cast<float>(kW), static_cast<float>(kH)};
+        StarfieldParams params;
+        params.intensity = 0.0f; // no sun billboard
+        renderer->render(cmd, ctx, params);
+        vkCmdEndRendering(cmd);
+        Image::transitionToTransferSrc(cmd, image->handle());
+        VkBufferImageCopy copy{};
+        copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        copy.imageSubresource.layerCount = 1;
+        copy.imageExtent = {kW, kH, 1};
+        vkCmdCopyImageToBuffer(cmd, image->handle(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               readback->handle(), 1, &copy);
+        VkBufferMemoryBarrier2 barrier{};
+        barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+        barrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        barrier.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+        barrier.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
+        barrier.buffer = readback->handle();
+        barrier.size = VK_WHOLE_SIZE;
+        VkDependencyInfo dep{};
+        dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        dep.bufferMemoryBarrierCount = 1;
+        dep.pBufferMemoryBarriers = &barrier;
+        vkCmdPipelineBarrier2(cmd, &dep);
+        REQUIRE(vkEndCommandBuffer(cmd) == VK_SUCCESS);
+        REQUIRE(vkResetFences(device->device(), 1, &fence) == VK_SUCCESS);
+        VkCommandBufferSubmitInfo submitCmd{};
+        submitCmd.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+        submitCmd.commandBuffer = cmd;
+        VkSubmitInfo2 submit{};
+        submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+        submit.commandBufferInfoCount = 1;
+        submit.pCommandBufferInfos = &submitCmd;
+        REQUIRE(device->submit(1, &submit, fence) == VK_SUCCESS);
+        REQUIRE(vkWaitForFences(device->device(), 1, &fence, VK_TRUE, UINT64_MAX) == VK_SUCCESS);
+        auto mapped = readback->map();
+        REQUIRE(mapped.has_value());
+        (void)readback->invalidate(0, kW * kH * 4);
+        out.assign(static_cast<const std::uint8_t*>(*mapped),
+                   static_cast<const std::uint8_t*>(*mapped) + kW * kH * 4);
+        readback->unmap();
+    };
+
+    std::vector<std::uint8_t> a, b;
+    renderAt(0.0f, a);
+    renderAt(500.0f, b); // same view direction, different position
+    std::size_t differing = 0;
+    int maxDiff = 0;
+    for (std::size_t i = 0; i < a.size(); ++i)
+    {
+        const int d = std::abs(static_cast<int>(a[i]) - static_cast<int>(b[i]));
+        maxDiff = std::max(maxDiff, d);
+        if (d > 2) ++differing;
+    }
+    // A handful of bytes can differ from float rounding at star-cell
+    // boundaries; the star *pattern* must otherwise be identical.
+    CHECK(differing < 64);
+    CHECK(maxDiff <= 32);
+    CHECK(context->validationErrorCount() == 0);
+
+    vkDestroyFence(device->device(), fence, nullptr);
+    vkFreeCommandBuffers(device->device(), pool, 1, &cmd);
+    vkDestroyCommandPool(device->device(), pool, nullptr);
+}

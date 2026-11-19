@@ -89,6 +89,8 @@ float4 fragmentMain(VSOutput input) : SV_Target
     float core = smoothstep(0.002 * sizeFactor, 0.0, distance);
     float haloSigma = 0.004 * (0.7 + sqrt(mag));
     float halo = 0.35 * exp(-distance * distance / (haloSigma * haloSigma));
+    // Only a subset of stars carry a visible halo; the rest are crisp points.
+    halo *= step(0.55, hash31(cell + int3(59, 59, 59)));
 
     // Distance to the nearest direction-cell boundary, in cell units.
     // Fading the halo there prevents it from spilling into the next cell
@@ -102,9 +104,21 @@ float4 fragmentMain(VSOutput input) : SV_Target
     halo *= haloFade;
     core *= coreFade;
 
-    // Twinkle (brighter stars twinkle faster).
-    float twinkle = 0.75 + 0.25 * sin(pc.timeIntensityAspectTan.x * (1.0 + h * 3.0 + mag * 4.0) + h * 40.0);
-    float brightness = (core * 2.2 + halo * (0.5 + mag)) * twinkle * pc.timeIntensityAspectTan.y;
+    // Slow, subtle twinkle on only a minority of stars. Most stars are
+    // steady; the twinkling ones modulate gently over tens of seconds.
+    float twinkleSeed = hash31(cell + int3(47, 47, 47));
+    float twinkle = 1.0;
+    if (twinkleSeed > 0.72)
+    {
+        float rate = 0.12 + twinkleSeed * 0.20 + mag * 0.15; // rad/s
+        twinkle = 0.86 + 0.14 * sin(pc.timeIntensityAspectTan.x * rate + twinkleSeed * 40.0);
+    }
+    // Per-star luminosity: many faint (distant) stars, a few bright ones.
+    float lumSeed = hash31(cell + int3(61, 61, 61));
+    float luminosity = 0.18 + 0.82 * lumSeed;
+    luminosity *= luminosity; // skew toward dimmer stars
+    float brightness = (core * 2.2 + halo * (0.5 + mag)) * twinkle * luminosity *
+                       pc.timeIntensityAspectTan.y;
     float3 tint = lerp(float3(0.75, 0.85, 1.0), float3(1.0, 0.9, 0.75), hash31(cell + int3(3, 3, 3)));
 
     // Tone-map the star so the tint survives instead of clamping to a

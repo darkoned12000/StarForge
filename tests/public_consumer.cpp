@@ -3,9 +3,11 @@
 // proving no internal src/ headers are needed to use the public API.
 #include "starforge/application.hpp"
 #include "starforge/asset.hpp"
+#include "starforge/asteroid_field.hpp"
 #include "starforge/audio.hpp"
 #include "starforge/hud.hpp"
 #include "starforge/math.hpp"
+#include "starforge/planet.hpp"
 #include "starforge/renderer.hpp"
 #include "starforge/starfield.hpp"
 #include "starforge/toon.hpp"
@@ -15,12 +17,17 @@
 
 static_assert(std::is_move_constructible_v<starforge::Application>);
 static_assert(std::is_move_constructible_v<starforge::Asset>);
+static_assert(std::is_move_constructible_v<starforge::AsteroidField>);
 static_assert(std::is_move_constructible_v<starforge::Audio>);
 static_assert(std::is_move_constructible_v<starforge::Hud>);
+static_assert(std::is_move_constructible_v<starforge::Planet>);
 static_assert(std::is_move_constructible_v<starforge::Renderer>);
 static_assert(std::is_move_constructible_v<starforge::Starfield>);
 static_assert(std::is_move_constructible_v<starforge::Toon>);
+static_assert(!std::is_copy_constructible_v<starforge::Asset>);
 static_assert(!std::is_copy_constructible_v<starforge::Audio>);
+static_assert(!std::is_copy_constructible_v<starforge::AsteroidField>);
+static_assert(!std::is_copy_constructible_v<starforge::Planet>);
 static_assert(!std::is_copy_constructible_v<starforge::Renderer>);
 static_assert(!std::is_copy_constructible_v<starforge::Starfield>);
 static_assert(!std::is_copy_constructible_v<starforge::Toon>);

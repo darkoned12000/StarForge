@@ -20,6 +20,9 @@ add_library(starforge_environment STATIC
     toon_renderer.cpp
     hud_renderer.cpp
     sun_renderer.cpp
+    planet_renderer.cpp
+    rock_field_renderer.cpp
+    nebula_optimized.cpp
 )
 
 target_include_directories(starforge_environment PUBLIC

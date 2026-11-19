@@ -4,6 +4,8 @@ add_library(starforge_public_api STATIC
     application.cpp
     asset.cpp
     asset_bridge.cpp
+    asteroid_field.cpp
+    asteroid_field_bridge.cpp
     audio.cpp
     audio_bridge.cpp
     hud.cpp
@@ -13,6 +15,8 @@ add_library(starforge_public_api STATIC
     starfield_bridge.cpp
     nebula.cpp
     nebula_bridge.cpp
+    planet.cpp
+    planet_bridge.cpp
     sun.cpp
     sun_bridge.cpp
     toon.cpp
@@ -38,6 +42,7 @@ target_link_libraries(starforge_public_api
         starforge_platform
         starforge_asset
         starforge_vulkan
+        starforge_gpu
         starforge_spatial
         starforge_environment
         starforge_audio

@@ -30,6 +30,7 @@ struct RawStarfieldParams
     RawVec3f worldPosition;
     float radius = 1.0f;
     float intensity = 1.0f;
+    float starIntensity = 1.0f;
     RawVec4f color;
     float limbDarkeningCoeff = 0.3f;
 };

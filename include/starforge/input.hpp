@@ -18,6 +18,7 @@ enum class Key
     Down,
     Left,
     Right,
+    LeftShift,
     Count,
 };
 

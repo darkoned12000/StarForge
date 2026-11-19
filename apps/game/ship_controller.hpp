@@ -38,6 +38,7 @@ struct FlightState
     FlightMode mode = FlightMode::Flight;
     bool firePrimary = false;
     bool fireSecondary = false;
+    bool boost = false; // afterburner (5x speed), held
 };
 
 // NOTE: pause/space meta-commands also live in applyInput so headless
@@ -64,6 +65,7 @@ struct InputEdge
     float mouseScrollY = 0.0f; // scroll-wheel steps since last frame
     bool mouseLeftDown = false;
     bool mouseRightDown = false;
+    bool boostDown = false; // Left Shift held -> afterburner
 };
 
 inline constexpr float kThrottleStep = 0.25f;
@@ -71,6 +73,7 @@ inline constexpr float kMaxSpeed = 60.0f; // m/s at full throttle
 inline constexpr float kMouseSensitivity = 0.0035f; // rad/px
 inline constexpr float kRollRateMax = 3.0f;         // rad/s
 inline constexpr float kArrowRateMax = 1.5f;        // rad/s held arrow steering
+inline constexpr float kBoostMultiplier = 15.0f;   // afterburner speed factor
 
 // Advances state by one frame of input. Pure: depends only on state +
 // current input, so fixed-step replay is deterministic.
@@ -97,8 +100,10 @@ inline void applyInput(FlightState& state, const InputEdge& input, float dt)
         state.rollRate = 0.0f;
         state.firePrimary = false;
         state.fireSecondary = false;
+        state.boost = false;
         return;
     }
+    state.boost = input.boostDown;
 
     // Throttle is a persistent set-point; only edges change it.
     if (input.wPressed)
@@ -163,7 +168,7 @@ inline void applyInput(FlightState& state, const InputEdge& input, float dt)
 // Target forward speed (m/s) from throttle set-point.
 inline float targetSpeed(const FlightState& state) noexcept
 {
-    return state.throttle * kMaxSpeed;
+    return state.throttle * kMaxSpeed * (state.boost ? kBoostMultiplier : 1.0f);
 }
 
 // Fire-arm states for the same input edges (convenience so tests and

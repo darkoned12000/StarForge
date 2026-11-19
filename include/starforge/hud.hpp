@@ -30,6 +30,7 @@ public:
         math::Vec4f panelColor{0.08f, 0.12f, 0.22f, 1.0f};
         math::Vec4f outlineColor{0.02f, 0.02f, 0.04f, 1.0f};
         math::Vec4f accentColor{0.95f, 0.65f, 0.15f, 1.0f};
+        float barValues[3] = {1.0f, 0.75f, 0.5f}; // normalized readout bar lengths
     };
 
     static std::expected<Hud, std::string> create(Renderer& renderer, const CreateInfo& info);
@@ -41,6 +42,7 @@ public:
     Hud& operator=(const Hud&) = delete;
 
     void record(FrameContext& frameContext, const Params& params);
+    [[nodiscard]] std::expected<void, std::string> recreate(Renderer& renderer);
 
 private:
     struct Impl;

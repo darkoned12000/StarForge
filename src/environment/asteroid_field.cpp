@@ -89,7 +89,8 @@ static_assert(offsetof(PushConstants, pad) == 108, "Asteroid pad offset must be 
 
 } // namespace
 
-AsteroidMesh generateAsteroidMesh(float radius, std::uint32_t latSegments, std::uint32_t lonSegments)
+AsteroidMesh generateAsteroidMesh(float radius, std::uint32_t latSegments, std::uint32_t lonSegments,
+                                  std::uint32_t seed)
 {
     AsteroidMesh mesh;
     if (radius <= 0.0f || latSegments == 0 || lonSegments == 0)
@@ -121,8 +122,9 @@ AsteroidMesh generateAsteroidMesh(float radius, std::uint32_t latSegments, std::
             const auto uNx = static_cast<std::uint32_t>((nx + 2.0f) * 1000.0f);
             const auto uNy = static_cast<std::uint32_t>((ny + 2.0f) * 1000.0f);
             const auto uNz = static_cast<std::uint32_t>((nz + 2.0f) * 1000.0f);
-            const std::uint32_t seed = hash32(uNx * 73856093u ^ uNy * 19349663u ^ uNz * 83492791u);
-            const float noise = static_cast<float>(seed) / 4294967296.0f; // [0,1)
+            const std::uint32_t directionHash = uNx * 73856093u ^ uNy * 19349663u ^ uNz * 83492791u;
+            const std::uint32_t rockSeed = hash32(directionHash ^ hash32(seed + 0x9e3779b9u));
+            const float noise = static_cast<float>(rockSeed) / 4294967296.0f; // [0,1)
             const float scale = radius * (1.0f + (noise - 0.5f) * 0.5f);
 
             mesh.vertices.insert(mesh.vertices.end(),
@@ -178,8 +180,10 @@ std::expected<AsteroidFieldRenderer, std::string> AsteroidFieldRenderer::create(
         return std::unexpected(std::move(fragModule.error()));
     }
 
+    // asteroid.slang's fragment stage reads pc.sunDirection, so the range
+    // must expose push constants to both stages.
     VkPushConstantRange pushRange{};
-    pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     pushRange.offset = 0;
     pushRange.size = static_cast<std::uint32_t>(sizeof(PushConstants));
 
@@ -277,7 +281,8 @@ void AsteroidFieldRenderer::render(VkCommandBuffer cmd, const AsteroidFieldRende
     push.sunDirection[1] = context.sunDirection.y;
     push.sunDirection[2] = context.sunDirection.z;
 
-    vkCmdPushConstants(cmd, pipelineLayout_, VK_SHADER_STAGE_VERTEX_BIT,
+    vkCmdPushConstants(cmd, pipelineLayout_,
+                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, static_cast<std::uint32_t>(sizeof(push)), &push);
 
     // Caller must bind the index buffer before render() (params carry

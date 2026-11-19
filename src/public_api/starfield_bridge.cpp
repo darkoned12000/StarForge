@@ -39,6 +39,7 @@ namespace
     result.worldPosition = ::starforge::math::Vec3f{value.worldPosition.x, value.worldPosition.y, value.worldPosition.z};
     result.radius = value.radius;
     result.intensity = value.intensity;
+    result.starIntensity = value.starIntensity;
     result.color = ::starforge::math::Vec4f{value.color.x, value.color.y, value.color.z, value.color.w};
     result.limbDarkeningCoeff = value.limbDarkeningCoeff;
     return result;

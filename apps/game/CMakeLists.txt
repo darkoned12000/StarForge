@@ -5,6 +5,7 @@
 add_executable(starforge_game
     main.cpp
     game_bridge.cpp
+    game_simulation.cpp
 )
 
 target_link_libraries(starforge_game
@@ -12,6 +13,10 @@ target_link_libraries(starforge_game
         starforge_public_api
         starforge_ecs
         starforge_content
+        starforge_gameplay
+        starforge_ai
+        starforge_physics
+        starforge_audio
         starforge_math
         starforge_spatial
 )

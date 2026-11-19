@@ -16,8 +16,9 @@ namespace
 struct HudPush
 {
     float panel[4], portrait[4], panelColor[4], outlineColor[4], accentColor[4], screen[4];
+    float barValues[4] = {1.0f, 0.75f, 0.5f, 0.0f};
 };
-static_assert(sizeof(HudPush) == 96);
+static_assert(sizeof(HudPush) == 112);
 } // namespace
 
 struct HudRenderer::Impl
@@ -50,8 +51,9 @@ std::expected<HudRenderer, std::string> HudRenderer::create(const CreateInfo& in
 
     auto effect = internal::TextureEffect::create({
         .device = info.device, .colorFormat = info.colorFormat,
+        .depthFormat = info.depthFormat,
         .shaderDirectory = info.shaderDirectory, .shaderBaseName = "hud",
-        .pushConstantSize = sizeof(HudPush)});
+        .pushConstantSize = sizeof(HudPush), .alphaBlend = true});
     if (!effect) return std::unexpected(effect.error());
 
     HudRenderer renderer;
@@ -80,6 +82,7 @@ void HudRenderer::render(VkCommandBuffer cmd, float width, float height, const H
     std::copy_n(params.accentColor, 4, push.accentColor);
     push.screen[0] = width;
     push.screen[1] = height;
+    std::copy_n(params.barValues, 3, push.barValues);
     impl_->effect->render(cmd, impl_->whiteView.handle(), &push, sizeof(push));
 }
 

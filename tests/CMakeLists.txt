@@ -67,6 +67,10 @@ add_executable(starforge_tests
     test_audio_spatial.cpp
     test_audio_bridge.cpp
     test_game_controls.cpp
+    test_gameplay.cpp
+    test_game_simulation.cpp
+    ${PROJECT_SOURCE_DIR}/apps/game/game_bridge.cpp
+    ${PROJECT_SOURCE_DIR}/apps/game/game_simulation.cpp
 )
 
 target_link_libraries(starforge_tests
@@ -83,6 +87,7 @@ target_link_libraries(starforge_tests
         starforge_vulkan_core
         starforge_ecs
         starforge_ai
+        starforge_gameplay
         starforge_physics
         starforge_audio
         doctest::doctest
@@ -176,6 +181,9 @@ add_executable(starforge_gpu_tests
     test_hdr_pipeline.cpp
     test_toon_crease.cpp
     test_hud.cpp
+    test_planet_render.cpp
+    test_rock_field.cpp
+    test_nebula_optimized.cpp
     test_atmosphere_render.cpp
     test_vulkan_retirement.cpp
     test_naive_control.cpp

@@ -55,16 +55,16 @@ VkImageAspectFlags toAspectMask(VkFormat format)
 
 std::expected<Image, std::string> Image::create(Allocator& allocator, const CreateInfo& info)
 {
-    if (info.width == 0 || info.height == 0)
+    if (info.width == 0 || info.height == 0 || info.depth == 0)
     {
         return std::unexpected("Image dimensions must be > 0");
     }
 
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.imageType = info.imageType;
     imageInfo.format = info.format;
-    imageInfo.extent = {info.width, info.height, 1};
+    imageInfo.extent = {info.width, info.height, info.depth};
     imageInfo.mipLevels = info.mipLevels;
     imageInfo.arrayLayers = info.arrayLayers;
     imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -81,6 +81,7 @@ std::expected<Image, std::string> Image::create(Allocator& allocator, const Crea
     image.format_ = info.format;
     image.width_ = info.width;
     image.height_ = info.height;
+    image.imageType_ = info.imageType;
     image.aspectMask_ = toAspectMask(info.format);
     image.layout_ = VK_IMAGE_LAYOUT_UNDEFINED;
 
@@ -118,12 +119,14 @@ Image::Image(Image&& other) noexcept
       format_(other.format_),
       width_(other.width_),
       height_(other.height_),
+      imageType_(other.imageType_),
       aspectMask_(other.aspectMask_),
       layout_(other.layout_)
 {
     other.format_ = VK_FORMAT_UNDEFINED;
     other.width_ = 0;
     other.height_ = 0;
+    other.imageType_ = VK_IMAGE_TYPE_2D;
     other.aspectMask_ = VK_IMAGE_ASPECT_COLOR_BIT;
     other.layout_ = VK_IMAGE_LAYOUT_UNDEFINED;
 }
@@ -142,6 +145,7 @@ Image& Image::operator=(Image&& other) noexcept
         format_ = other.format_;
         width_ = other.width_;
         height_ = other.height_;
+        imageType_ = other.imageType_;
         aspectMask_ = other.aspectMask_;
         layout_ = other.layout_;
     }
@@ -198,7 +202,8 @@ std::expected<VkImageView, std::string> Image::createView(VkDevice device, VkIma
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     viewInfo.image = image_;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.viewType = imageType_ == VK_IMAGE_TYPE_3D ? VK_IMAGE_VIEW_TYPE_3D
+                                                       : VK_IMAGE_VIEW_TYPE_2D;
     viewInfo.format = format_;
     viewInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
     viewInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;

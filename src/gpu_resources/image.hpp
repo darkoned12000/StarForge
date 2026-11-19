@@ -62,6 +62,8 @@ public:
     {
         std::uint32_t width = 0;
         std::uint32_t height = 0;
+        std::uint32_t depth = 1;
+        VkImageType imageType = VK_IMAGE_TYPE_2D;
         VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
         ImageUsageFlags usage = ImageUsageFlags::ColorAttachment;
         std::uint32_t mipLevels = 1;
@@ -157,6 +159,7 @@ private:
     VkFormat format_ = VK_FORMAT_R8G8B8A8_UNORM;
     std::uint32_t width_ = 0;
     std::uint32_t height_ = 0;
+    VkImageType imageType_ = VK_IMAGE_TYPE_2D;
     VkImageAspectFlags aspectMask_ = VK_IMAGE_ASPECT_COLOR_BIT;
     VkImageLayout layout_ = VK_IMAGE_LAYOUT_UNDEFINED;
 };

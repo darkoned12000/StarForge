@@ -26,6 +26,7 @@ struct HudParams
     float panelColor[4] = {0.08f, 0.12f, 0.22f, 1.0f};
     float outlineColor[4] = {0.02f, 0.02f, 0.04f, 1.0f};
     float accentColor[4] = {0.95f, 0.65f, 0.15f, 1.0f};
+    float barValues[3] = {1.0f, 0.75f, 0.5f};
 };
 
 // Toon HUD renderer: flat outlined panels, a portrait frame and accent bars.
@@ -39,6 +40,7 @@ public:
         VkDevice device = VK_NULL_HANDLE;
         VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
         VkFormat colorFormat = VK_FORMAT_R8G8B8A8_UNORM;
+        VkFormat depthFormat = VK_FORMAT_UNDEFINED; // must match the active render pass
         std::string shaderDirectory;
     };
 

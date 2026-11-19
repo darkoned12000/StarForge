@@ -78,7 +78,9 @@ convenience wrapper around the same path.
   `extent`, `waitIdle`. `FrameContext` is the opaque per-frame record
   context (exposes only `extent()`).
 - `starforge::Starfield` — procedural starfield and sun billboard.
-  Scene-level parameters only; shader artifacts are bundled.
+  `Params::intensity` controls the billboard; `Params::starIntensity`
+  independently controls star brightness (setting billboard intensity to 0
+  leaves stars visible). Scene-level parameters only; shaders are bundled.
 - `starforge::Toon` — cel-shaded (toon) mesh renderer: quantized
   diffuse bands, stepped specular, rim light, and an inverted-hull
   outline pass. `record()`/`render()`/`recreate()` mirror `Starfield`;
@@ -93,6 +95,12 @@ convenience wrapper around the same path.
   quantizes the FBM into flat toon bands.
 - `starforge::Sun` — visitable celestial body with an emissive core, corona
   shell and 64-bit camera-relative positioning.
+- `starforge::Planet` — visitable ray-sphere planet with a projective depth
+  write, toon diffuse bands, a Fresnel limb and an additive atmosphere halo.
+  `record()` draws into an active frame; positions are camera-relative.
+- `starforge::AsteroidField` — instanced lumpy rock field with per-instance
+  tint, procedural shape variety, a distance-aware inverted-hull outline and
+  a cheap impostor tier for distant rocks. `record()` takes an instance array.
 - `starforge::Hud` — toon-styled HUD with outlined flat panels, a portrait
   frame and accent bars; `record()` draws into an active frame.
 - `starforge::Audio` — backend-neutral audio: `create`, `loadFromMemory`

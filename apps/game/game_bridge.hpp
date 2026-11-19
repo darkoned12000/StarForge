@@ -5,6 +5,7 @@
 // public math header and the internal GLM-based math aliases (the same
 // rule the public API bridges use).
 
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -38,6 +39,7 @@ struct RawTransform
     RawVec3d position{};
     RawVec4f orientation{}; // xyzw, unit
     float scale = 1.0f;
+    std::uint32_t seed = 0; // stable per-entity id (never camera-relative)
 };
 
 // Owning wrapper around the ECS world with one player ship.

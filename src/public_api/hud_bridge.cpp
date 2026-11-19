@@ -22,6 +22,7 @@ std::expected<std::unique_ptr<RawHud>, std::string> RawHud::create(const CreateI
     auto renderer = environment::HudRenderer::create({
         .instance = info.instance, .device = info.device,
         .physicalDevice = info.physicalDevice, .colorFormat = info.colorFormat,
+        .depthFormat = info.depthFormat,
         .shaderDirectory = info.shaderDirectory});
     if (!renderer) return std::unexpected(renderer.error());
     auto result = std::unique_ptr<RawHud>(new RawHud());
@@ -44,7 +45,20 @@ void RawHud::render(VkCommandBuffer cmd, float width, float height, const RawHud
     std::copy_n(params.panelColor, 4, internal.panelColor);
     std::copy_n(params.outlineColor, 4, internal.outlineColor);
     std::copy_n(params.accentColor, 4, internal.accentColor);
+    std::copy_n(params.barValues, 3, internal.barValues);
     impl_->renderer.render(cmd, width, height, internal);
+}
+
+std::expected<void, std::string> RawHud::recreate(const CreateInfo& info)
+{
+    auto renderer = environment::HudRenderer::create({
+        .instance = info.instance, .device = info.device,
+        .physicalDevice = info.physicalDevice, .colorFormat = info.colorFormat,
+        .depthFormat = info.depthFormat,
+        .shaderDirectory = info.shaderDirectory});
+    if (!renderer) return std::unexpected(renderer.error());
+    impl_->renderer = std::move(*renderer);
+    return {};
 }
 
 } // namespace starforge::public_api_bridge

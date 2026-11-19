@@ -110,9 +110,10 @@ struct GameWorld::Impl
             transform.scale = 5.0f + static_cast<float>(hash01(4000 + i)) * 20.0f;
             ecs::Velocity spin;
             spin.linear = math::Vec3d{0.0, 0.0, 0.0};
-            spin.angular = math::Vec3f{(static_cast<float>(hash01(7000 + i)) - 0.5f) * 0.8f,
-                                       (static_cast<float>(hash01(8000 + i)) - 0.5f) * 0.8f,
-                                       (static_cast<float>(hash01(9000 + i)) - 0.5f) * 0.8f};
+            // 80% slower tumble than the original 0.8 rad/s spread.
+            spin.angular = math::Vec3f{(static_cast<float>(hash01(7000 + i)) - 0.5f) * 0.16f,
+                                       (static_cast<float>(hash01(8000 + i)) - 0.5f) * 0.16f,
+                                       (static_cast<float>(hash01(9000 + i)) - 0.5f) * 0.16f};
             entity.set<ecs::Velocity>(spin);
             authored.push_back(entity);
         }
@@ -358,6 +359,7 @@ std::vector<RawTransform> GameWorld::visibleAsteroids(double radiusMetres) const
             .orientation = RawVec4f{t.orientation.x, t.orientation.y, t.orientation.z,
                                      t.orientation.w},
             .scale = t.scale,
+            .seed = static_cast<std::uint32_t>(entity.raw_id()),
         });
     };
     for (const auto entity : impl_->authored)

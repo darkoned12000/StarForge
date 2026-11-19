@@ -42,7 +42,8 @@ public:
     {
         math::Vec3f worldPosition{0.0f, 0.0f, 0.0f};
         float radius = 1.0f;
-        float intensity = 1.0f;
+        float intensity = 1.0f; // sun-billboard intensity (0 disables the billboard)
+        float starIntensity = 1.0f; // independent star brightness
         math::Vec4f color{1.0f, 0.9f, 0.7f, 1.0f};
         float limbDarkeningCoeff = 0.3f;
     };

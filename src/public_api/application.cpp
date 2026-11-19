@@ -134,6 +134,9 @@ bool Application::isKeyDown(Key key) const noexcept
     case Key::Right:
         platformKey = platform::PlatformKey::Right;
         break;
+    case Key::LeftShift:
+        platformKey = platform::PlatformKey::LeftShift;
+        break;
     default:
         return false;
     }

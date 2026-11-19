@@ -23,8 +23,10 @@ struct AsteroidMesh
 };
 
 // Displaced UV-sphere rock: hash-noise radius displacement per vertex.
-// Deterministic (seeded); flat-ish normals from displacement gradient.
-[[nodiscard]] AsteroidMesh generateAsteroidMesh(float radius, std::uint32_t latSegments, std::uint32_t lonSegments);
+// Deterministic; `seed` selects a distinct lumpy variant. The three-argument
+// form (seed = 0) is kept for existing callers.
+[[nodiscard]] AsteroidMesh generateAsteroidMesh(float radius, std::uint32_t latSegments,
+                                                std::uint32_t lonSegments, std::uint32_t seed = 0);
 
 struct AsteroidFieldRenderContext
 {

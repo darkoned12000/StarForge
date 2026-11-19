@@ -72,7 +72,7 @@ std::expected<PipelineBundle, std::string> createBundle(
     const std::string& dir, const std::string& base, VkDevice device, VkFormat colorFormat,
     std::uint32_t pushSize, VkShaderStageFlags stages,
     VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-    VkFormat depthFormat = VK_FORMAT_UNDEFINED)
+    VkFormat depthFormat = VK_FORMAT_UNDEFINED, bool alphaBlend = false)
 {
     PipelineBundle bundle;
     auto vertModule = loadShaderModule(device, dir + "/" + base + ".vert.spv");
@@ -122,8 +122,8 @@ std::expected<PipelineBundle, std::string> createBundle(
         .depthCompare = VK_COMPARE_OP_ALWAYS,
         .backfaceCulling = false,
         .blendEnable = true,
-        .blendSrcFactor = VK_BLEND_FACTOR_ONE,
-        .blendDstFactor = VK_BLEND_FACTOR_ONE,
+        .blendSrcFactor = alphaBlend ? VK_BLEND_FACTOR_SRC_ALPHA : VK_BLEND_FACTOR_ONE,
+        .blendDstFactor = alphaBlend ? VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA : VK_BLEND_FACTOR_ONE,
         .viewportWidth = 1.0f,
         .viewportHeight = 1.0f,
     });
@@ -174,7 +174,7 @@ std::expected<FullscreenEffect, std::string> FullscreenEffect::create(const Crea
     auto bundle = createBundle(info.shaderDirectory, info.shaderBaseName, info.device,
                                info.colorFormat, info.pushConstantSize,
                                VK_SHADER_STAGE_FRAGMENT_BIT, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-                               info.depthFormat);
+                               info.depthFormat, info.alphaBlend);
     if (!bundle)
     {
         return std::unexpected(std::move(bundle.error()));

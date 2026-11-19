@@ -116,5 +116,8 @@ float4 fragmentMain(VSOutput input) : SV_Target
     float3 col = pc.color.rgb * cloud * pc.scattering;
     col += pc.color.rgb * cloud * cloud * 0.3; // core brightening (no channel swizzle)
 
-    return float4(col, 0.0); // Additive (ONE, ONE); no background term.
+    // Alpha-composited so the cloud occludes/dims stars behind it. Boost the
+    // colour slightly to compensate for the SRC_ALPHA multiply.
+    float opacity = clamp(cloud, 0.0f, 0.85f);
+    return float4(col * 1.35f, opacity);
 }

@@ -9,8 +9,12 @@
 // game bridge (no TU includes both public and internal math).
 
 #include "starforge/application.hpp"
+#include "starforge/asteroid_field.hpp"
+#include "starforge/audio.hpp"
+#include "starforge/hud.hpp"
 #include "starforge/math.hpp"
 #include "starforge/nebula.hpp"
+#include "starforge/planet.hpp"
 #include "starforge/renderer.hpp"
 #include "starforge/starfield.hpp"
 #include "starforge/sun.hpp"
@@ -18,6 +22,7 @@
 #include "starforge/world.hpp"
 
 #include "game_bridge.hpp"
+#include "game_simulation.hpp"
 #include "ship_controller.hpp"
 
 #include <algorithm>
@@ -90,25 +95,18 @@ starforge::math::Vec3d upFromQuat(starforge::math::Vec4f q)
                                    static_cast<float>(v.z())};
 }
 
-// Uniform scale that keeps w = 1 (Mat4f(s) would set [3][3] = s and
-// collapse positions through perspective divide — rocks/planet were
-// rendering at metres instead of kilometres).
-[[nodiscard]] starforge::math::Mat4f scaleMat(float s)
-{
-    starforge::math::Mat4f m(1.0f);
-    m.columns[0][0] = s;
-    m.columns[1][1] = s;
-    m.columns[2][2] = s;
-    return m;
-}
-
 // Build the input edges for this frame from the public API.
 struct InputTracker
 {
     bool prevW = false;
     bool prevS = false;
+    bool prevA = false;
     bool prevSpace = false;
     bool prevPause = false;
+    bool prevUp = false;
+    bool prevDown = false;
+    bool prevLeft = false;
+    bool prevRight = false;
 };
 
 [[nodiscard]] starforge::game::InputEdge readInput(starforge::Application& app, InputTracker& tracker)
@@ -132,8 +130,13 @@ struct InputTracker
 
     tracker.prevW = w;
     tracker.prevS = s;
+    tracker.prevA = app.isKeyDown(starforge::Key::A);
     tracker.prevSpace = space;
     tracker.prevPause = pause;
+    tracker.prevUp = edge.arrowUpDown;
+    tracker.prevDown = edge.arrowDownDown;
+    tracker.prevLeft = edge.arrowLeftDown;
+    tracker.prevRight = edge.arrowRightDown;
 
     const auto motion = app.takeMouseMotion();
     edge.mouseDx = motion.dx;
@@ -141,7 +144,73 @@ struct InputTracker
     edge.mouseScrollY = motion.scrollY;
     edge.mouseLeftDown = app.isMouseButtonDown(starforge::MouseButton::Left);
     edge.mouseRightDown = app.isMouseButtonDown(starforge::MouseButton::Right);
+    edge.boostDown = app.isKeyDown(starforge::Key::LeftShift);
     return edge;
+}
+
+// UI-mode trading keys (the public Key enum has no digits; arrows + W/S/A
+// are reused only while in UI mode). Each is an edge, not a held level.
+struct UiTracker
+{
+    bool up = false, down = false, left = false, right = false;
+    bool w = false, s = false, a = false;
+};
+
+void handleUiActions(starforge::Application& app, UiTracker& tracker,
+                     starforge::game::GameSimulation& simulation)
+{
+    const bool up = app.isKeyDown(starforge::Key::Up);
+    const bool down = app.isKeyDown(starforge::Key::Down);
+    const bool left = app.isKeyDown(starforge::Key::Left);
+    const bool right = app.isKeyDown(starforge::Key::Right);
+    const bool w = app.isKeyDown(starforge::Key::W);
+    const bool s = app.isKeyDown(starforge::Key::S);
+    const bool a = app.isKeyDown(starforge::Key::A);
+    const bool dockEdge = up && !tracker.up;
+    const bool undockEdge = down && !tracker.down;
+    const bool buyEdge = left && !tracker.left;
+    const bool sellEdge = right && !tracker.right;
+    const bool acceptEdge = w && !tracker.w;
+    const bool completeEdge = s && !tracker.s;
+    const bool jumpEdge = a && !tracker.a;
+    tracker.up = up; tracker.down = down; tracker.left = left; tracker.right = right;
+    tracker.w = w; tracker.s = s; tracker.a = a;
+
+    if (dockEdge)
+    {
+        simulation.updateDocking(20.0, 0.0, "station-a");
+        if (simulation.dock("station-a", "slot-1")) logInfo("[TRADE] docked at station-a");
+    }
+    if (undockEdge)
+    {
+        simulation.undock();
+        logInfo("[TRADE] undocked");
+    }
+    if (buyEdge)
+    {
+        if (simulation.buy("station-a", "ore", 5)) logInfo("[TRADE] bought 5 ore");
+        else logError(simulation.lastTradeError().c_str());
+    }
+    if (sellEdge)
+    {
+        if (simulation.sell("station-a", "ore", 5)) logInfo("[TRADE] sold 5 ore");
+        else logError(simulation.lastTradeError().c_str());
+    }
+    if (acceptEdge)
+    {
+        if (simulation.acceptMission("haul-ore")) logInfo("[MISSION] accepted haul-ore");
+    }
+    if (completeEdge)
+    {
+        if (simulation.deliverMission("haul-ore", "ore", 10, "station-b") &&
+            simulation.completeMission("haul-ore", "station-b"))
+            logInfo("[MISSION] haul-ore complete");
+    }
+    if (jumpEdge)
+    {
+        if (simulation.jump("alpha-centauri", 1.5f)) logInfo("[JUMP] entered alpha-centauri");
+        else logError("[JUMP] beyond range - complete the haul mission first");
+    }
 }
 
 } // namespace
@@ -197,10 +266,59 @@ int main()
         return EXIT_FAILURE;
     }
 
+    // M15.0.4: ray-sphere planet with an atmosphere limb.
+    auto planet = starforge::Planet::create(*renderer, {});
+    if (!planet)
+    {
+        logError(planet.error().c_str());
+        return EXIT_FAILURE;
+    }
+
+    // M15.0.8/15.0.9: instanced lumpy rock field with tint + LOD + outline.
+    auto rockField = starforge::AsteroidField::create(*renderer,
+                                                      {.shaderDirectory = {}, .variantCount = 4});
+    if (!rockField)
+    {
+        logError(rockField.error().c_str());
+        return EXIT_FAILURE;
+    }
+
+    // M9.5 toon HUD draw + M12 audio for combat feedback.
+    auto hud = starforge::Hud::create(*renderer, {});
+    if (!hud)
+    {
+        logError(hud.error().c_str());
+        return EXIT_FAILURE;
+    }
+    // The facade defaults to the silent backend (for CI/headless tests), so
+    // opt into real hardware here; fall back gracefully if no device exists.
+    auto audio = starforge::Audio::create({
+        .backend = starforge::Audio::CreateInfo::Backend::Default});
+    if (!audio)
+    {
+        std::fprintf(stderr, "[STARFORGE] audio device unavailable (%s); continuing silent\n",
+                     audio.error().c_str());
+        audio = starforge::Audio::create({});
+    }
+    if (!audio)
+    {
+        logError(audio.error().c_str());
+        return EXIT_FAILURE;
+    }
+    // Placeholder one-shots (no binary assets shipped).
+    const auto laserWav = starforge::generateToneWav(22050, 1, 880.0f, 0.09f, 0.35f);
+    const auto hitWav = starforge::generateToneWav(22050, 1, 220.0f, 0.16f, 0.5f);
+    const auto boomWav = starforge::generateToneWav(22050, 1, 90.0f, 0.35f, 0.6f);
+    const auto laserVoice = audio->loadFromMemory(laserWav);
+    const auto hitVoice = audio->loadFromMemory(hitWav);
+    const auto boomVoice = audio->loadFromMemory(boomWav);
+
     // Game layer: ECS world holds the player ship (raw bridge).
     starforge::game::GameWorld world;
     starforge::game::FlightState flight;
-    logInfo("First Flight: ship created. W/S throttle, mouse steer, Space UI, P pause.");
+    starforge::game::GameSimulation simulation;
+    simulation.spawnHostile();
+    logInfo("First Flight: ship + hostile + trading loop ready. W/S throttle, mouse steer, Space UI, P pause.");
 
     bool needRecreate = false;
     float time = 0.0f;
@@ -212,13 +330,18 @@ int main()
     // lost on frames with zero fixed steps (display > 60 Hz).
     starforge::game::InputEdge pending;
     InputTracker inputTracker;
+    UiTracker uiTracker;
     float lastThrottle = -1.0f;
     bool lastPaused = false;
     starforge::game::FlightMode lastMode = starforge::game::FlightMode::Flight;
     bool lastFirePrimary = false;
     bool lastFireSecondary = false;
     bool lastRelativeMouse = false;
+    bool lastBoost = false;
     float cameraDist = 8.0f; // chase-camera distance (fixed for FOV zoom)
+    float shieldFlash = 0.0f; // seconds of remaining shield-hit visual
+    float explosionTimer = 0.0f; // hostile destruction effect
+    starforge::game::RawVec3f explosionPos{};
     float cameraFov = kPi / 3.0f; // vertical FOV radians (wheel zoom)
 
     while (!app->shouldClose())
@@ -276,6 +399,21 @@ int main()
                     logError(t.error().c_str());
                     return EXIT_FAILURE;
                 }
+                if (auto p = planet->recreate(*renderer); !p)
+                {
+                    logError(p.error().c_str());
+                    return EXIT_FAILURE;
+                }
+                if (auto r = rockField->recreate(*renderer); !r)
+                {
+                    logError(r.error().c_str());
+                    return EXIT_FAILURE;
+                }
+                if (auto h = hud->recreate(*renderer); !h)
+                {
+                    logError(h.error().c_str());
+                    return EXIT_FAILURE;
+                }
             }
             needRecreate = false;
         }
@@ -283,6 +421,8 @@ int main()
         if (!flight.paused)
         {
             time += frameDt;
+            shieldFlash = std::max(0.0f, shieldFlash - frameDt);
+            explosionTimer = std::max(0.0f, explosionTimer - frameDt);
         }
 
         // Merge this frame's input into `pending` first...
@@ -303,6 +443,7 @@ int main()
             pending.mouseScrollY += edge.mouseScrollY;
             pending.mouseLeftDown = edge.mouseLeftDown;
             pending.mouseRightDown = edge.mouseRightDown;
+            pending.boostDown = edge.boostDown;
         }
 
         // Scroll-wheel FOV zoom (runs every frame, not step-gated).
@@ -352,8 +493,15 @@ int main()
                 pending.mouseScrollY = 0.0f;
                 pending.mouseLeftDown = false;
                 pending.mouseRightDown = false;
+                pending.boostDown = false;
                 accumulator = 0.0f;
             }
+        }
+
+        // UI-mode trading / mission / jump actions.
+        if (flight.mode == starforge::game::FlightMode::Ui && !flight.paused)
+        {
+            handleUiActions(*app, uiTracker, simulation);
         }
 
         // --- Fixed-step simulation (M15.0.1) + streaming (M15.0.3) ---
@@ -385,6 +533,34 @@ int main()
                 {forward.x() * speed, forward.y() * speed, forward.z() * speed},
                 {flight.pitchRate, flight.yawRate, flight.rollRate});
             world.step(kSimStep);
+
+            // M15 combat slice: advance hostile AI, weapons and damage.
+            const starforge::game::RawVec3f shipForward{
+                static_cast<float>(forward.x()), static_cast<float>(forward.y()),
+                static_cast<float>(forward.z())};
+            for (const auto& event : simulation.step(kSimStep, shipForward,
+                                                     flight.firePrimary, flight.fireSecondary))
+            {
+                switch (event.type)
+                {
+                case starforge::game::GameEvent::Type::WeaponFired:
+                    if (laserVoice.has_value()) audio->play(*laserVoice, true);
+                    break;
+                case starforge::game::GameEvent::Type::PlayerShieldHit:
+                case starforge::game::GameEvent::Type::PlayerHullHit:
+                    shieldFlash = 0.35f;
+                    if (hitVoice.has_value()) audio->play(*hitVoice, true);
+                    break;
+                case starforge::game::GameEvent::Type::HostileDestroyed:
+                    explosionTimer = 1.0f;
+                    explosionPos = simulation.hostile().position;
+                    if (boomVoice.has_value()) audio->play(*boomVoice, true);
+                    logInfo("[COMBAT] hostile destroyed");
+                    break;
+                default:
+                    break;
+                }
+            }
             if (blocked)
             {
                 static float lastCollideLog = -10.0f;
@@ -425,6 +601,11 @@ int main()
         {
             std::printf("[INPUT] mode: %s\n",
                         flight.mode == starforge::game::FlightMode::Ui ? "UI" : "FLIGHT");
+            if (flight.mode == starforge::game::FlightMode::Ui)
+            {
+                std::printf("[UI] Up=dock  Down=undock  Left=buy 5 ore  Right=sell 5 ore\n");
+                std::printf("[UI] W=accept haul-ore  S=deliver+complete  A=jump (needs unlock)\n");
+            }
             std::fflush(stdout);
             lastMode = flight.mode;
         }
@@ -437,6 +618,14 @@ int main()
         {
             std::printf("[INPUT] SECONDARY FIRE\n");
             std::fflush(stdout);
+        }
+        if (flight.boost != lastBoost)
+        {
+            std::printf("[INPUT] %s (%.0f m/s at full throttle)\n",
+                        flight.boost ? "AFTERBURNER ON" : "AFTERBURNER OFF",
+                        starforge::game::targetSpeed(flight));
+            std::fflush(stdout);
+            lastBoost = flight.boost;
         }
         lastFirePrimary = flight.firePrimary;
         lastFireSecondary = flight.fireSecondary;
@@ -462,12 +651,20 @@ int main()
             const double sdz = kSunWorld.z - ship.position.z;
             const double sunDist = std::sqrt(sdx * sdx + sdy * sdy + sdz * sdz);
 
+            const auto hostileInfo = simulation.hostile();
             std::printf(
-                "[HUD] throttle %.0f%% speed %.0f m/s pos (%.0f, %.0f, %.0f) cell (%.0f,%.0f,%.0f) rocks %zu planet %.0f m sun %.0f m mode %s%s\n",
-                flight.throttle * 100.0f, effectiveSpeed, ship.position.x, ship.position.y,
-                ship.position.z, cell.x, cell.y, cell.z, world.mountedAsteroidCount(), planetDist, sunDist,
+                "[HUD] throttle %.0f%% speed %.0f m/s cell (%.0f,%.0f,%.0f) rocks %zu planet %.0f m sun %.0f m mode %s%s\n",
+                flight.throttle * 100.0f, effectiveSpeed, cell.x, cell.y, cell.z,
+                world.mountedAsteroidCount(), planetDist, sunDist,
                 flight.mode == starforge::game::FlightMode::Ui ? "UI" : "FLIGHT",
                 flight.paused ? " PAUSED" : "");
+            std::printf(
+                "[M15] shield %.0f hull %.0f hostile %s (s%.0f/h%.0f) credits %d cargo %d system %s jump %.1fly missions %d%s\n",
+                simulation.playerShield(), simulation.playerHull(),
+                hostileInfo.alive ? (hostileInfo.engaging ? "ENGAGE" : "EVADE") : "DESTROYED",
+                hostileInfo.shield, hostileInfo.hull, simulation.credits(), simulation.cargoUsed(),
+                simulation.currentSystem().c_str(), simulation.jumpRangeLy(),
+                simulation.completedMissions(), simulation.isDocked() ? " DOCKED" : "");
             std::fflush(stdout);
         }
 
@@ -505,14 +702,16 @@ int main()
         // Far plane covers the world-anchored planet (~63 km), sun (~30 km
         // plus a 12 km corona) and rocks (within 2.5 km), with margin.
         const auto proj = starforge::math::perspectiveVulkan(cameraFov, aspect, 0.1f, 150000.0f);
+        const auto viewProj = proj * view;
+        const auto invViewProj = starforge::math::inverse(viewProj);
         // Ship sits at the ship-relative origin; lookAt already places it
         // 8 m ahead of the camera. Adding another translation would
         // double-shift it (review fix).
         const auto model = matFromQuat(shipQuat);
 
         starforge::Starfield::RenderContext starContext;
-        starContext.viewProj = proj * view;
-        starContext.invViewProj = starforge::math::inverse(starContext.viewProj);
+        starContext.viewProj = viewProj;
+        starContext.invViewProj = invViewProj;
         starContext.time = time;
         if (flight.paused)
         {
@@ -524,7 +723,8 @@ int main()
         starforge::Starfield::Params sunBillboardParams;
         sunBillboardParams.worldPosition = {-5000.0f, 2500.0f, -6000.0f};
         sunBillboardParams.radius = 800.0f;
-        sunBillboardParams.intensity = 0.0f;
+        sunBillboardParams.intensity = 0.0f;   // billboard off; 3D sun is used instead
+        sunBillboardParams.starIntensity = 1.0f; // stars remain visible
 
         starforge::Toon::Context toonContext;
         toonContext.viewProj = proj * view * model;
@@ -539,12 +739,93 @@ int main()
         toonParams.rimStrength = 0.6f;
         toonParams.outlineWidth = 2.0f;
 
+        // Hostile ship (M15.0.5): red hull with a fresnel shield shell.
+        const auto hostileInfo = simulation.hostile();
+        starforge::Toon::Context hostileContext;
+        starforge::Toon::Params hostileParams;
+        if (hostileInfo.alive)
+        {
+            starforge::math::Mat4f hm(1.0f);
+            hm.columns[3] = {hostileInfo.position.x, hostileInfo.position.y,
+                             hostileInfo.position.z, 1.0f};
+            hostileContext.viewProj = viewProj * hm;
+            hostileContext.modelView = view * hm;
+            hostileContext.lightDirectionView = toonContext.lightDirectionView;
+            hostileContext.resolution = {static_cast<float>(size.width), static_cast<float>(size.height)};
+            hostileParams.baseColor = {0.58f, 0.42f, 0.24f, 1.0f}; // brown NPC hull
+            hostileParams.shadowColor = {0.22f, 0.14f, 0.07f, 1.0f};
+            hostileParams.bandCount = 3.0f;
+            hostileParams.rimStrength = 0.7f;
+            hostileParams.outlineWidth = 2.0f;
+            hostileParams.capabilities = hostileInfo.shield > 0.0f ? 2u : 0u; // fresnel shield
+            hostileParams.emissiveColor = {0.2f, 0.05f, 0.5f, 0.6f};
+        }
+
+        // Visible combat feedback (M15.0.5): emissive muzzle flash while
+        // firing and a fresnel shield bubble when the player is hit.
+        starforge::Toon::Context muzzleContext;
+        starforge::Toon::Params muzzleParams;
+        if (flight.firePrimary)
+        {
+            auto mm = starforge::math::Mat4f(1.0f);
+            mm.columns[0][0] = mm.columns[1][1] = mm.columns[2][2] = 0.45f;
+            mm.columns[3] = {shipForward.x() * 8.0f, shipForward.y() * 8.0f,
+                             shipForward.z() * 8.0f, 1.0f};
+            muzzleContext.viewProj = viewProj * mm;
+            muzzleContext.modelView = view * mm;
+            muzzleContext.lightDirectionView = toonContext.lightDirectionView;
+            muzzleContext.resolution = {static_cast<float>(size.width), static_cast<float>(size.height)};
+            muzzleParams.baseColor = {1.0f, 0.8f, 0.2f, 1.0f};
+            muzzleParams.capabilities = 1u; // emissive
+            muzzleParams.emissiveColor = {2.5f, 1.6f, 0.35f, 1.0f};
+            muzzleParams.outlineWidth = 0.0f;
+        }
+        starforge::Toon::Context flashContext;
+        starforge::Toon::Params flashParams;
+        if (shieldFlash > 0.0f)
+        {
+            auto fm = starforge::math::Mat4f(1.0f);
+            // Keep the bubble well inside the 8 m chase-camera distance.
+            const float s = 1.2f + (0.35f - shieldFlash) * 1.8f;
+            fm.columns[0][0] = fm.columns[1][1] = fm.columns[2][2] = s;
+            flashContext.viewProj = viewProj * fm;
+            flashContext.modelView = view * fm;
+            flashContext.lightDirectionView = toonContext.lightDirectionView;
+            flashContext.resolution = {static_cast<float>(size.width), static_cast<float>(size.height)};
+            flashParams.baseColor = {0.1f, 0.4f, 1.0f, 1.0f};
+            flashParams.capabilities = 2u; // fresnel shield
+            flashParams.emissiveColor = {0.2f, 0.6f, 1.0f, 0.7f};
+            flashParams.outlineWidth = 0.0f;
+        }
+
+        // Stylized destruction burst: expanding emissive shells at the last
+        // hostile position.
+        starforge::Toon::Context boomContext;
+        starforge::Toon::Params boomParams;
+        if (explosionTimer > 0.0f)
+        {
+            const float progress = 1.0f - explosionTimer;
+            auto bm = starforge::math::Mat4f(1.0f);
+            const float s = 1.0f + progress * 7.0f;
+            bm.columns[0][0] = bm.columns[1][1] = bm.columns[2][2] = s;
+            bm.columns[3] = {explosionPos.x, explosionPos.y, explosionPos.z, 1.0f};
+            boomContext.viewProj = viewProj * bm;
+            boomContext.modelView = view * bm;
+            boomContext.lightDirectionView = toonContext.lightDirectionView;
+            boomContext.resolution = {static_cast<float>(size.width), static_cast<float>(size.height)};
+            boomParams.baseColor = {1.0f, 0.55f, 0.12f, 1.0f};
+            boomParams.capabilities = 1u; // emissive
+            boomParams.emissiveColor = {3.0f * explosionTimer, 1.2f * explosionTimer,
+                                        0.2f * explosionTimer, 1.0f};
+            boomParams.outlineWidth = 0.0f;
+        }
+
         // --- Asteroid field (M15.0.3): streaming chunks + authored
         // near cluster, rendered as toon cubes (placeholder geometry).
-        const auto rocks = world.visibleAsteroids(2500.0);
+        const auto visibleRocks = world.visibleAsteroids(2500.0);
         std::vector<const starforge::game::RawTransform*> sorted;
-        sorted.reserve(rocks.size());
-        for (const auto& r : rocks)
+        sorted.reserve(visibleRocks.size());
+        for (const auto& r : visibleRocks)
         {
             sorted.push_back(&r);
         }
@@ -563,8 +844,8 @@ int main()
         // Nebula backdrop first (fullscreen FBM), then stars, then
         // 3D visitable sun (M15.0.7), then planet dish placeholder + ship + asteroids.
         starforge::Nebula::RenderContext nebContext;
-        nebContext.viewProj = proj * view;
-        nebContext.invViewProj = starforge::math::inverse(nebContext.viewProj);
+        nebContext.viewProj = viewProj;
+        nebContext.invViewProj = invViewProj;
         nebContext.cameraPosition = eyeOffset;
         nebContext.resolution = {static_cast<float>(size.width), static_cast<float>(size.height)};
         nebContext.time = time;
@@ -581,7 +862,7 @@ int main()
         // Anchored at world coordinates (~30 km from spawn); the core and
         // corona both sit inside the far plane so the whole body renders.
         starforge::Sun::RenderContext sunContext;
-        sunContext.viewProj = proj * view;
+        sunContext.viewProj = viewProj;
         sunContext.cameraPosition = starforge::WorldPosition::fromMeters(
             ship.position.x + eyeOffset.x(),
             ship.position.y + eyeOffset.y(),
@@ -601,26 +882,122 @@ int main()
         sun3DParams.coronaIntensity = 1.0f;
         sun3DParams.time = time;
 
-        // Planet dish placeholder: WORLD-anchored (~63 km from spawn),
-        // computed ship-relative each frame, so it stays put in the world and grows as the ship approaches.
+        // M15.0.4 planet: WORLD-anchored (~63 km from spawn), computed
+        // ship-relative each frame, rendered as a ray-sphere disc with a
+        // projective depth write and a Fresnel atmosphere limb.
         constexpr starforge::game::RawVec3d kPlanetWorld{1067000.0, 8000.0, -60000.0};
         starforge::math::Vec3f planetRel{
             static_cast<float>(kPlanetWorld.x - ship.position.x),
             static_cast<float>(kPlanetWorld.y - ship.position.y),
             static_cast<float>(kPlanetWorld.z - ship.position.z)};
-        starforge::math::Mat4f planetModel(1.0f);
-        planetModel.columns[3] = {planetRel.x(), planetRel.y(), planetRel.z(), 1.0f};
-        planetModel = planetModel * scaleMat(6000.0f);
-        starforge::Toon::Context planetContext;
-        planetContext.viewProj = proj * view * planetModel;
-        planetContext.modelView = view * planetModel;
-        planetContext.lightDirectionView = toonContext.lightDirectionView;
-        starforge::Toon::Params planetParams;
-        planetParams.baseColor = {0.15f, 0.45f, 1.0f, 1.0f}; // bright water blue
-        planetParams.shadowColor = {0.02f, 0.12f, 0.35f, 1.0f};
-        planetParams.bandCount = 4.0f;
-        planetParams.rimStrength = 1.0f;
-        planetParams.outlineWidth = 1.0f;
+        starforge::Planet::RenderContext planetContext;
+        planetContext.viewProj = viewProj;
+        planetContext.invViewProj = invViewProj;
+        planetContext.cameraPosition = eyeOffset;
+        planetContext.resolution = {static_cast<float>(size.width), static_cast<float>(size.height)};
+        planetContext.time = time;
+        starforge::Planet::Params planetParams;
+        planetParams.center = planetRel;
+        planetParams.radius = 6000.0f;
+        planetParams.baseColor = {0.18f, 0.5f, 1.0f, 1.0f};
+        planetParams.shadowColor = {0.12f, 0.35f, 0.65f, 1.0f}; // clearly opaque night side
+        planetParams.rimColor = {0.6f, 0.8f, 1.0f, 1.0f};
+        // Light direction must be planet->sun (not ship->sun), otherwise the
+        // terminator points the wrong way because the two bodies are far apart.
+        planetParams.sunDirection = starforge::math::normalize(
+            starforge::math::Vec3f{kSunWorld.x - kPlanetWorld.x,
+                                   kSunWorld.y - kPlanetWorld.y,
+                                   kSunWorld.z - kPlanetWorld.z});
+        planetParams.fresnelPower = 3.5f;
+        planetParams.rimStrength = 1.2f;
+        planetParams.atmosphereRatio = 1.18f;
+        planetParams.atmosphereColor = {0.35f, 0.6f, 1.0f, 1.0f};
+        // The additive limb read as a second, hollow planet at some angles,
+        // so it is disabled in the demo; the disc alone is unmistakably solid.
+        planetParams.atmosphereIntensity = 0.0f;
+        // ~250 s per revolution (halved from 0.05 rad/s).
+        planetParams.spin = time * 0.025f;
+
+        // M15.0.8/15.0.9 instanced asteroid field: build camera-relative
+        // instances with a palette tint keyed by the rock seed/position.
+        starforge::AsteroidField::RenderContext rockContext;
+        rockContext.viewProj = viewProj;
+        rockContext.projectionScale = {proj.columns[0][0], proj.columns[1][1]};
+        rockContext.resolution = {static_cast<float>(size.width), static_cast<float>(size.height)};
+        // Rock normals are in ship-relative world space (not view space), so
+        // pass the real direction to the sun; backlit faces go dark.
+        rockContext.sunDirection = starforge::math::normalize(
+            starforge::math::Vec3f{kSunWorld.x - ship.position.x,
+                                   kSunWorld.y - ship.position.y,
+                                   kSunWorld.z - ship.position.z});
+        rockContext.cameraPosition = eyeOffset;
+        rockContext.lodDistance = 1600.0f;
+        rockContext.outlineWidthPixels = 1.2f;
+        rockContext.outline = true;
+        std::vector<starforge::AsteroidField::Instance> rockInstances;
+        rockInstances.reserve(sorted.size());
+        for (const auto* rock : sorted)
+        {
+            const double rdist = std::sqrt(rock->position.x * rock->position.x +
+                                           rock->position.y * rock->position.y +
+                                           rock->position.z * rock->position.z);
+            if (rdist > 2500.0) break;
+            // Stable per-entity seed: never derived from camera-relative
+            // position, which changes as the ship flies and caused flicker.
+            const int palette = static_cast<int>(rock->seed % 4);
+            const float tints[4][3] = {
+                {0.72f, 0.55f, 0.30f}, // tan
+                {0.35f, 0.52f, 0.72f}, // slate blue
+                {0.70f, 0.32f, 0.24f}, // rust
+                {0.38f, 0.62f, 0.35f}}; // sage
+            starforge::AsteroidField::Instance instance;
+            instance.position = {static_cast<float>(rock->position.x),
+                                 static_cast<float>(rock->position.y),
+                                 static_cast<float>(rock->position.z)};
+            instance.scale = rock->scale;
+            instance.rotation = {rock->orientation.x, rock->orientation.y,
+                                 rock->orientation.z, rock->orientation.w};
+            instance.tint = {tints[palette][0], tints[palette][1], tints[palette][2], 1.0f};
+            instance.seed = rock->seed; // stable shape/tint across frames
+            rockInstances.push_back(instance);
+        }
+        starforge::Hud::Params hudParams;
+        hudParams.panelX = 16.0f;
+        hudParams.panelY = 16.0f;
+        hudParams.panelWidth = 200.0f;
+        hudParams.panelHeight = 96.0f;
+        hudParams.portraitX = 28.0f;
+        hudParams.portraitY = 28.0f;
+        hudParams.portraitWidth = 56.0f;
+        hudParams.portraitHeight = 56.0f;
+        hudParams.panelColor = {0.06f, 0.10f, 0.20f, 1.0f};
+        hudParams.outlineColor = {0.02f, 0.02f, 0.04f, 1.0f};
+        hudParams.accentColor = {0.95f, 0.65f, 0.15f, 1.0f};
+        // Live readouts: shield / hull / cargo.
+        const float flightBars[3] = {
+            std::clamp(simulation.playerShield() / 100.0f, 0.0f, 1.0f),
+            std::clamp(simulation.playerHull() / 100.0f, 0.0f, 1.0f),
+            std::clamp(static_cast<float>(simulation.cargoUsed()) / 30.0f, 0.0f, 1.0f)};
+        std::copy_n(flightBars, 3, hudParams.barValues);
+
+        // UI mode: a larger trade/combat panel with status bars.
+        starforge::Hud::Params uiParams = hudParams;
+        uiParams.panelX = static_cast<float>(size.width) * 0.5f - 240.0f;
+        uiParams.panelY = static_cast<float>(size.height) * 0.5f - 160.0f;
+        uiParams.panelWidth = 480.0f;
+        uiParams.panelHeight = 320.0f;
+        uiParams.portraitX = uiParams.panelX + 20.0f;
+        uiParams.portraitY = uiParams.panelY + 20.0f;
+        uiParams.portraitWidth = 96.0f;
+        uiParams.portraitHeight = 96.0f;
+        uiParams.panelColor = {0.08f, 0.14f, 0.26f, 1.0f};
+        uiParams.accentColor = {0.35f, 0.85f, 0.55f, 1.0f};
+        // Credits / cargo / completed missions.
+        const float uiBars[3] = {
+            std::clamp(static_cast<float>(simulation.credits()) / 2000.0f, 0.0f, 1.0f),
+            std::clamp(static_cast<float>(simulation.cargoUsed()) / 30.0f, 0.0f, 1.0f),
+            std::clamp(static_cast<float>(simulation.completedMissions()) / 2.0f, 0.0f, 1.0f)};
+        std::copy_n(uiBars, 3, uiParams.barValues);
 
         // Composition order: starfield base (opaque stars), then nebula
         // additive over it, then 3D celestial sun (opaque core + additive corona),
@@ -629,49 +1006,19 @@ int main()
             starfield->record(fc, starContext, sunBillboardParams);
             nebula->record(fc, nebContext, nebParams);
             sun->record(fc, sunContext, sun3DParams);
-            toon->record(fc, planetContext, planetParams);
+            planet->record(fc, planetContext, planetParams);
             toon->record(fc, toonContext, toonParams);
-            std::size_t shown = 0;
-            for (const auto* rock : sorted)
-            {
-                if (shown >= kMaxRocks)
-                {
-                    break;
-                }
-                // Fade-in by distance (grow-in) masks streaming pop-in
-                // at the 2.5 km cull radius.
-                const double rdist = std::sqrt(rock->position.x * rock->position.x +
-                                                 rock->position.y * rock->position.y +
-                                                 rock->position.z * rock->position.z);
-                float fade = 1.0f;
-                if (rdist > 1800.0)
-                {
-                    fade = std::max(0.0f, 1.0f - static_cast<float>((rdist - 1800.0) / 700.0));
-                }
-                if (fade <= 0.001f)
-                {
-                    continue;
-                }
-                const starforge::math::Vec4f rq{
-                    rock->orientation.x, rock->orientation.y, rock->orientation.z, rock->orientation.w};
-                starforge::math::Mat4f rm(1.0f);
-                rm.columns[3] = {static_cast<float>(rock->position.x), static_cast<float>(rock->position.y),
-                                 static_cast<float>(rock->position.z), 1.0f};
-                const auto rockModel = rm * matFromQuat(rq) * scaleMat(rock->scale * fade);
-                starforge::Toon::Context rc;
-                rc.viewProj = proj * view * rockModel;
-                rc.modelView = view * rockModel;
-                rc.lightDirectionView = toonContext.lightDirectionView;
-                rc.resolution = toonContext.resolution;
-                starforge::Toon::Params rp;
-                rp.baseColor = {0.55f, 0.45f, 0.35f, 1.0f};
-                rp.shadowColor = {0.15f, 0.12f, 0.1f, 1.0f};
-                rp.bandCount = 2.0f;
-                rp.rimStrength = 0.25f;
-                rp.outlineWidth = 1.5f;
-                toon->record(fc, rc, rp);
-                ++shown;
-            }
+            if (hostileInfo.alive) toon->record(fc, hostileContext, hostileParams);
+            if (flight.firePrimary) toon->record(fc, muzzleContext, muzzleParams);
+            if (shieldFlash > 0.0f) toon->record(fc, flashContext, flashParams);
+            if (explosionTimer > 0.0f) toon->record(fc, boomContext, boomParams);
+            // One instanced draw (+ outline + impostor tiers) replaces the
+            // old 64 per-rock Toon draws (M15.0.9).
+            rockField->record(fc, rockContext, rockInstances.data(),
+                              static_cast<std::uint32_t>(rockInstances.size()));
+            hud->record(fc, hudParams);
+            if (flight.mode == starforge::game::FlightMode::Ui)
+                hud->record(fc, uiParams);
         });
         if (!frame)
         {

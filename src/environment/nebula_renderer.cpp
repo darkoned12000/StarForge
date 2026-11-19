@@ -91,6 +91,7 @@ std::expected<NebulaRenderer, std::string> NebulaRenderer::create(const CreateIn
         .shaderDirectory = info.shaderDirectory,
         .shaderBaseName = "nebula",
         .pushConstantSize = sizeof(PushConstants),
+        .alphaBlend = true, // composite over stars so clouds dim them
     });
     if (!effect)
     {

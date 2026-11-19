@@ -18,6 +18,7 @@ struct RawHudParams
     float panelColor[4] = {0.08f, 0.12f, 0.22f, 1.0f};
     float outlineColor[4] = {0.02f, 0.02f, 0.04f, 1.0f};
     float accentColor[4] = {0.95f, 0.65f, 0.15f, 1.0f};
+    float barValues[3] = {1.0f, 0.75f, 0.5f};
 };
 
 class RawHud
@@ -29,6 +30,7 @@ public:
         VkDevice device = VK_NULL_HANDLE;
         VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
         VkFormat colorFormat = VK_FORMAT_UNDEFINED;
+        VkFormat depthFormat = VK_FORMAT_UNDEFINED;
         std::string shaderDirectory;
     };
 
@@ -40,6 +42,7 @@ public:
     RawHud& operator=(const RawHud&) = delete;
 
     void render(VkCommandBuffer cmd, float width, float height, const RawHudParams& params);
+    [[nodiscard]] std::expected<void, std::string> recreate(const CreateInfo& info);
 
 private:
     RawHud() = default;

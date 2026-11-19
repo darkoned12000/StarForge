@@ -21,10 +21,12 @@ public:
     {
         VkDevice device = VK_NULL_HANDLE;
         VkFormat colorFormat = VK_FORMAT_R8G8B8A8_UNORM;
+        VkFormat depthFormat = VK_FORMAT_UNDEFINED; // must match the active render pass
         std::string shaderDirectory;
         std::string shaderBaseName; // <name>.vert.spv / <name>.frag.spv
         std::uint32_t pushConstantSize = 0;
-        bool additive = false; // ONE/ONE blending for bloom accumulation
+        bool additive = false;    // ONE/ONE blending for bloom accumulation
+        bool alphaBlend = false;  // SRC_ALPHA / ONE_MINUS_SRC_ALPHA for overlays
     };
 
     static std::expected<TextureEffect, std::string> create(const CreateInfo& info);

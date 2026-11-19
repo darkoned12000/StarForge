@@ -37,7 +37,14 @@ static_assert(offsetof(PushConstants, timeIntensityAspectTan) == 48, "Starfield 
     const math::Mat4f invView = glm::inverse(viewProj);
     const math::Vec3f right = glm::normalize(math::Vec3f(invView[0]));
     const math::Vec3f up = glm::normalize(math::Vec3f(invView[1]));
-    const math::Vec3f forward = -glm::normalize(math::Vec3f(invView[2]));
+    // The third column of inv(P*V) is -cameraPosition, NOT the view forward.
+    // Unproject the near/far plane centres and take their difference so the
+    // star directions stay pinned in world space when the camera translates.
+    const math::Vec4f nearH = invView * math::Vec4f{0.0f, 0.0f, 0.0f, 1.0f};
+    const math::Vec4f farH = invView * math::Vec4f{0.0f, 0.0f, 1.0f, 1.0f};
+    const math::Vec3f nearP{nearH.x / nearH.w, nearH.y / nearH.w, nearH.z / nearH.w};
+    const math::Vec3f farP{farH.x / farH.w, farH.y / farH.w, farH.z / farH.w};
+    const math::Vec3f forward = glm::normalize(farP - nearP);
     const float projRow1Squared = viewProj[0][1] * viewProj[0][1] + viewProj[1][1] * viewProj[1][1] +
                                   viewProj[2][1] * viewProj[2][1];
     const float tanHalfFov = projRow1Squared > 0.0f ? 1.0f / std::sqrt(projRow1Squared) : 1.0f;
@@ -258,8 +265,10 @@ void StarfieldRenderer::render(VkCommandBuffer cmd, const StarfieldRenderContext
     }
 
     const float skyAspect = context.resolution.x / std::max(context.resolution.y, 1.0f);
+    // Stars have their own intensity: callers disabling the sun billboard
+    // (intensity = 0) must not accidentally zero out the whole star field.
     const PushConstants push = skyBasis(context.viewProj, params.time != 0.0f ? params.time : context.time,
-                                        params.intensity, skyAspect);
+                                        params.starIntensity, skyAspect);
 
     vkCmdPushConstants(cmd, pipelineLayout_, VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, static_cast<std::uint32_t>(sizeof(PushConstants)), &push);

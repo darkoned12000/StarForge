@@ -139,7 +139,7 @@ std::expected<TextureEffect, std::string> TextureEffect::create(const CreateInfo
     auto pipeline = vulkan::GraphicsPipeline::create({
         .device = info.device,
         .colorFormat = info.colorFormat,
-        .depthFormat = VK_FORMAT_UNDEFINED,
+        .depthFormat = info.depthFormat,
         .vertexShader = effect.vertexModule_,
         .fragmentShader = effect.fragmentModule_,
         .pipelineLayout = effect.pipelineLayout_,
@@ -148,9 +148,10 @@ std::expected<TextureEffect, std::string> TextureEffect::create(const CreateInfo
         .depthWrite = false,
         .depthCompare = VK_COMPARE_OP_ALWAYS,
         .backfaceCulling = false,
-        .blendEnable = info.additive,
-        .blendSrcFactor = VK_BLEND_FACTOR_ONE,
-        .blendDstFactor = VK_BLEND_FACTOR_ONE,
+        .blendEnable = info.additive || info.alphaBlend,
+        .blendSrcFactor = info.alphaBlend ? VK_BLEND_FACTOR_SRC_ALPHA : VK_BLEND_FACTOR_ONE,
+        .blendDstFactor = info.alphaBlend ? VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
+                                          : VK_BLEND_FACTOR_ONE,
         .viewportWidth = 1.0f,
         .viewportHeight = 1.0f,
     });

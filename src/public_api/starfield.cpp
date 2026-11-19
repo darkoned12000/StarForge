@@ -125,6 +125,7 @@ void Starfield::record(FrameContext& frameContext, const RenderContext& context,
     rawParams.worldPosition = toRaw(params.worldPosition);
     rawParams.radius = params.radius;
     rawParams.intensity = params.intensity;
+    rawParams.starIntensity = params.starIntensity;
     rawParams.color = toRaw(params.color);
     rawParams.limbDarkeningCoeff = params.limbDarkeningCoeff;
 

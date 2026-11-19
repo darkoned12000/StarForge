@@ -24,6 +24,7 @@ add_subdirectory(gpu_resources)
 add_subdirectory(environment)
 add_subdirectory(ecs)
 add_subdirectory(ai)
+add_subdirectory(gameplay)
 add_subdirectory(physics)
 add_subdirectory(audio)
 add_subdirectory(public_api)
@@ -51,6 +52,7 @@ target_link_libraries(starforge
         starforge_environment
         starforge_ecs
         starforge_ai
+        starforge_gameplay
         starforge_physics
         starforge_audio
         starforge_public_api

@@ -11,6 +11,7 @@ struct Push
     float4 outlineColor;
     float4 accentColor;
     float4 screen;  // width, height, unused, unused
+    float4 barValues; // normalized readout bar lengths (shield / hull / cargo)
 };
 [[vk::push_constant]] Push pc;
 
@@ -45,26 +46,34 @@ float4 fragmentMain(VSOutput input) : SV_Target
 {
     float2 p = input.uv * pc.screen.xy;
     float3 color = float3(0.0, 0.0, 0.0);
+    float coverage = 0.0; // transparent everywhere except HUD elements
 
     float panel = rectMask(p, pc.panel);
     color = lerp(color, pc.panelColor.rgb, panel);
+    coverage = max(coverage, panel);
 
     float outline = borderMask(p, pc.panel, 3.0);
     color = lerp(color, pc.outlineColor.rgb, outline);
+    coverage = max(coverage, outline);
 
     float portrait = rectMask(p, pc.portrait);
     color = lerp(color, pc.panelColor.rgb * 0.5, portrait);
+    coverage = max(coverage, portrait);
     float portraitOutline = borderMask(p, pc.portrait, 2.0);
     color = lerp(color, pc.accentColor.rgb, portraitOutline);
+    coverage = max(coverage, portraitOutline);
 
     // Three graphic accent bars (health / shield / ammo).
     for (uint i = 0; i < 3u; ++i)
     {
         float4 bar = float4(pc.panel.x + 8.0,
                             pc.panel.y + pc.panel.w - 12.0 - float(i) * 7.0,
-                            (pc.panel.z - 16.0) * (1.0 - float(i) * 0.25),
+                            (pc.panel.z - 16.0) * pc.barValues[i],
                             3.0);
-        color = lerp(color, pc.accentColor.rgb, rectMask(p, bar));
+        float barMask = rectMask(p, bar);
+        color = lerp(color, pc.accentColor.rgb, barMask);
+        coverage = max(coverage, barMask);
     }
-    return float4(color, 1.0);
+    // Alpha-blended overlay: only the elements modify the framebuffer.
+    return float4(color, coverage);
 }

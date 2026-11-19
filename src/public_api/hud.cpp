@@ -28,6 +28,7 @@ std::string resolveShaderDirectory(const std::string& requested)
 struct Hud::Impl
 {
     std::unique_ptr<bridge::RawHud> backend;
+    std::string shaderDirectory;
 };
 
 Hud::Hud(std::unique_ptr<Impl> impl) noexcept : impl_(std::move(impl)) {}
@@ -46,11 +47,13 @@ std::expected<Hud, std::string> Hud::create(Renderer& renderer, const CreateInfo
         .device = RendererInternalAccess::device(renderer),
         .physicalDevice = RendererInternalAccess::physicalDevice(renderer),
         .colorFormat = RendererInternalAccess::colorFormat(renderer),
+        .depthFormat = RendererInternalAccess::depthFormat(renderer),
         .shaderDirectory = shaderDirectory,
     });
     if (!backend) return std::unexpected(backend.error());
     auto impl = std::make_unique<Impl>();
     impl->backend = std::move(*backend);
+    impl->shaderDirectory = shaderDirectory;
     return Hud(std::move(impl));
 }
 
@@ -75,10 +78,25 @@ void Hud::record(FrameContext& frameContext, const Params& params)
     const auto accent = toRaw(params.accentColor);
     raw.accentColor[0] = accent.x; raw.accentColor[1] = accent.y;
     raw.accentColor[2] = accent.z; raw.accentColor[3] = accent.w;
+    std::copy_n(params.barValues, 3, raw.barValues);
 
     const Size2D extent = frameContext.extent();
     impl_->backend->render(RendererInternalAccess::commandBuffer(frameContext),
                            static_cast<float>(extent.width), static_cast<float>(extent.height), raw);
+}
+
+std::expected<void, std::string> Hud::recreate(Renderer& renderer)
+{
+    if (!impl_ || !impl_->backend) return std::unexpected("Hud is moved-from");
+    renderer.waitIdle();
+    return impl_->backend->recreate({
+        .instance = RendererInternalAccess::instance(renderer),
+        .device = RendererInternalAccess::device(renderer),
+        .physicalDevice = RendererInternalAccess::physicalDevice(renderer),
+        .colorFormat = RendererInternalAccess::colorFormat(renderer),
+        .depthFormat = RendererInternalAccess::depthFormat(renderer),
+        .shaderDirectory = impl_->shaderDirectory,
+    });
 }
 
 } // namespace starforge

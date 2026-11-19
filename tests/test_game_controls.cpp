@@ -137,3 +137,21 @@ TEST_CASE("Flight: weapon states follow buttons, suppressed while paused")
     CHECK_FALSE(state.firePrimary);
     CHECK_FALSE(state.fireSecondary);
 }
+
+TEST_CASE("Flight: Left Shift afterburner multiplies top speed 15x")
+{
+    starforge::game::FlightState state;
+    state.throttle = 1.0f;
+    CHECK(starforge::game::targetSpeed(state) == doctest::Approx(60.0f));
+
+    starforge::game::InputEdge boost;
+    boost.boostDown = true;
+    starforge::game::applyInput(state, boost, 1.0f / 60.0f);
+    CHECK(state.boost);
+    CHECK(starforge::game::targetSpeed(state) == doctest::Approx(900.0f));
+
+    starforge::game::InputEdge release;
+    starforge::game::applyInput(state, release, 1.0f / 60.0f);
+    CHECK_FALSE(state.boost);
+    CHECK(starforge::game::targetSpeed(state) == doctest::Approx(60.0f));
+}
