@@ -26,6 +26,7 @@ enum class Key
     Backspace,
     Equal,
     Minus,
+    M,
     Count,
 };
 

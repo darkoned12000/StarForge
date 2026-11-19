@@ -28,6 +28,7 @@
 #include "targeting.hpp"
 #include "ui_comms.hpp"
 #include "ui_radar.hpp"
+#include "ui_map.hpp"
 #include "ui_station.hpp"
 #include "ui_state.hpp"
 
@@ -118,6 +119,7 @@ struct InputTracker
     bool prevBackspace = false;
     bool prevZoomIn = false;
     bool prevZoomOut = false;
+    bool prevMap = false;
 };
 
 [[nodiscard]] starforge::game::InputEdge readInput(starforge::Application& app, InputTracker& tracker)
@@ -399,6 +401,8 @@ int main()
     bool lastRelativeMouse = false;
     bool lastBoost = false;
     float radarRange = 2000.0f;
+    bool mapVisible = false;
+    starforge::game::CommsLog toasts;
     float cameraDist = 8.0f; // chase-camera distance (fixed for FOV zoom)
     float shieldFlash = 0.0f; // seconds of remaining shield-hit visual
     float explosionTimer = 0.0f; // hostile destruction effect
@@ -554,6 +558,9 @@ int main()
                     radarRange = std::min(8000.0f, radarRange * 1.333f);
                 inputTracker.prevZoomIn = zoomIn;
                 inputTracker.prevZoomOut = zoomOut;
+                const bool mapKey = app->isKeyDown(starforge::Key::M);
+                if (mapKey && !inputTracker.prevMap) mapVisible = !mapVisible;
+                inputTracker.prevMap = mapKey;
             }
             if (!flight.paused && pending.spacePressed)
             {
@@ -625,6 +632,7 @@ int main()
             app->takeTextInput(); // drain typing while flying
         }
         comms.tick(frameDt);
+        toasts.tick(frameDt);
 
         // --- Fixed-step simulation (M15.0.1) + streaming (M15.0.3) ---
         if (!flight.paused)
@@ -671,11 +679,13 @@ int main()
                 case starforge::game::GameEvent::Type::PlayerShieldHit:
                 case starforge::game::GameEvent::Type::PlayerHullHit:
                     shieldFlash = 0.35f;
+                    toasts.push(starforge::game::CommsChannel::Combat, "", "SHIELD HIT", 2.0f);
                     if (hitVoice.has_value()) audio->play(*hitVoice, true);
                     break;
                 case starforge::game::GameEvent::Type::HostileDestroyed:
                     comms.push(starforge::game::CommsChannel::Combat, "combat",
                                "Hostile destroyed");
+                    toasts.push(starforge::game::CommsChannel::Combat, "", "HOSTILE DESTROYED", 3.0f);
                     explosionTimer = 1.0f;
                     explosionPos = simulation.hostile().position;
                     if (boomVoice.has_value()) audio->play(*boomVoice, true);
@@ -1280,26 +1290,44 @@ int main()
                     default:                                  return {0.7f, 0.7f, 0.7f, 1.0f};
                     }
                 };
-                const auto plot = [&](const char* id, float x, float z,
-                                      starforge::game::RadarKind kind) {
+                // Contacts arrive as camera-relative WORLD offsets. Rotate
+                // them into the ship's local basis so a 180 turn moves them
+                // from behind to ahead on the radar.
+                const auto shipBasis = matFromQuat(shipQuat);
+                const starforge::math::Vec3f shipRight{shipBasis.columns[0][0],
+                                                       shipBasis.columns[0][1],
+                                                       shipBasis.columns[0][2]};
+                const auto shipForwardWorld = forwardFromQuat(shipQuat);
+                const starforge::math::Vec3f shipForward{
+                    static_cast<float>(shipForwardWorld.x()),
+                    static_cast<float>(shipForwardWorld.y()),
+                    static_cast<float>(shipForwardWorld.z())};
+                const auto plotWorld = [&](const char* id, float wx, float wy, float wz,
+                                           starforge::game::RadarKind kind) {
+                    const auto [localX, localF] = starforge::game::toShipLocal(
+                        {wx, wy, wz}, {shipRight.x(), shipRight.y(), shipRight.z()},
+                        {shipForward.x(), shipForward.y(), shipForward.z()});
                     const auto p = starforge::game::projectRadar(
-                        {id, x, -z, kind}, kRadarRange, kRadarRadius);
+                        {id, localX, localF, kind}, kRadarRange, kRadarRadius);
                     if (!p.visible) return;
                     uiCanvas->addRect({.x = ccx + p.x, .y = ccy + p.y, .w = 3.0f, .h = 3.0f,
                                        .color = radarColor(kind)});
                 };
-                plot("planet", planetRel.x(), planetRel.z(), starforge::game::RadarKind::Planet);
-                plot("station-a", 400.0f, -1200.0f, starforge::game::RadarKind::Station);
+                plotWorld("planet", planetRel.x(), planetRel.y(), planetRel.z(),
+                          starforge::game::RadarKind::Planet);
+                plotWorld("station-a", 400.0f, 0.0f, -1200.0f, starforge::game::RadarKind::Station);
                 const auto hostile = simulation.hostile();
                 if (hostile.alive)
-                    plot("hostile", hostile.position.x, hostile.position.z,
-                         starforge::game::RadarKind::Hostile);
+                    plotWorld("hostile", hostile.position.x, hostile.position.y,
+                              hostile.position.z, starforge::game::RadarKind::Hostile);
                 int radarRocks = 0;
                 for (const auto* rock : sorted)
                 {
                     if (radarRocks++ >= 12) break; // keep the radar readable
-                    plot("rock", static_cast<float>(rock->position.x),
-                         static_cast<float>(rock->position.z), starforge::game::RadarKind::Rock);
+                    plotWorld("rock", static_cast<float>(rock->position.x),
+                              static_cast<float>(rock->position.y),
+                              static_cast<float>(rock->position.z),
+                              starforge::game::RadarKind::Rock);
                 }
                 uiCanvas->addRect({.x = ccx - 2.0f, .y = ccy - 2.0f, .w = 4.0f, .h = 4.0f,
                                    .color = {1.0f, 1.0f, 1.0f, 1.0f}}); // player
@@ -1310,9 +1338,15 @@ int main()
                                    .color = {0.6f, 0.9f, 1.0f, 1.0f}, .text = radarLabel});
                 if (const auto* target = targeting.selected())
                 {
+                    const bool isHostile = target->id == "hostile-1" && hostile.alive;
+                    const float wx = isHostile ? hostile.position.x : 400.0f;
+                    const float wy = isHostile ? hostile.position.y : 0.0f;
+                    const float wz = isHostile ? hostile.position.z : -1200.0f;
+                    const auto [localX, localF] = starforge::game::toShipLocal(
+                        {wx, wy, wz}, {shipRight.x(), shipRight.y(), shipRight.z()},
+                        {shipForward.x(), shipForward.y(), shipForward.z()});
                     const auto p = starforge::game::projectRadar(
-                        {target->id, target->id == "hostile-1" ? hostile.position.x : 400.0f,
-                         target->id == "hostile-1" ? -hostile.position.z : 1200.0f,
+                        {target->id, localX, localF,
                          target->hostile ? starforge::game::RadarKind::Hostile
                                          : starforge::game::RadarKind::Station},
                         kRadarRange, kRadarRadius);
@@ -1391,6 +1425,72 @@ int main()
                 if (entry.empty()) entry = ">";
                 uiCanvas->addText({.x = px + 10.0f, .y = py + 250.0f, .scale = 2.0f,
                                    .color = {1.0f, 1.0f, 1.0f, 1.0f}, .text = entry});
+            }
+            // M16.9: toast notifications (top-centre, transient).
+            {
+                const auto& active = toasts.messages();
+                const float tx = static_cast<float>(size.width) * 0.5f - 160.0f;
+                for (std::size_t i = 0; i < active.size() && i < 3; ++i)
+                {
+                    uiCanvas->addPanel({.x = tx, .y = 20.0f + static_cast<float>(i) * 32.0f,
+                                        .w = 320.0f, .h = 28.0f, .outlineWidth = 1.5f,
+                                        .fillColor = {0.25f, 0.1f, 0.06f, 0.9f},
+                                        .accentColor = {1.0f, 0.6f, 0.15f, 1.0f}});
+                    uiCanvas->addText({.x = tx + 10.0f, .y = 25.0f + static_cast<float>(i) * 32.0f,
+                                       .scale = 2.0f,
+                                       .color = {1.0f, 0.85f, 0.4f, 1.0f},
+                                       .text = active[i].text});
+                }
+            }
+
+            // M16.9: galaxy map (M toggles).
+            if (mapVisible)
+            {
+                const float mx0 = static_cast<float>(size.width) * 0.5f - 220.0f;
+                const float my0 = static_cast<float>(size.height) * 0.5f - 140.0f;
+                uiCanvas->addPanel({.x = mx0, .y = my0, .w = 440.0f, .h = 300.0f,
+                                    .outlineWidth = 2.0f,
+                                    .fillColor = {0.04f, 0.07f, 0.13f, 0.94f},
+                                    .accentColor = {0.4f, 0.7f, 1.0f, 1.0f}});
+                uiCanvas->addText({.x = mx0 + 12.0f, .y = my0 + 8.0f, .scale = 2.0f,
+                                   .color = {0.5f, 0.85f, 1.0f, 1.0f}, .text = "SECTOR MAP (M)"});
+                const auto systemId = simulation.currentSystem();
+                const auto& systems = starforge::game::knownSystems();
+                auto originIt = std::find_if(systems.begin(), systems.end(),
+                                             [&](const auto& sys) { return sys.id == systemId; });
+                if (originIt == systems.end()) originIt = systems.begin();
+                const float mapCx = mx0 + 220.0f, mapCy = my0 + 160.0f;
+                for (const auto& sys : systems)
+                {
+                    const auto p = starforge::game::projectSystem(
+                        sys, *originIt, 100.0f, simulation.jumpRangeLy());
+                    const auto dotColor = sys.id == systemId
+                        ? starforge::math::Vec4f{1.0f, 1.0f, 0.3f, 1.0f}
+                        : p.reachable ? starforge::math::Vec4f{0.3f, 1.0f, 0.6f, 1.0f}
+                                      : starforge::math::Vec4f{0.5f, 0.5f, 0.7f, 1.0f};
+                    uiCanvas->addRect({.x = mapCx + p.x, .y = mapCy + p.y, .w = 5.0f, .h = 5.0f,
+                                       .color = dotColor});
+                    uiCanvas->addText({.x = mapCx + p.x + 8.0f, .y = mapCy + p.y - 2.0f,
+                                       .scale = 1.0f, .color = dotColor, .text = sys.id});
+                }
+            }
+
+            // M16.9: pause menu.
+            if (flight.paused)
+            {
+                const float px = static_cast<float>(size.width) * 0.5f - 160.0f;
+                const float py = static_cast<float>(size.height) * 0.5f - 80.0f;
+                uiCanvas->addPanel({.x = px, .y = py, .w = 320.0f, .h = 160.0f,
+                                    .outlineWidth = 2.0f,
+                                    .fillColor = {0.06f, 0.09f, 0.16f, 0.95f}});
+                uiCanvas->addText({.x = px + 16.0f, .y = py + 16.0f, .scale = 3.0f,
+                                   .color = {1.0f, 0.9f, 0.5f, 1.0f}, .text = "PAUSED"});
+                uiCanvas->addText({.x = px + 16.0f, .y = py + 60.0f, .scale = 2.0f,
+                                   .color = {0.8f, 0.9f, 1.0f, 1.0f},
+                                   .text = "Press P or Esc to resume"});
+                uiCanvas->addText({.x = px + 16.0f, .y = py + 88.0f, .scale = 2.0f,
+                                   .color = {0.6f, 0.8f, 0.9f, 1.0f},
+                                   .text = "M = sector map  +/- = radar zoom"});
             }
             uiCanvas->record(fc);
 

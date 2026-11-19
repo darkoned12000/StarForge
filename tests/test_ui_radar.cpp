@@ -45,3 +45,24 @@ TEST_CASE("M16.6: radar handles degenerate ranges")
     const auto q = projectRadar({"c", 10.0f, 10.0f, RadarKind::Rock}, 100.0f, 0.0f);
     CHECK_FALSE(q.visible);
 }
+
+TEST_CASE("M16.6: world contacts rotate into the ship frame on a 180 turn")
+{
+    // A contact 100 m along +Z world. Ship initially faces -Z (forward),
+    // so it is behind; after a 180 turn it must appear ahead.
+    const starforge::game::RadarVec3 contact{0.0f, 0.0f, 100.0f};
+
+    const auto before = starforge::game::toShipLocal(
+        contact, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, -1.0f});
+    CHECK(before.first == doctest::Approx(0.0f));
+    CHECK(before.second == doctest::Approx(-100.0f)); // behind
+
+    const auto after = starforge::game::toShipLocal(
+        contact, {-1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f});
+    CHECK(after.second == doctest::Approx(100.0f)); // ahead
+
+    const auto aheadPoint = starforge::game::projectRadar(
+        {"rock", after.first, after.second, starforge::game::RadarKind::Rock}, 200.0f, 50.0f);
+    CHECK(aheadPoint.visible);
+    CHECK(aheadPoint.y == doctest::Approx(-25.0f)); // 100/200 of the radar radius
+}

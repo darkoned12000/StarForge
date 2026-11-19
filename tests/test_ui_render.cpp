@@ -282,7 +282,11 @@ TEST_CASE("M16.3: composite UI panel golden (T3)")
         rects.push_back({q.quad.x0,q.quad.y0,q.quad.x1,q.quad.y1,*buttonPalette[q.colorIndex]});
     for (const auto& g : gameplay::ui_text::textQuads("BUY", 68.0f, 99.0f, 1.0f))
         rects.push_back({g.x0,g.y0,g.x1,g.y1,textColor});
-    (void)bpi;
+    // Toast banner (M16.9).
+    const std::array<float,4> toastFill{0.25f,0.1f,0.06f,1.0f};
+    const std::array<const std::array<float,4>*,3> toastPalette{&toastFill,&outline,&accent};
+    for (const auto& q : gameplay::ui_shapes::panelQuads(34.0f, 84.0f, 60.0f, 12.0f, 1.0f))
+        rects.push_back({q.quad.x0,q.quad.y0,q.quad.x1,q.quad.y1,*toastPalette[q.colorIndex]});
 
     std::vector<environment::UiVertex> vertices;
     const auto ndc = [](float px, float py) -> std::array<float,4> {
@@ -393,6 +397,149 @@ TEST_CASE("M16.3: composite UI panel golden (T3)")
         if (pixels[i]+pixels[i+1]+pixels[i+2] > 40) ++lit;
     readback->unmap();
     CHECK(lit > 500);
+    CHECK(context->validationErrorCount() == 0);
+    vkDestroyFence(device->device(),fence,nullptr);
+    vkFreeCommandBuffers(device->device(),pool,1,&cmd);
+    vkDestroyCommandPool(device->device(),pool,nullptr);
+}
+
+// Regression: a busy HUD must not silently vanish when glyph quads exceed
+// the initial vertex buffer capacity (the old 256 KB cap dropped the UI).
+TEST_CASE("M16.9: large text draw survives buffer growth")
+{
+    vulkan::ContextCreateInfo info;
+    info.enableValidation = true;
+    info.requiredExtensions.clear();
+    auto context = vulkan::VulkanContext::create(info);
+    REQUIRE(context.has_value());
+    auto device = vulkan::VulkanDevice::create(*context);
+    REQUIRE(device.has_value());
+    auto allocator = gpu_resources::Allocator::create({
+        .instance = context->instance(), .physicalDevice = context->physicalDevice(),
+        .device = device->device()});
+    REQUIRE(allocator.has_value());
+    auto renderer = environment::UiRenderer::create({
+        .instance = context->instance(), .device = device->device(),
+        .physicalDevice = context->physicalDevice(),
+        .colorFormat = VK_FORMAT_R8G8B8A8_UNORM,
+        .shaderDirectory = STARFORGE_SHADER_DIR});
+    REQUIRE(renderer.has_value());
+    auto image = gpu_resources::Image::create(*allocator, {
+        .width = kW, .height = kH, .format = VK_FORMAT_R8G8B8A8_UNORM,
+        .usage = gpu_resources::ImageUsageFlags::ColorAttachment |
+                 gpu_resources::ImageUsageFlags::TransferSrc});
+    REQUIRE(image.has_value());
+    auto view = image->createImageView(device->device());
+    REQUIRE(view.has_value());
+    auto readback = gpu_resources::Buffer::create(*allocator, {
+        .size = kPixelBytes, .usage = gpu_resources::BufferUsage::TransferDst,
+        .memory = gpu_resources::MemoryPlacement::GpuToCpu});
+    REQUIRE(readback.has_value());
+
+    // 18 rows x 20 glyphs x ~20 lit pixels = ~7200 quads > the old cap.
+    const std::string row(20, 'M');
+    std::vector<gameplay::ui_text::Quad> quads;
+    for (int r = 0; r < 18; ++r)
+    {
+        auto rowQuads = gameplay::ui_text::textQuads(row, 2.0f, 2.0f + r * 7.0f, 1.0f);
+        quads.insert(quads.end(), rowQuads.begin(), rowQuads.end());
+    }
+    REQUIRE(quads.size() > 1600);
+    std::vector<environment::UiVertex> vertices;
+    const auto ndc = [](float px, float py) -> std::array<float,4> {
+        return {2.0f*px/kW-1.0f, 1.0f-2.0f*py/kH, 0.0f, 1.0f};
+    };
+    const std::array<float,4> color{1.0f,1.0f,0.2f,1.0f};
+    for (const auto& q : quads)
+    {
+        const auto a=ndc(q.x0,q.y0), b=ndc(q.x1,q.y0), c=ndc(q.x1,q.y1), d=ndc(q.x0,q.y1);
+        vertices.push_back({a,color}); vertices.push_back({b,color});
+        vertices.push_back({c,color}); vertices.push_back({a,color});
+        vertices.push_back({c,color}); vertices.push_back({d,color});
+    }
+
+    VkCommandPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    poolInfo.queueFamilyIndex = device->graphicsQueueFamily();
+    poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    VkCommandPool pool = VK_NULL_HANDLE;
+    REQUIRE(vkCreateCommandPool(device->device(), &poolInfo, nullptr, &pool) == VK_SUCCESS);
+    VkCommandBufferAllocateInfo alloc{};
+    alloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    alloc.commandPool = pool;
+    alloc.commandBufferCount = 1;
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    REQUIRE(vkAllocateCommandBuffers(device->device(), &alloc, &cmd) == VK_SUCCESS);
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    VkFence fence = VK_NULL_HANDLE;
+    REQUIRE(vkCreateFence(device->device(), &fenceInfo, nullptr, &fence) == VK_SUCCESS);
+
+    VkCommandBufferBeginInfo begin{};
+    begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    REQUIRE(vkBeginCommandBuffer(cmd, &begin) == VK_SUCCESS);
+    image->transitionToColorAttachment(cmd);
+    VkRenderingAttachmentInfo attachment{};
+    attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    attachment.imageView = view->handle();
+    attachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    attachment.clearValue.color = VkClearColorValue{{0.0f,0.0f,0.0f,1.0f}};
+    VkRenderingInfo rendering{};
+    rendering.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    rendering.renderArea.extent = {kW,kH};
+    rendering.layerCount = 1;
+    rendering.colorAttachmentCount = 1;
+    rendering.pColorAttachments = &attachment;
+    vkCmdBeginRendering(cmd, &rendering);
+    VkViewport viewport{0.0f,static_cast<float>(kH),static_cast<float>(kW),-static_cast<float>(kH),0.0f,1.0f};
+    VkRect2D scissor{{0,0},{kW,kH}};
+    vkCmdSetViewport(cmd,0,1,&viewport);
+    vkCmdSetScissor(cmd,0,1,&scissor);
+    renderer->render(cmd, vertices);
+    vkCmdEndRendering(cmd);
+    image->transitionToTransferSrc(cmd);
+    VkBufferImageCopy copy{};
+    copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy.imageSubresource.layerCount = 1;
+    copy.imageExtent = {kW,kH,1};
+    vkCmdCopyImageToBuffer(cmd, image->handle(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           readback->handle(), 1, &copy);
+    VkBufferMemoryBarrier2 barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+    barrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    barrier.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+    barrier.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
+    barrier.buffer = readback->handle();
+    barrier.size = VK_WHOLE_SIZE;
+    VkDependencyInfo dep{};
+    dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dep.bufferMemoryBarrierCount = 1;
+    dep.pBufferMemoryBarriers = &barrier;
+    vkCmdPipelineBarrier2(cmd, &dep);
+    REQUIRE(vkEndCommandBuffer(cmd) == VK_SUCCESS);
+    VkCommandBufferSubmitInfo submitCmd{};
+    submitCmd.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+    submitCmd.commandBuffer = cmd;
+    VkSubmitInfo2 submit{};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+    submit.commandBufferInfoCount = 1;
+    submit.pCommandBufferInfos = &submitCmd;
+    REQUIRE(device->submit(1,&submit,fence) == VK_SUCCESS);
+    REQUIRE(vkWaitForFences(device->device(),1,&fence,VK_TRUE,UINT64_MAX) == VK_SUCCESS);
+
+    auto mapped = readback->map();
+    REQUIRE(mapped.has_value());
+    (void)readback->invalidate(0,kPixelBytes);
+    const auto* pixels = static_cast<const std::uint8_t*>(*mapped);
+    std::size_t lit = 0;
+    for (std::size_t i=0;i<kPixelBytes;i+=4)
+        if (pixels[i] > 100 && pixels[i+1] > 100) ++lit;
+    readback->unmap();
+    CHECK(lit > 400); // the whole HUD still renders, not an empty frame
     CHECK(context->validationErrorCount() == 0);
     vkDestroyFence(device->device(),fence,nullptr);
     vkFreeCommandBuffers(device->device(),pool,1,&cmd);

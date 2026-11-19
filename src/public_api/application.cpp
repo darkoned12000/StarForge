@@ -157,6 +157,9 @@ bool Application::isKeyDown(Key key) const noexcept
     case Key::Minus:
         platformKey = platform::PlatformKey::Minus;
         break;
+    case Key::M:
+        platformKey = platform::PlatformKey::M;
+        break;
     default:
         return false;
     }

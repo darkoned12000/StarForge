@@ -50,6 +50,7 @@ enum class PlatformKey
     Backspace,
     Equal,
     Minus,
+    M,
     Count,
 };
 

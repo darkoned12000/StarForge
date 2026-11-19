@@ -82,8 +82,10 @@ std::expected<UiRenderer, std::string> UiRenderer::create(const CreateInfo& info
     if (!allocator) return std::unexpected(allocator.error());
     impl->allocator = std::make_unique<Allocator>(std::move(*allocator));
 
-    // Capacity for a full screen of glyph quads (generous fixed pool).
-    impl->capacity = 256 * 1024;
+    // Capacity for thousands of glyph quads: a busy HUD (panels + bars +
+    // comms log + station buttons) can exceed 256 KB, which used to make
+    // the whole UI silently vanish until a message expired.
+    impl->capacity = 8 * 1024 * 1024;
     auto buffer = Buffer::create(*impl->allocator, {
         .size = impl->capacity, .usage = BufferUsage::Storage,
         .memory = MemoryPlacement::CpuToGpu});
@@ -135,7 +137,17 @@ void UiRenderer::render(VkCommandBuffer cmd, const std::vector<UiVertex>& vertic
 {
     if (!impl_ || !impl_->pipeline || vertices.empty()) return;
     const VkDeviceSize bytes = static_cast<VkDeviceSize>(vertices.size() * sizeof(UiVertex));
-    if (bytes > impl_->capacity) return;
+    if (bytes > impl_->capacity)
+    {
+        // Grow rather than drop the frame: a busy HUD must never disappear.
+        const VkDeviceSize needed = ((bytes / (2 * 1024 * 1024)) + 1) * 2 * 1024 * 1024;
+        auto grown = gpu_resources::Buffer::create(*impl_->allocator, {
+            .size = needed, .usage = gpu_resources::BufferUsage::Storage,
+            .memory = gpu_resources::MemoryPlacement::CpuToGpu});
+        if (!grown) return;
+        impl_->vertexBuffer = std::make_unique<gpu_resources::Buffer>(std::move(*grown));
+        impl_->capacity = needed;
+    }
 
     auto mapped = impl_->vertexBuffer->map();
     if (!mapped) return;
