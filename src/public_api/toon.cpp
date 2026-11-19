@@ -198,9 +198,24 @@ Toon::createMesh(std::span<const MeshVertex> vertices) const
 std::expected<Toon::ToonMesh, std::string>
 Toon::createMeshFromAsset(const MeshData& mesh) const
 {
+    static constexpr std::uint8_t kWhite[4] = {255, 255, 255, 255};
+    const bool hasTexture = mesh.material.hasBaseColorTexture && !mesh.material.textureRGBA.empty();
+    if (hasTexture)
+        return createMeshFromAsset(mesh, mesh.material.textureRGBA,
+                                   mesh.material.textureWidth, mesh.material.textureHeight);
+    return createMeshFromAsset(mesh, kWhite, 1u, 1u);
+}
+
+std::expected<Toon::ToonMesh, std::string>
+Toon::createMeshFromAsset(const MeshData& mesh, std::span<const std::uint8_t> rgba,
+                          std::uint32_t textureWidth, std::uint32_t textureHeight) const
+{
     if (!impl_ || !impl_->backend)
         return std::unexpected("Toon::createMeshFromAsset failed: Toon is moved-from");
     if (mesh.vertices.empty()) return std::unexpected("Asset mesh has no vertices");
+    if (textureWidth == 0 || textureHeight == 0 ||
+        rgba.size() < static_cast<std::size_t>(textureWidth) * textureHeight * 4)
+        return std::unexpected("Streamed texture has invalid dimensions or pixel count");
 
     // Weld by position and average normals to bake smooth outline normals.
     // Copying hard per-face normals would crack the inverted-hull outline at
@@ -232,14 +247,8 @@ Toon::createMeshFromAsset(const MeshData& mesh) const
         for (int c = 0; c < 4; ++c) raw[i].tangent[c] = v.tangent[c];
     }
 
-    static constexpr std::uint8_t kWhite[4] = {255, 255, 255, 255};
-    const bool hasTexture = mesh.material.hasBaseColorTexture && !mesh.material.textureRGBA.empty();
-    const std::uint8_t* pixels = hasTexture ? mesh.material.textureRGBA.data() : kWhite;
-    const std::uint32_t width = hasTexture ? mesh.material.textureWidth : 1u;
-    const std::uint32_t height = hasTexture ? mesh.material.textureHeight : 1u;
-
     auto backend = impl_->backend->createTexturedMesh(
-        raw.data(), static_cast<std::uint32_t>(raw.size()), pixels, width, height);
+        raw.data(), static_cast<std::uint32_t>(raw.size()), rgba.data(), textureWidth, textureHeight);
     if (!backend) return std::unexpected(backend.error());
     auto impl = std::make_unique<ToonMesh::Impl>();
     impl->backend = std::move(*backend);

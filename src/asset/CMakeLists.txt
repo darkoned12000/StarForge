@@ -6,6 +6,7 @@ add_library(starforge_asset STATIC
     material_mapping.cpp
     mesh_optimizer.cpp
     lod_chain.cpp
+    texture_streamer.cpp
 )
 
 target_link_libraries(starforge_asset

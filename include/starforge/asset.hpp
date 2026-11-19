@@ -93,6 +93,39 @@ enum class MaterialVariant
     Highlighted,
 };
 
+// M17.5: budgeted mip residency for streamed textures. Pixel data stays on
+// the CPU; callers upload the currently resident mip through Toon.
+class StreamingTexture
+{
+public:
+    static std::expected<StreamingTexture, std::string>
+    fromRGBA(std::uint32_t width, std::uint32_t height, std::span<const std::uint8_t> rgba,
+             std::size_t budgetBytes = 4u * 1024u * 1024u);
+
+    ~StreamingTexture();
+    StreamingTexture(StreamingTexture&&) noexcept;
+    StreamingTexture& operator=(StreamingTexture&&) noexcept;
+    StreamingTexture(const StreamingTexture&) = delete;
+    StreamingTexture& operator=(const StreamingTexture&) = delete;
+
+    [[nodiscard]] std::size_t mipCount() const noexcept;
+    [[nodiscard]] std::uint32_t width(std::size_t level) const noexcept;
+    [[nodiscard]] std::uint32_t height(std::size_t level) const noexcept;
+    [[nodiscard]] std::span<const std::uint8_t> data(std::size_t level) const noexcept;
+
+    [[nodiscard]] bool request(std::size_t level) noexcept;
+    [[nodiscard]] bool resident(std::size_t level) const noexcept;
+    [[nodiscard]] std::size_t selectMip(std::uint32_t screenPixels) const noexcept;
+    [[nodiscard]] std::size_t budget() const noexcept;
+    [[nodiscard]] std::size_t residentBytes() const noexcept;
+    void setBudget(std::size_t bytes) noexcept;
+
+private:
+    struct Impl;
+    explicit StreamingTexture(std::unique_ptr<Impl> impl) noexcept;
+    std::unique_ptr<Impl> impl_;
+};
+
 [[nodiscard]] ToonMaterialDesc mapAssetMaterial(const MeshMaterialData& material);
 [[nodiscard]] ToonMaterialDesc applyAssetMaterialVariant(const ToonMaterialDesc& base,
                                                          MaterialVariant variant);

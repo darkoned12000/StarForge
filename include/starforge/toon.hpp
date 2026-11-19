@@ -141,6 +141,12 @@ public:
     [[nodiscard]] std::expected<ToonMesh, std::string>
     createMeshFromAsset(const MeshData& mesh) const;
 
+    // M17.5: same as above but uploads a caller-supplied (streamed) mip as
+    // the base-colour texture instead of the embedded full-resolution one.
+    [[nodiscard]] std::expected<ToonMesh, std::string>
+    createMeshFromAsset(const MeshData& mesh, std::span<const std::uint8_t> rgba,
+                        std::uint32_t textureWidth, std::uint32_t textureHeight) const;
+
     // Records a draw with explicit mesh geometry (base + outline, or the
     // additive pass for emissive materials).
     void recordMesh(FrameContext& frameContext, const Context& context,

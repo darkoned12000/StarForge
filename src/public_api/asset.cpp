@@ -2,6 +2,7 @@
 
 #include "asset_bridge.hpp"
 #include "asset/material_mapping.hpp"
+#include "asset/texture_streamer.hpp"
 
 #include <cstdint>
 #include <fstream>
@@ -20,6 +21,12 @@ namespace bridge = public_api_bridge;
 struct Asset::Impl
 {
     std::vector<MeshData> meshes;
+};
+
+struct StreamingTexture::Impl
+{
+    asset::StreamingTexture texture;
+    explicit Impl(asset::StreamingTexture t) : texture(std::move(t)) {}
 };
 
 Asset::Asset(std::unique_ptr<Impl> impl) noexcept : impl_(std::move(impl)) {}
@@ -86,6 +93,61 @@ std::span<const MeshData> Asset::meshes() const noexcept
 {
     if (!impl_) return {};
     return impl_->meshes;
+}
+
+std::expected<StreamingTexture, std::string>
+StreamingTexture::fromRGBA(std::uint32_t width, std::uint32_t height,
+                           std::span<const std::uint8_t> rgba, std::size_t budgetBytes)
+{
+    if (width == 0 || height == 0 || rgba.size() < static_cast<std::size_t>(width) * height * 4)
+        return std::unexpected("Invalid RGBA texture dimensions or pixel count");
+    asset::TextureData base;
+    base.width = width;
+    base.height = height;
+    base.rgba.assign(rgba.begin(), rgba.end());
+    return StreamingTexture(std::make_unique<Impl>(
+        asset::StreamingTexture(std::move(base), budgetBytes)));
+}
+
+StreamingTexture::StreamingTexture(std::unique_ptr<Impl> impl) noexcept : impl_(std::move(impl)) {}
+StreamingTexture::~StreamingTexture() = default;
+StreamingTexture::StreamingTexture(StreamingTexture&&) noexcept = default;
+StreamingTexture& StreamingTexture::operator=(StreamingTexture&&) noexcept = default;
+
+std::size_t StreamingTexture::mipCount() const noexcept { return impl_ ? impl_->texture.mipCount() : 0; }
+std::uint32_t StreamingTexture::width(std::size_t level) const noexcept
+{
+    return impl_ ? impl_->texture.chain().level(level).width : 0;
+}
+std::uint32_t StreamingTexture::height(std::size_t level) const noexcept
+{
+    return impl_ ? impl_->texture.chain().level(level).height : 0;
+}
+std::span<const std::uint8_t> StreamingTexture::data(std::size_t level) const noexcept
+{
+    const auto* pixels = impl_ ? impl_->texture.data(level) : nullptr;
+    return pixels ? std::span<const std::uint8_t>(pixels->rgba) : std::span<const std::uint8_t>{};
+}
+bool StreamingTexture::request(std::size_t level) noexcept
+{
+    return impl_ && impl_->texture.request(level) != nullptr;
+}
+bool StreamingTexture::resident(std::size_t level) const noexcept
+{
+    return impl_ && impl_->texture.resident(level);
+}
+std::size_t StreamingTexture::selectMip(std::uint32_t screenPixels) const noexcept
+{
+    return impl_ ? impl_->texture.chain().selectLevel(screenPixels) : 0;
+}
+std::size_t StreamingTexture::budget() const noexcept { return impl_ ? impl_->texture.budget() : 0; }
+std::size_t StreamingTexture::residentBytes() const noexcept
+{
+    return impl_ ? impl_->texture.residentBytes() : 0;
+}
+void StreamingTexture::setBudget(std::size_t bytes) noexcept
+{
+    if (impl_) impl_->texture.setBudget(bytes);
 }
 
 namespace
