@@ -1,6 +1,8 @@
 add_library(starforge_asset STATIC
     gltf_loader.cpp
     asset_manager.cpp
+    file_watcher.cpp
+    hot_reload.cpp
 )
 
 target_include_directories(starforge_asset

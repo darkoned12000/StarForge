@@ -19,6 +19,7 @@ add_executable(starforge_tests
     test_version.cpp
     test_asset_gltf.cpp
     test_asset_manager.cpp
+    test_asset_hot_reload.cpp
     test_vulkan_version.cpp
     test_gpu_capabilities.cpp
     test_swapchain_selection.cpp
