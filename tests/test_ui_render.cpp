@@ -258,6 +258,16 @@ TEST_CASE("M16.3: composite UI panel golden (T3)")
     rects.push_back({mx+18,my-30,mx+30,my-28,bracket});
     rects.push_back({mx-30,my-30,mx-28,my-18,bracket});
     rects.push_back({mx+28,my-30,mx+30,my-18,bracket});
+    // Navigation radar rings + contacts (M16.6).
+    const std::array<float,4> ring{0.15f,0.35f,0.5f,1.0f};
+    const std::array<float,4> hostileDot{1.0f,0.25f,0.2f,1.0f};
+    const std::array<float,4> planetDot{0.2f,0.55f,1.0f,1.0f};
+    const float rr = 30.0f;
+    rects.push_back({mx-rr,my-1,mx+rr,my+1,ring});
+    rects.push_back({mx-1,my-rr,mx+1,my+rr,ring});
+    for (const auto& c : std::vector<std::pair<float,float>>{{-14.0f,-10.0f},{8.0f,-16.0f},{20.0f,7.0f}})
+        rects.push_back({mx+c.first,my+c.second,mx+c.first+3,my+c.second+3,hostileDot});
+    rects.push_back({mx-6,my-20,mx-3,my-17,planetDot});
 
     std::vector<environment::UiVertex> vertices;
     const auto ndc = [](float px, float py) -> std::array<float,4> {

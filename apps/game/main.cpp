@@ -26,6 +26,7 @@
 #include "game_simulation.hpp"
 #include "ship_controller.hpp"
 #include "targeting.hpp"
+#include "ui_radar.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -1065,7 +1066,7 @@ int main()
             const float hudScale = 3.0f;
             const float cx = static_cast<float>(size.width) * 0.5f;
             const float cy = static_cast<float>(size.height) * 0.5f;
-            uiCanvas->addPanel({.x = 16.0f, .y = 16.0f, .w = 320.0f, .h = 176.0f,
+            uiCanvas->addPanel({.x = 16.0f, .y = 16.0f, .w = 380.0f, .h = 180.0f,
                                 .outlineWidth = 2.0f,
                                 .fillColor = {0.05f, 0.09f, 0.18f, 0.85f}});
             const auto hudText = [&](float tx, float ty, const char* label, float value) {
@@ -1074,40 +1075,124 @@ int main()
                 uiCanvas->addText({.x = tx, .y = ty, .scale = hudScale,
                                    .color = {0.85f, 0.95f, 1.0f, 1.0f}, .text = buffer});
             };
-            hudText(28.0f, 26.0f, "THROTTLE", flight.throttle * 100.0f);
-            hudText(28.0f, 50.0f, "SPEED", starforge::game::targetSpeed(flight));
-            hudText(28.0f, 74.0f, "SHIELD", simulation.playerShield());
-            hudText(28.0f, 98.0f, "HULL", simulation.playerHull());
-            hudText(28.0f, 122.0f, "CREDITS", static_cast<float>(simulation.credits()));
-            hudText(28.0f, 146.0f, "CARGO", static_cast<float>(simulation.cargoUsed()));
-            uiCanvas->addBar({.x = 150.0f, .y = 82.0f, .w = 170.0f, .h = 10.0f,
-                              .value = simulation.playerShield() / 100.0f,
+            hudText(28.0f, 24.0f, "THROTTLE", flight.throttle * 100.0f);
+            hudText(28.0f, 48.0f, "SPEED", starforge::game::targetSpeed(flight));
+            // Shield / hull readouts live inside their bars.
+            const float shield = simulation.playerShield();
+            const float hull = simulation.playerHull();
+            uiCanvas->addBar({.x = 28.0f, .y = 80.0f, .w = 350.0f, .h = 24.0f,
+                              .value = shield / 100.0f,
                               .fillColor = {0.2f, 0.6f, 1.0f, 1.0f}});
-            uiCanvas->addBar({.x = 150.0f, .y = 106.0f, .w = 170.0f, .h = 10.0f,
-                              .value = simulation.playerHull() / 100.0f,
-                              .fillColor = {0.2f, 0.9f, 0.4f, 1.0f}});
-            // Crosshair: four short strokes around screen centre.
-            const auto reticle = starforge::math::Vec4f{1.0f, 1.0f, 1.0f, 0.9f};
-            uiCanvas->addRect({.x = cx - 18.0f, .y = cy - 1.0f, .w = 10.0f, .h = 2.0f, .color = reticle});
-            uiCanvas->addRect({.x = cx + 8.0f, .y = cy - 1.0f, .w = 10.0f, .h = 2.0f, .color = reticle});
-            uiCanvas->addRect({.x = cx - 1.0f, .y = cy - 18.0f, .w = 2.0f, .h = 10.0f, .color = reticle});
-            uiCanvas->addRect({.x = cx - 1.0f, .y = cy + 8.0f, .w = 2.0f, .h = 10.0f, .color = reticle});
-            // Selected target bracket + lock bar.
-            if (const auto* target = targeting.selected())
+            char shieldLabel[32];
+            std::snprintf(shieldLabel, sizeof(shieldLabel), "SHIELD %.0f", shield);
+            uiCanvas->addText({.x = 34.0f, .y = 83.0f, .scale = hudScale,
+                               .color = {0.02f, 0.05f, 0.1f, 1.0f}, .text = shieldLabel});
+            // Hull bar colour tracks remaining health.
+            const starforge::math::Vec4f hullColor =
+                hull >= 75.0f ? starforge::math::Vec4f{0.2f, 0.9f, 0.4f, 1.0f}
+              : hull >= 50.0f ? starforge::math::Vec4f{0.95f, 0.9f, 0.2f, 1.0f}
+              : hull >= 25.0f ? starforge::math::Vec4f{1.0f, 0.55f, 0.15f, 1.0f}
+                              : starforge::math::Vec4f{1.0f, 0.2f, 0.2f, 1.0f};
+            uiCanvas->addBar({.x = 28.0f, .y = 112.0f, .w = 350.0f, .h = 24.0f,
+                              .value = hull / 100.0f, .fillColor = hullColor});
+            char hullLabel[32];
+            std::snprintf(hullLabel, sizeof(hullLabel), "HULL %.0f", hull);
+            uiCanvas->addText({.x = 34.0f, .y = 115.0f, .scale = hudScale,
+                               .color = {0.02f, 0.05f, 0.1f, 1.0f}, .text = hullLabel});
+            hudText(28.0f, 148.0f, "CREDITS", static_cast<float>(simulation.credits()));
+            hudText(252.0f, 148.0f, "CARGO", static_cast<float>(simulation.cargoUsed()));
+
+            // Crosshair: four strokes + centre dot, all around screen centre.
+            const auto reticle = starforge::math::Vec4f{1.0f, 1.0f, 1.0f, 0.95f};
+            uiCanvas->addRect({.x = cx - 20.0f, .y = cy - 1.0f, .w = 12.0f, .h = 2.0f, .color = reticle});
+            uiCanvas->addRect({.x = cx + 8.0f, .y = cy - 1.0f, .w = 12.0f, .h = 2.0f, .color = reticle});
+            uiCanvas->addRect({.x = cx - 1.0f, .y = cy - 20.0f, .w = 2.0f, .h = 12.0f, .color = reticle});
+            uiCanvas->addRect({.x = cx - 1.0f, .y = cy + 8.0f, .w = 2.0f, .h = 12.0f, .color = reticle});
+            uiCanvas->addRect({.x = cx - 2.0f, .y = cy - 2.0f, .w = 4.0f, .h = 4.0f, .color = reticle});
+            // Target bracket only for a hostile; stations appear on radar only.
+            if (const auto* target = targeting.selected(); target && target->hostile)
             {
-                const starforge::math::Vec4f tc = target->hostile
-                    ? starforge::math::Vec4f{1.0f, 0.3f, 0.2f, 1.0f}
-                    : starforge::math::Vec4f{0.3f, 0.8f, 1.0f, 1.0f};
+                const starforge::math::Vec4f tc{1.0f, 0.3f, 0.2f, 1.0f};
                 const float bx = cx - 30.0f, by = cy - 30.0f;
                 uiCanvas->addRect({.x = bx, .y = by, .w = 12.0f, .h = 2.0f, .color = tc});
                 uiCanvas->addRect({.x = bx + 48.0f, .y = by, .w = 12.0f, .h = 2.0f, .color = tc});
+                uiCanvas->addRect({.x = bx, .y = by + 58.0f, .w = 12.0f, .h = 2.0f, .color = tc});
+                uiCanvas->addRect({.x = bx + 48.0f, .y = by + 58.0f, .w = 12.0f, .h = 2.0f, .color = tc});
                 uiCanvas->addRect({.x = bx, .y = by, .w = 2.0f, .h = 12.0f, .color = tc});
                 uiCanvas->addRect({.x = bx + 58.0f, .y = by, .w = 2.0f, .h = 12.0f, .color = tc});
-                uiCanvas->addText({.x = cx - 60.0f, .y = cy + 36.0f, .scale = 2.0f, .color = tc,
-                                   .text = target->id});
+                uiCanvas->addRect({.x = bx, .y = by + 48.0f, .w = 2.0f, .h = 12.0f, .color = tc});
+                uiCanvas->addRect({.x = bx + 58.0f, .y = by + 48.0f, .w = 2.0f, .h = 12.0f, .color = tc});
                 if (targeting.lockProgress() > 0.0f)
-                    uiCanvas->addBar({.x = cx - 40.0f, .y = cy + 56.0f, .w = 80.0f, .h = 6.0f,
+                    uiCanvas->addBar({.x = cx - 40.0f, .y = cy + 44.0f, .w = 80.0f, .h = 6.0f,
                                       .value = targeting.lockProgress(), .fillColor = tc});
+            }
+            // M16.6: navigation radar (bottom-right) + destination readout.
+            {
+                constexpr float kRadarRange = 2000.0f;
+                constexpr float kRadarRadius = 72.0f;
+                const float rx = static_cast<float>(size.width) - 176.0f;
+                const float ry = static_cast<float>(size.height) - 176.0f;
+                const float ccx = rx + 80.0f;
+                const float ccy = ry + 88.0f;
+                uiCanvas->addPanel({.x = rx, .y = ry, .w = 160.0f, .h = 160.0f,
+                                    .outlineWidth = 2.0f,
+                                    .fillColor = {0.04f, 0.08f, 0.14f, 0.85f}});
+                const starforge::math::Vec4f ringColor{0.15f, 0.35f, 0.5f, 1.0f};
+                for (float r : {kRadarRadius * 0.5f, kRadarRadius})
+                {
+                    uiCanvas->addRect({.x = ccx - r, .y = ccy - 1.0f, .w = 2.0f * r, .h = 1.0f, .color = ringColor});
+                    uiCanvas->addRect({.x = ccx - r, .y = ccy + r - 1.0f, .w = 2.0f * r, .h = 1.0f, .color = ringColor});
+                    uiCanvas->addRect({.x = ccx - 1.0f, .y = ccy - r, .w = 1.0f, .h = 2.0f * r, .color = ringColor});
+                    uiCanvas->addRect({.x = ccx + r - 1.0f, .y = ccy - r, .w = 1.0f, .h = 2.0f * r, .color = ringColor});
+                }
+                const auto radarColor = [](starforge::game::RadarKind kind) -> starforge::math::Vec4f {
+                    switch (kind)
+                    {
+                    case starforge::game::RadarKind::Hostile: return {1.0f, 0.25f, 0.2f, 1.0f};
+                    case starforge::game::RadarKind::Planet:  return {0.2f, 0.55f, 1.0f, 1.0f};
+                    case starforge::game::RadarKind::Station: return {0.3f, 1.0f, 0.6f, 1.0f};
+                    default:                                  return {0.7f, 0.7f, 0.7f, 1.0f};
+                    }
+                };
+                const auto plot = [&](const char* id, float x, float z,
+                                      starforge::game::RadarKind kind) {
+                    const auto p = starforge::game::projectRadar(
+                        {id, x, -z, kind}, kRadarRange, kRadarRadius);
+                    if (!p.visible) return;
+                    uiCanvas->addRect({.x = ccx + p.x, .y = ccy + p.y, .w = 3.0f, .h = 3.0f,
+                                       .color = radarColor(kind)});
+                };
+                plot("planet", planetRel.x(), planetRel.z(), starforge::game::RadarKind::Planet);
+                plot("station-a", 400.0f, -1200.0f, starforge::game::RadarKind::Station);
+                const auto hostile = simulation.hostile();
+                if (hostile.alive)
+                    plot("hostile", hostile.position.x, hostile.position.z,
+                         starforge::game::RadarKind::Hostile);
+                int radarRocks = 0;
+                for (const auto* rock : sorted)
+                {
+                    if (radarRocks++ >= 12) break; // keep the radar readable
+                    plot("rock", static_cast<float>(rock->position.x),
+                         static_cast<float>(rock->position.z), starforge::game::RadarKind::Rock);
+                }
+                uiCanvas->addRect({.x = ccx - 2.0f, .y = ccy - 2.0f, .w = 4.0f, .h = 4.0f,
+                                   .color = {1.0f, 1.0f, 1.0f, 1.0f}}); // player
+                uiCanvas->addText({.x = rx + 8.0f, .y = ry + 4.0f, .scale = 2.0f,
+                                   .color = {0.6f, 0.9f, 1.0f, 1.0f}, .text = "RADAR 2km"});
+                if (const auto* target = targeting.selected())
+                {
+                    const auto p = starforge::game::projectRadar(
+                        {target->id, target->id == "hostile-1" ? hostile.position.x : 400.0f,
+                         target->id == "hostile-1" ? -hostile.position.z : 1200.0f,
+                         target->hostile ? starforge::game::RadarKind::Hostile
+                                         : starforge::game::RadarKind::Station},
+                        kRadarRange, kRadarRadius);
+                    char nav[64];
+                    std::snprintf(nav, sizeof(nav), "TGT %.0fm BRG %.0f", p.distance, p.bearing);
+                    uiCanvas->addText({.x = 16.0f, .y = static_cast<float>(size.height) - 28.0f,
+                                       .scale = 2.0f,
+                                       .color = {0.8f, 0.95f, 1.0f, 1.0f}, .text = nav});
+                }
             }
             uiCanvas->record(fc);
 

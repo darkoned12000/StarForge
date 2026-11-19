@@ -73,6 +73,7 @@ add_executable(starforge_tests
     test_ui_text.cpp
     test_ui_state.cpp
     test_targeting.cpp
+    test_ui_radar.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/game_bridge.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/game_simulation.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/ui_state.cpp
