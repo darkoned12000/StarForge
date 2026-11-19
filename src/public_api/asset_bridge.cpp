@@ -34,7 +34,17 @@ RawAsset::loadFromMemory(const std::uint8_t* data, std::size_t size)
         converted.material.baseColorFactor[1] = mesh.material.baseColorFactor[1];
         converted.material.baseColorFactor[2] = mesh.material.baseColorFactor[2];
         converted.material.baseColorFactor[3] = mesh.material.baseColorFactor[3];
+        for (int i = 0; i < 4; ++i)
+            converted.material.emissiveFactor[i] = mesh.material.emissiveFactor[i];
+        converted.material.metallicFactor = mesh.material.metallicFactor;
+        converted.material.roughnessFactor = mesh.material.roughnessFactor;
         converted.material.hasBaseColorTexture = mesh.material.hasBaseColorTexture;
+        converted.material.hasNormalTexture = mesh.material.hasNormalTexture;
+        converted.material.hasMetallicRoughnessTexture = mesh.material.hasMetallicRoughnessTexture;
+        converted.material.hasOcclusionTexture = mesh.material.hasOcclusionTexture;
+        converted.material.hasEmissiveTexture = mesh.material.hasEmissiveTexture;
+        converted.material.doubleSided = mesh.material.doubleSided;
+        converted.material.alphaMode = mesh.material.alphaMode;
         converted.material.textureWidth = mesh.material.baseColorTexture.width;
         converted.material.textureHeight = mesh.material.baseColorTexture.height;
         converted.material.textureRGBA = mesh.material.baseColorTexture.rgba;

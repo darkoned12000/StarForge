@@ -20,6 +20,7 @@ add_executable(starforge_tests
     test_asset_gltf.cpp
     test_asset_manager.cpp
     test_asset_hot_reload.cpp
+    test_asset_material.cpp
     test_vulkan_version.cpp
     test_gpu_capabilities.cpp
     test_swapchain_selection.cpp
@@ -116,6 +117,7 @@ target_link_libraries(starforge_tests
 add_executable(starforge_public_api_tests
     main.cpp
     test_public_application.cpp
+    test_public_asset.cpp
     test_public_audio.cpp
     test_public_math_world.cpp
     test_public_renderer.cpp

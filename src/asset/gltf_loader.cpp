@@ -152,6 +152,20 @@ MaterialData readMaterial(const json& root, int materialIndex, const std::uint8_
     if (static_cast<std::size_t>(materialIndex) >= materials.size()) return material;
     const auto& source = materials[materialIndex];
     material.name = source.value("name", "");
+    material.doubleSided = source.value("doubleSided", false);
+    material.alphaMode = source.value("alphaMode", std::string("OPAQUE"));
+    if (source.contains("emissiveFactor") && source["emissiveFactor"].is_array())
+    {
+        const auto& factor = source["emissiveFactor"];
+        for (std::size_t i = 0; i < std::min<std::size_t>(3, factor.size()); ++i)
+            material.emissiveFactor[i] = factor[i].get<float>();
+    }
+    const auto hasTextureSlot = [&](const char* slot) {
+        return source.contains(slot) && source[slot].contains("index") && root.contains("textures");
+    };
+    material.hasNormalTexture = hasTextureSlot("normalTexture");
+    material.hasOcclusionTexture = hasTextureSlot("occlusionTexture");
+    material.hasEmissiveTexture = hasTextureSlot("emissiveTexture");
     if (source.contains("pbrMetallicRoughness"))
     {
         const auto& pbr = source["pbrMetallicRoughness"];
@@ -163,6 +177,11 @@ MaterialData readMaterial(const json& root, int materialIndex, const std::uint8_
                 material.baseColorFactor[i] = factor[i].get<float>();
             }
         }
+        material.metallicFactor = pbr.value("metallicFactor", 0.0f);
+        material.roughnessFactor = pbr.value("roughnessFactor", 1.0f);
+        material.hasMetallicRoughnessTexture =
+            pbr.contains("metallicRoughnessTexture") && pbr["metallicRoughnessTexture"].contains("index") &&
+            root.contains("textures");
         if (pbr.contains("baseColorTexture") && pbr["baseColorTexture"].contains("index") &&
             root.contains("textures"))
         {

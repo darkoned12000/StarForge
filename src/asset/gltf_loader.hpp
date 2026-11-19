@@ -26,7 +26,16 @@ struct TextureData
 struct MaterialData
 {
     float baseColorFactor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    float emissiveFactor[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    float metallicFactor = 0.0f;
+    float roughnessFactor = 1.0f;
     bool hasBaseColorTexture = false;
+    bool hasNormalTexture = false;
+    bool hasMetallicRoughnessTexture = false;
+    bool hasOcclusionTexture = false;
+    bool hasEmissiveTexture = false;
+    bool doubleSided = false;
+    std::string alphaMode = "OPAQUE";
     TextureData baseColorTexture;
     std::string name;
 };

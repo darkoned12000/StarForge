@@ -22,7 +22,16 @@ struct RawAssetVertex
 struct RawAssetMaterial
 {
     float baseColorFactor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    float emissiveFactor[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    float metallicFactor = 0.0f;
+    float roughnessFactor = 1.0f;
     bool hasBaseColorTexture = false;
+    bool hasNormalTexture = false;
+    bool hasMetallicRoughnessTexture = false;
+    bool hasOcclusionTexture = false;
+    bool hasEmissiveTexture = false;
+    bool doubleSided = false;
+    std::string alphaMode = "OPAQUE";
     std::uint32_t textureWidth = 0;
     std::uint32_t textureHeight = 0;
     std::vector<std::uint8_t> textureRGBA;

@@ -3,6 +3,7 @@ add_library(starforge_asset STATIC
     asset_manager.cpp
     file_watcher.cpp
     hot_reload.cpp
+    material_mapping.cpp
 )
 
 target_include_directories(starforge_asset

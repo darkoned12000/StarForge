@@ -8,6 +8,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace starforge
@@ -27,12 +28,75 @@ struct MeshVertexData
 struct MeshMaterialData
 {
     math::Vec4f baseColorFactor{1.0f, 1.0f, 1.0f, 1.0f};
+    math::Vec4f emissiveFactor{0.0f, 0.0f, 0.0f, 1.0f};
+    float metallicFactor = 0.0f;
+    float roughnessFactor = 1.0f;
     bool hasBaseColorTexture = false;
+    bool hasNormalTexture = false;
+    bool hasMetallicRoughnessTexture = false;
+    bool hasOcclusionTexture = false;
+    bool hasEmissiveTexture = false;
+    bool doubleSided = false;
+    std::string alphaMode = "OPAQUE";
     std::uint32_t textureWidth = 0;
     std::uint32_t textureHeight = 0;
     std::vector<std::uint8_t> textureRGBA; // decoded RGBA8 pixels
     std::string name;
 };
+
+// Capability bits understood by Toon::Params::capabilities. This enum mirrors
+// starforge::ToonCapability but lives here so asset.hpp stays self-contained.
+enum class AssetToonCapability : std::uint32_t
+{
+    None = 0,
+    Emissive = 1,
+    Fresnel = 2,
+    Faceted = 4,
+    ScatteringRim = 8,
+    ShadowDetail = 16,
+    Textured = 32,
+};
+
+constexpr AssetToonCapability operator|(AssetToonCapability a, AssetToonCapability b) noexcept
+{
+    return static_cast<AssetToonCapability>(static_cast<std::uint32_t>(a) |
+                                            static_cast<std::uint32_t>(b));
+}
+constexpr AssetToonCapability operator&(AssetToonCapability a, AssetToonCapability b) noexcept
+{
+    return static_cast<AssetToonCapability>(static_cast<std::uint32_t>(a) &
+                                            static_cast<std::uint32_t>(b));
+}
+
+// glTF PBR material mapped onto the toon material model.
+struct ToonMaterialDesc
+{
+    std::uint32_t capabilities = 0;
+    math::Vec4f baseColor{1.0f, 1.0f, 1.0f, 1.0f};
+    math::Vec4f shadowColor{0.2f, 0.1f, 0.15f, 1.0f};
+    math::Vec4f midColor{0.6f, 0.4f, 0.4f, 1.0f};
+    math::Vec4f emissiveColor{0.0f, 0.0f, 0.0f, 1.0f};
+    math::Vec4f fresnelColor{0.3f, 0.7f, 1.0f, 1.0f};
+    float bandCount = 3.0f;
+    float rimStrength = 0.6f;
+    float outlineWidth = 2.0f;
+    float fresnelPower = 3.0f;
+    bool doubleSided = false;
+    std::string name;
+};
+
+enum class MaterialVariant
+{
+    Default,
+    Damaged,
+    Shielded,
+    Highlighted,
+};
+
+[[nodiscard]] ToonMaterialDesc mapAssetMaterial(const MeshMaterialData& material);
+[[nodiscard]] ToonMaterialDesc applyAssetMaterialVariant(const ToonMaterialDesc& base,
+                                                         MaterialVariant variant);
+[[nodiscard]] std::string_view materialVariantName(MaterialVariant variant) noexcept;
 
 struct MeshData
 {
