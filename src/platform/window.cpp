@@ -6,6 +6,7 @@
 #include <SDL3/SDL_vulkan.h>
 
 #include <format>
+#include <string>
 #include <utility>
 
 namespace starforge::platform
@@ -178,6 +179,12 @@ void Window::pollEvents()
             case SDL_SCANCODE_TAB:
                 keyDown_[static_cast<std::size_t>(PlatformKey::Tab)] = down;
                 break;
+            case SDL_SCANCODE_RETURN:
+                keyDown_[static_cast<std::size_t>(PlatformKey::Return)] = down;
+                break;
+            case SDL_SCANCODE_BACKSPACE:
+                keyDown_[static_cast<std::size_t>(PlatformKey::Backspace)] = down;
+                break;
             default:
                 break;
             }
@@ -209,6 +216,9 @@ void Window::pollEvents()
             break;
         case SDL_EVENT_MOUSE_WHEEL:
             mouseScrollY_ += event.wheel.y;
+            break;
+        case SDL_EVENT_TEXT_INPUT:
+            if (event.text.text) textInput_ += event.text.text;
             break;
         case SDL_EVENT_WINDOW_FOCUS_LOST:
         {
@@ -260,6 +270,11 @@ void Window::takeMouseMotion(float& dxOut, float& dyOut, float& scrollOut) noexc
     dxOut = std::exchange(mouseMotionX_, 0.0f);
     dyOut = std::exchange(mouseMotionY_, 0.0f);
     scrollOut = std::exchange(mouseScrollY_, 0.0f);
+}
+
+void Window::takeTextInput(std::string& out)
+{
+    out = std::exchange(textInput_, std::string{});
 }
 
 void Window::mousePosition(float& xOut, float& yOut) const noexcept

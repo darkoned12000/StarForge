@@ -26,6 +26,7 @@
 #include "game_simulation.hpp"
 #include "ship_controller.hpp"
 #include "targeting.hpp"
+#include "ui_comms.hpp"
 #include "ui_radar.hpp"
 
 #include <algorithm>
@@ -111,6 +112,8 @@ struct InputTracker
     bool prevLeft = false;
     bool prevRight = false;
     bool prevTab = false;
+    bool prevReturn = false;
+    bool prevBackspace = false;
 };
 
 [[nodiscard]] starforge::game::InputEdge readInput(starforge::Application& app, InputTracker& tracker)
@@ -164,7 +167,8 @@ struct UiTracker
 };
 
 void handleUiActions(starforge::Application& app, UiTracker& tracker,
-                     starforge::game::GameSimulation& simulation)
+                     starforge::game::GameSimulation& simulation,
+                     starforge::game::CommsLog& comms)
 {
     const bool up = app.isKeyDown(starforge::Key::Up);
     const bool down = app.isKeyDown(starforge::Key::Down);
@@ -186,7 +190,11 @@ void handleUiActions(starforge::Application& app, UiTracker& tracker,
     if (dockEdge)
     {
         simulation.updateDocking(20.0, 0.0, "station-a");
-        if (simulation.dock("station-a", "slot-1")) logInfo("[TRADE] docked at station-a");
+        if (simulation.dock("station-a", "slot-1"))
+        {
+            logInfo("[TRADE] docked at station-a");
+            comms.push(starforge::game::CommsChannel::Trade, "station-a", "Docking granted");
+        }
     }
     if (undockEdge)
     {
@@ -195,28 +203,57 @@ void handleUiActions(starforge::Application& app, UiTracker& tracker,
     }
     if (buyEdge)
     {
-        if (simulation.buy("station-a", "ore", 5)) logInfo("[TRADE] bought 5 ore");
-        else logError(simulation.lastTradeError().c_str());
+        if (simulation.buy("station-a", "ore", 5))
+        {
+            logInfo("[TRADE] bought 5 ore");
+            comms.push(starforge::game::CommsChannel::Trade, "station-a", "Bought 5 ore");
+        }
+        else
+        {
+            logError(simulation.lastTradeError().c_str());
+            comms.push(starforge::game::CommsChannel::System, "system", simulation.lastTradeError());
+        }
     }
     if (sellEdge)
     {
-        if (simulation.sell("station-a", "ore", 5)) logInfo("[TRADE] sold 5 ore");
-        else logError(simulation.lastTradeError().c_str());
+        if (simulation.sell("station-a", "ore", 5))
+        {
+            logInfo("[TRADE] sold 5 ore");
+            comms.push(starforge::game::CommsChannel::Trade, "station-a", "Sold 5 ore");
+        }
+        else
+        {
+            logError(simulation.lastTradeError().c_str());
+            comms.push(starforge::game::CommsChannel::System, "system", simulation.lastTradeError());
+        }
     }
     if (acceptEdge)
     {
-        if (simulation.acceptMission("haul-ore")) logInfo("[MISSION] accepted haul-ore");
+        if (simulation.acceptMission("haul-ore"))
+        {
+            logInfo("[MISSION] accepted haul-ore");
+            comms.push(starforge::game::CommsChannel::System, "missions", "Contract accepted: Ore Haul");
+        }
     }
     if (completeEdge)
     {
         if (simulation.deliverMission("haul-ore", "ore", 10, "station-b") &&
             simulation.completeMission("haul-ore", "station-b"))
             logInfo("[MISSION] haul-ore complete");
+            comms.push(starforge::game::CommsChannel::System, "missions", "Ore Haul complete: +500 cr");
     }
     if (jumpEdge)
     {
-        if (simulation.jump("alpha-centauri", 1.5f)) logInfo("[JUMP] entered alpha-centauri");
-        else logError("[JUMP] beyond range - complete the haul mission first");
+        if (simulation.jump("alpha-centauri", 1.5f))
+        {
+            logInfo("[JUMP] entered alpha-centauri");
+            comms.push(starforge::game::CommsChannel::System, "nav", "Jumped to alpha-centauri");
+        }
+        else
+        {
+            logError("[JUMP] beyond range - complete the haul mission first");
+            comms.push(starforge::game::CommsChannel::System, "nav", "Jump range insufficient");
+        }
     }
 }
 
@@ -333,6 +370,8 @@ int main()
     starforge::game::FlightState flight;
     starforge::game::GameSimulation simulation;
     starforge::game::TargetingState targeting;
+    starforge::game::CommsLog comms;
+    starforge::game::TextEntry textEntry;
     simulation.spawnHostile();
     logInfo("First Flight: ship + hostile + trading loop ready. W/S throttle, mouse steer, Space UI, P pause.");
 
@@ -529,8 +568,29 @@ int main()
         // UI-mode trading / mission / jump actions.
         if (flight.mode == starforge::game::FlightMode::Ui && !flight.paused)
         {
-            handleUiActions(*app, uiTracker, simulation);
+            handleUiActions(*app, uiTracker, simulation, comms);
+            // M16.7: chat text entry (SDL text input, not key-code mapping).
+            textEntry.append(app->takeTextInput());
+            const bool backspace = app->isKeyDown(starforge::Key::Backspace);
+            if (backspace && !inputTracker.prevBackspace) textEntry.backspace();
+            inputTracker.prevBackspace = backspace;
+            const bool enter = app->isKeyDown(starforge::Key::Return);
+            if (enter && !inputTracker.prevReturn)
+            {
+                const std::string line = textEntry.submit();
+                if (!line.empty())
+                {
+                    comms.push(starforge::game::CommsChannel::Local, "you", line);
+                    logInfo(("[CHAT] " + line).c_str());
+                }
+            }
+            inputTracker.prevReturn = enter;
         }
+        else
+        {
+            app->takeTextInput(); // drain typing while flying
+        }
+        comms.tick(frameDt);
 
         // --- Fixed-step simulation (M15.0.1) + streaming (M15.0.3) ---
         if (!flight.paused)
@@ -580,6 +640,8 @@ int main()
                     if (hitVoice.has_value()) audio->play(*hitVoice, true);
                     break;
                 case starforge::game::GameEvent::Type::HostileDestroyed:
+                    comms.push(starforge::game::CommsChannel::Combat, "combat",
+                               "Hostile destroyed");
                     explosionTimer = 1.0f;
                     explosionPos = simulation.hostile().position;
                     if (boomVoice.has_value()) audio->play(*boomVoice, true);
@@ -631,8 +693,14 @@ int main()
                         flight.mode == starforge::game::FlightMode::Ui ? "UI" : "FLIGHT");
             if (flight.mode == starforge::game::FlightMode::Ui)
             {
+                textEntry.begin(">");
                 std::printf("[UI] Up=dock  Down=undock  Left=buy 5 ore  Right=sell 5 ore\n");
                 std::printf("[UI] W=accept haul-ore  S=deliver+complete  A=jump (needs unlock)\n");
+                std::printf("[UI] Type to chat, Enter=send, Backspace=delete\n");
+            }
+            else
+            {
+                textEntry.end();
             }
             std::fflush(stdout);
             lastMode = flight.mode;
@@ -1193,6 +1261,42 @@ int main()
                                        .scale = 2.0f,
                                        .color = {0.8f, 0.95f, 1.0f, 1.0f}, .text = nav});
                 }
+            }
+            // M16.7: comms log + chat entry in UI mode.
+            if (flight.mode == starforge::game::FlightMode::Ui)
+            {
+                const float px = static_cast<float>(size.width) * 0.5f - 260.0f;
+                const float py = static_cast<float>(size.height) - 300.0f;
+                uiCanvas->addPanel({.x = px, .y = py, .w = 520.0f, .h = 280.0f,
+                                    .outlineWidth = 2.0f,
+                                    .fillColor = {0.04f, 0.08f, 0.14f, 0.9f},
+                                    .accentColor = {0.3f, 0.8f, 1.0f, 1.0f}});
+                uiCanvas->addText({.x = px + 10.0f, .y = py + 8.0f, .scale = 2.0f,
+                                   .color = {0.4f, 0.9f, 1.0f, 1.0f}, .text = "COMMS"});
+                auto channelColor = [](starforge::game::CommsChannel c) -> starforge::math::Vec4f {
+                    switch (c)
+                    {
+                    case starforge::game::CommsChannel::Combat: return {1.0f, 0.35f, 0.25f, 1.0f};
+                    case starforge::game::CommsChannel::Trade:  return {0.3f, 1.0f, 0.6f, 1.0f};
+                    case starforge::game::CommsChannel::Local:  return {1.0f, 1.0f, 0.7f, 1.0f};
+                    default:                                    return {0.6f, 0.75f, 1.0f, 1.0f};
+                    }
+                };
+                const auto& log = comms.messages();
+                const std::size_t start = log.size() > 9 ? log.size() - 9 : 0;
+                for (std::size_t i = start; i < log.size(); ++i)
+                {
+                    const auto& m = log[i];
+                    std::string line = m.sender + ": " + m.text;
+                    if (line.size() > 62) line.resize(62);
+                    uiCanvas->addText({.x = px + 10.0f,
+                                       .y = py + 30.0f + static_cast<float>(i - start) * 18.0f,
+                                       .scale = 2.0f, .color = channelColor(m.channel), .text = line});
+                }
+                std::string entry = textEntry.prompt() + textEntry.text();
+                if (entry.empty()) entry = ">";
+                uiCanvas->addText({.x = px + 10.0f, .y = py + 250.0f, .scale = 2.0f,
+                                   .color = {1.0f, 1.0f, 1.0f, 1.0f}, .text = entry});
             }
             uiCanvas->record(fc);
 

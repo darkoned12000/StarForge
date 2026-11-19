@@ -268,6 +268,12 @@ TEST_CASE("M16.3: composite UI panel golden (T3)")
     for (const auto& c : std::vector<std::pair<float,float>>{{-14.0f,-10.0f},{8.0f,-16.0f},{20.0f,7.0f}})
         rects.push_back({mx+c.first,my+c.second,mx+c.first+3,my+c.second+3,hostileDot});
     rects.push_back({mx-6,my-20,mx-3,my-17,planetDot});
+    // Comms log lines + entry prompt (M16.7).
+    const std::array<float,4> commsColor{0.6f,0.9f,1.0f,1.0f};
+    for (const auto& g : gameplay::ui_text::textQuads("COMMS", 8.0f, 100.0f, 1.0f))
+        rects.push_back({g.x0,g.y0,g.x1,g.y1,commsColor});
+    for (const auto& g : gameplay::ui_text::textQuads(">hi", 8.0f, 112.0f, 1.0f))
+        rects.push_back({g.x0,g.y0,g.x1,g.y1,reticle});
 
     std::vector<environment::UiVertex> vertices;
     const auto ndc = [](float px, float py) -> std::array<float,4> {

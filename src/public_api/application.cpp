@@ -145,6 +145,12 @@ bool Application::isKeyDown(Key key) const noexcept
     case Key::Tab:
         platformKey = platform::PlatformKey::Tab;
         break;
+    case Key::Return:
+        platformKey = platform::PlatformKey::Return;
+        break;
+    case Key::Backspace:
+        platformKey = platform::PlatformKey::Backspace;
+        break;
     default:
         return false;
     }
@@ -205,6 +211,13 @@ MouseMotion Application::takeMouseMotion() noexcept
         impl_->window.takeMouseMotion(dx, dy, scroll);
     }
     return MouseMotion{.dx = dx, .dy = dy, .scrollY = scroll};
+}
+
+std::string Application::takeTextInput()
+{
+    std::string text;
+    if (impl_) impl_->window.takeTextInput(text);
+    return text;
 }
 
 void Application::setRelativeMouseMode(bool enabled) noexcept

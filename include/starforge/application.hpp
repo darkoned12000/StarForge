@@ -56,6 +56,8 @@ public:
     // Absolute cursor position in window coordinates (UI mode).
     [[nodiscard]] MousePosition mousePosition() const noexcept;
     [[nodiscard]] MouseMotion takeMouseMotion() noexcept;
+    // UTF-8 typed characters since the last take (SDL text input).
+    [[nodiscard]] std::string takeTextInput();
     void setRelativeMouseMode(bool enabled) noexcept;
 
 private:

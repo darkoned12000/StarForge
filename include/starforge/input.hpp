@@ -22,6 +22,8 @@ enum class Key
     Right,
     LeftShift,
     Tab,
+    Return,
+    Backspace,
     Count,
 };
 

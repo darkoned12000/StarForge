@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
@@ -44,6 +46,8 @@ enum class PlatformKey
     Right,
     LeftShift,
     Tab,
+    Return,
+    Backspace,
     Count,
 };
 
@@ -84,6 +88,8 @@ public:
     [[nodiscard]] void takeMouseMotion(float& dxOut, float& dyOut, float& scrollOut) noexcept;
     // Absolute cursor position in window coordinates (top-left origin).
     [[nodiscard]] void mousePosition(float& xOut, float& yOut) const noexcept;
+    // Typed UTF-8 characters accumulated from SDL text-input events.
+    [[nodiscard]] void takeTextInput(std::string& out);
     void setRelativeMouseMode(bool enabled) noexcept;
 
     // Instance extensions the windowing system needs for Vulkan presentation.
@@ -107,6 +113,7 @@ private:
     float       mouseMotionX_ = 0.0f;
     float       mouseMotionY_ = 0.0f;
     float       mouseScrollY_ = 0.0f;
+    std::string textInput_;
 };
 
 } // namespace starforge::platform
