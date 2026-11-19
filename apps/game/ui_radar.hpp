@@ -4,9 +4,30 @@
 // planar coordinates: x = right, forward = ahead. Screen y grows downward.
 #include <cmath>
 #include <string>
+#include <utility>
 
 namespace starforge::game
 {
+
+// Plain 3-vector used by the radar transform (no backend math types).
+struct RadarVec3
+{
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+};
+
+// Converts a camera-relative WORLD offset into ship-local (right, ahead)
+// coordinates using the ship's world-space basis vectors.
+[[nodiscard]] inline std::pair<float, float> toShipLocal(
+    const RadarVec3& worldOffset, const RadarVec3& shipRight,
+    const RadarVec3& shipForward) noexcept
+{
+    return {worldOffset.x * shipRight.x + worldOffset.y * shipRight.y +
+                worldOffset.z * shipRight.z,
+            worldOffset.x * shipForward.x + worldOffset.y * shipForward.y +
+                worldOffset.z * shipForward.z};
+}
 
 enum class RadarKind
 {
