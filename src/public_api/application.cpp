@@ -57,6 +57,11 @@ void Application::pollEvents() noexcept
     if (impl_)
     {
         impl_->window.pollEvents();
+        // Sample button levels once per frame for UI click edges.
+        impl_->mouseEdges.update(
+            impl_->window.isMouseButtonDown(platform::PlatformMouseButton::Left),
+            impl_->window.isMouseButtonDown(platform::PlatformMouseButton::Right),
+            impl_->window.isMouseButtonDown(platform::PlatformMouseButton::Middle));
     }
 }
 
@@ -165,6 +170,26 @@ bool Application::isMouseButtonDown(MouseButton button) const noexcept
         return false;
     }
     return impl_->window.isMouseButtonDown(platformButton);
+}
+
+bool Application::mouseButtonPressed(MouseButton button) const noexcept
+{
+    return impl_ && impl_->mouseEdges.pressed(button);
+}
+
+bool Application::mouseButtonReleased(MouseButton button) const noexcept
+{
+    return impl_ && impl_->mouseEdges.released(button);
+}
+
+MousePosition Application::mousePosition() const noexcept
+{
+    MousePosition position;
+    if (impl_)
+    {
+        impl_->window.mousePosition(position.x, position.y);
+    }
+    return position;
 }
 
 MouseMotion Application::takeMouseMotion() noexcept

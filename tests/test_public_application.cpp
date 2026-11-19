@@ -23,6 +23,8 @@ namespace
 
 
 static_assert(!std::is_copy_constructible_v<starforge::Application>);
+static_assert(std::is_same_v<decltype(std::declval<const starforge::Application&>().mousePosition()),
+                             starforge::MousePosition>);
 static_assert(!std::is_copy_assignable_v<starforge::Application>);
 static_assert(std::is_move_constructible_v<starforge::Application>);
 static_assert(std::is_move_assignable_v<starforge::Application>);
@@ -76,6 +78,14 @@ TEST_CASE("Public Application: moved-from instance is safe to query")
     CHECK(app->title() == "STARFORGE Public API");
     CHECK(app->framebufferSize().width == 320);
     CHECK(app->framebufferSize().height == 240);
+
+    // M16.1 smoke: position and click edges are queryable every frame.
+    app->pollEvents();
+    const auto cursor = app->mousePosition();
+    CHECK(cursor.x >= 0.0f);
+    CHECK(cursor.y >= 0.0f);
+    CHECK_FALSE(app->mouseButtonPressed(starforge::MouseButton::Left));
+    CHECK_FALSE(app->mouseButtonReleased(starforge::MouseButton::Left));
 
     auto moved = std::move(*app);
     REQUIRE(moved.title() == "STARFORGE Public API");

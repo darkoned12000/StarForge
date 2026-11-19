@@ -69,6 +69,7 @@ add_executable(starforge_tests
     test_game_controls.cpp
     test_gameplay.cpp
     test_game_simulation.cpp
+    test_public_input_edges.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/game_bridge.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/game_simulation.cpp
 )

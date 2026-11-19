@@ -50,6 +50,11 @@ public:
     // Input snapshot for this frame (no SDL types exposed).
     [[nodiscard]] bool isKeyDown(Key key) const noexcept;
     [[nodiscard]] bool isMouseButtonDown(MouseButton button) const noexcept;
+    // M16.1: click edges from the last pollEvents() sample.
+    [[nodiscard]] bool mouseButtonPressed(MouseButton button) const noexcept;
+    [[nodiscard]] bool mouseButtonReleased(MouseButton button) const noexcept;
+    // Absolute cursor position in window coordinates (UI mode).
+    [[nodiscard]] MousePosition mousePosition() const noexcept;
     [[nodiscard]] MouseMotion takeMouseMotion() noexcept;
     void setRelativeMouseMode(bool enabled) noexcept;
 

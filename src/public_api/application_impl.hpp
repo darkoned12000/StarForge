@@ -14,6 +14,7 @@ struct Application::Impl
 {
     platform::Window window;
     std::string title;
+    MouseButtonEdges mouseEdges;
 
     explicit Impl(platform::Window window, std::string title)
         : window(std::move(window)), title(std::move(title))

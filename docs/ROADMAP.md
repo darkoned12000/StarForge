@@ -1308,6 +1308,28 @@ Recorded so they are not lost; each item names its owner milestone:
 - **Tech:** Dear ImGui (dev tools) + custom or RmlUi (final UI).
 - **Depends on:** M10 (ECS), M15 (Gameplay), M15.0 (flight HUD is the
   first consumer; the full HUD expands from it).
+- **Plan:** detailed breakdown in [M16_PLAN.md](M16_PLAN.md).
+
+**Tech decision (confirmed 2026-11):** the shipped UI uses a **custom toon
+canvas** built on `starforge::Hud`/`hud.slang` (already matching the M9.5
+art direction), with a built-in 8×8 ASCII bitmap font for text. Dear ImGui
+stays dev-tools only, as the roadmap specifies. **Fallback: RmlUi** if the
+custom canvas cannot deliver the required UI functionality — revisit the
+decision if any step below proves unachievable. Commits follow one-per-step
+(16.1–16.10) in strict order.
+
+| Step | Deliverable | Verified by | Done when |
+|------|-------------|-------------|-----------|
+| 16.1 ✅ | Absolute mouse position + UI input primitives: `Application::mousePosition()` and mouse-button press/release edges, independent of relative-motion steering | T1 | Done: `MousePosition` + pure-CPU `MouseButtonEdges` in `starforge/input.hpp` (T1 `test_public_input_edges.cpp`); `Application::mousePosition/Pressed/Released` wired from `Window::mousePosition()` (SDL3 float coords) and sampled in `pollEvents()`; live smoke in `test_public_application.cpp`; flight steering untouched |
+| 16.2 ⬜ | Bitmap font + text rendering: built-in 8×8 ASCII glyph table (pure CPU), internal text renderer, public `UiCanvas::addText()` | T1 + T3 | A string renders deterministically through the public API with a golden image |
+| 16.3 ⬜ | Toon UI canvas: `addRect`/`addBar`/`addButton`/`addText`/`clear`/`record` in one retained-mode draw with outlined panels, flat fills, rim accents | T3 + T4 | Composite panel golden; frame time under the ADR-004 UI slice; zero validation errors |
+| 16.4 ⬜ | UI state machine + hit-testing/focus: screens (Flight/Pause/Inventory/Station/Comms/Map/Menu), focus stack, widget hover/press, click hit test, keyboard nav | T1 | Click/hover/focus driven headlessly with assertions |
+| 16.5 ⬜ | Flight HUD + targeting: throttle/speed, shield/hull bars, credits/cargo, crosshair, system/jump range (replaces console logging); target cycle (Tab), target info, lock/lead reticle, faction colour coding | T1 + T3 | Flight HUD golden; target cycle/lock T1 proof; no console needed for flight info |
+| 16.6 ⬜ | Navigation/radar: nearby rocks, hostile, planet, station markers with bearing/distance, range rings, selected destination + ETA | T1 + T3 | World→radar projection/filtering T1 tests; radar golden; tracks moving contacts |
+| 16.7 ⬜ | Communications (chat): message log for combat/trade/mission events + player text input with keyboard capture in UI mode, channels with colour coding | T1 + T3 | Log ring-buffer and text-entry T1 tests; comms golden; messages appear and can be sent |
+| 16.8 ⬜ | Inventory + station interaction: cargo list with quantities, station market buy/sell by click (replaces M15 arrow keys), docking state/prompt in UI | T1 + T3 | Click→buy/sell through `UiState`; station screen golden; buy/sell/dock fully mouse-driven |
+| 16.9 ⬜ | Menus, maps, prompts, toasts: pause menu, galaxy & sector maps with current location/jump range, contextual interaction prompts, toast queue replacing console logs | T1 + T3 | Menu navigation/map projection/toast expiry T1 tests; map + toast goldens |
+| 16.10 ⬜ | Full-loop UI proof + budget gate: launch → fly → fight → dock → buy/sell → mission → jump → repeat entirely through UI; 5-minute run, p95 < ADR-004, zero validation errors, screenshots reviewed | T4 + T5 | M16 Proof line satisfied; all steps marked ✅; ROADMAP + M16_PLAN synced |
 
 ### M17 – Asset Pipeline
 

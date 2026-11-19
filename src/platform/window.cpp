@@ -259,6 +259,15 @@ void Window::takeMouseMotion(float& dxOut, float& dyOut, float& scrollOut) noexc
     scrollOut = std::exchange(mouseScrollY_, 0.0f);
 }
 
+void Window::mousePosition(float& xOut, float& yOut) const noexcept
+{
+    float x = 0.0f;
+    float y = 0.0f;
+    SDL_GetMouseState(&x, &y);
+    xOut = x;
+    yOut = y;
+}
+
 Extent2D Window::framebufferSize() const
 {
     int width = 0;
