@@ -9,6 +9,7 @@ add_executable(starforge_game
     ui_state.cpp
     targeting.cpp
     ui_comms.cpp
+    ui_station.cpp
 )
 
 target_link_libraries(starforge_game

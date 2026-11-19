@@ -151,6 +151,12 @@ bool Application::isKeyDown(Key key) const noexcept
     case Key::Backspace:
         platformKey = platform::PlatformKey::Backspace;
         break;
+    case Key::Equal:
+        platformKey = platform::PlatformKey::Equal;
+        break;
+    case Key::Minus:
+        platformKey = platform::PlatformKey::Minus;
+        break;
     default:
         return false;
     }

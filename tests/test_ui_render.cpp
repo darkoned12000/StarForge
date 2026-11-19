@@ -274,6 +274,15 @@ TEST_CASE("M16.3: composite UI panel golden (T3)")
         rects.push_back({g.x0,g.y0,g.x1,g.y1,commsColor});
     for (const auto& g : gameplay::ui_text::textQuads(">hi", 8.0f, 112.0f, 1.0f))
         rects.push_back({g.x0,g.y0,g.x1,g.y1,reticle});
+    // Station buttons (M16.8): small outlined panels with labels.
+    const std::array<float,4> buttonFill{0.1f,0.2f,0.32f,1.0f};
+    const std::array<const std::array<float,4>*,3> buttonPalette{&buttonFill,&outline,&accent};
+    int bpi = 0;
+    for (const auto& q : gameplay::ui_shapes::panelQuads(64.0f, 96.0f, 56.0f, 14.0f, 1.0f))
+        rects.push_back({q.quad.x0,q.quad.y0,q.quad.x1,q.quad.y1,*buttonPalette[q.colorIndex]});
+    for (const auto& g : gameplay::ui_text::textQuads("BUY", 68.0f, 99.0f, 1.0f))
+        rects.push_back({g.x0,g.y0,g.x1,g.y1,textColor});
+    (void)bpi;
 
     std::vector<environment::UiVertex> vertices;
     const auto ndc = [](float px, float py) -> std::array<float,4> {

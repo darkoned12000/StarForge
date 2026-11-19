@@ -48,6 +48,8 @@ enum class PlatformKey
     Tab,
     Return,
     Backspace,
+    Equal,
+    Minus,
     Count,
 };
 

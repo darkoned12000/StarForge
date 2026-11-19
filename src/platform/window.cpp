@@ -185,6 +185,12 @@ void Window::pollEvents()
             case SDL_SCANCODE_BACKSPACE:
                 keyDown_[static_cast<std::size_t>(PlatformKey::Backspace)] = down;
                 break;
+            case SDL_SCANCODE_EQUALS:
+                keyDown_[static_cast<std::size_t>(PlatformKey::Equal)] = down;
+                break;
+            case SDL_SCANCODE_MINUS:
+                keyDown_[static_cast<std::size_t>(PlatformKey::Minus)] = down;
+                break;
             default:
                 break;
             }

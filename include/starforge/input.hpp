@@ -24,6 +24,8 @@ enum class Key
     Tab,
     Return,
     Backspace,
+    Equal,
+    Minus,
     Count,
 };
 

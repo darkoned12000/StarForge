@@ -28,6 +28,8 @@
 #include "targeting.hpp"
 #include "ui_comms.hpp"
 #include "ui_radar.hpp"
+#include "ui_station.hpp"
+#include "ui_state.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -114,6 +116,8 @@ struct InputTracker
     bool prevTab = false;
     bool prevReturn = false;
     bool prevBackspace = false;
+    bool prevZoomIn = false;
+    bool prevZoomOut = false;
 };
 
 [[nodiscard]] starforge::game::InputEdge readInput(starforge::Application& app, InputTracker& tracker)
@@ -372,6 +376,7 @@ int main()
     starforge::game::TargetingState targeting;
     starforge::game::CommsLog comms;
     starforge::game::TextEntry textEntry;
+    starforge::game::UiState uiState;
     simulation.spawnHostile();
     logInfo("First Flight: ship + hostile + trading loop ready. W/S throttle, mouse steer, Space UI, P pause.");
 
@@ -393,6 +398,7 @@ int main()
     bool lastFireSecondary = false;
     bool lastRelativeMouse = false;
     bool lastBoost = false;
+    float radarRange = 2000.0f;
     float cameraDist = 8.0f; // chase-camera distance (fixed for FOV zoom)
     float shieldFlash = 0.0f; // seconds of remaining shield-hit visual
     float explosionTimer = 0.0f; // hostile destruction effect
@@ -538,6 +544,17 @@ int main()
                 targeting.cycleNext();
                 pending.tabPressed = false;
             }
+            // Radar zoom on +/- edges (both flight and UI modes).
+            {
+                const bool zoomIn = app->isKeyDown(starforge::Key::Equal);
+                const bool zoomOut = app->isKeyDown(starforge::Key::Minus);
+                if (zoomIn && !inputTracker.prevZoomIn)
+                    radarRange = std::max(250.0f, radarRange * 0.75f);
+                if (zoomOut && !inputTracker.prevZoomOut)
+                    radarRange = std::min(8000.0f, radarRange * 1.333f);
+                inputTracker.prevZoomIn = zoomIn;
+                inputTracker.prevZoomOut = zoomOut;
+            }
             if (!flight.paused && pending.spacePressed)
             {
                 flight.mode = flight.mode == starforge::game::FlightMode::Flight
@@ -568,6 +585,23 @@ int main()
         // UI-mode trading / mission / jump actions.
         if (flight.mode == starforge::game::FlightMode::Ui && !flight.paused)
         {
+            // M16.8: clickable station screen. Register widgets in the same
+            // geometry the renderer uses, then apply any clicked action.
+            {
+                const auto cursor = app->mousePosition();
+                const auto fb = app->framebufferSize();
+                uiState.beginFrame(cursor.x, cursor.y,
+                                   app->mouseButtonPressed(starforge::MouseButton::Left));
+                const auto panel = starforge::game::stationPanelRect(
+                    static_cast<float>(fb.width), static_cast<float>(fb.height));
+                for (const auto& button : starforge::game::stationButtons())
+                    uiState.addWidget(button.id,
+                                      starforge::game::UiRect{panel.x + button.x, panel.y + button.y,
+                                                              button.w, button.h});
+                for (const auto& button : starforge::game::stationButtons())
+                    if (uiState.clicked(button.id))
+                        starforge::game::applyStationAction(button.id, simulation, comms);
+            }
             handleUiActions(*app, uiTracker, simulation, comms);
             // M16.7: chat text entry (SDL text input, not key-code mapping).
             textEntry.append(app->takeTextInput());
@@ -1194,15 +1228,39 @@ int main()
                     uiCanvas->addBar({.x = cx - 40.0f, .y = cy + 44.0f, .w = 80.0f, .h = 6.0f,
                                       .value = targeting.lockProgress(), .fillColor = tc});
             }
+            // M16.7: compact comms log is always visible (bottom-left).
+            {
+                const auto& messages = comms.messages();
+                if (!messages.empty())
+                {
+                    const std::size_t start = messages.size() > 3 ? messages.size() - 3 : 0;
+                    uiCanvas->addPanel({.x = 16.0f,
+                                        .y = static_cast<float>(size.height) - 96.0f,
+                                        .w = 360.0f, .h = 80.0f, .outlineWidth = 2.0f,
+                                        .fillColor = {0.04f, 0.08f, 0.14f, 0.85f}});
+                    std::size_t line = 0;
+                    for (std::size_t i = start; i < messages.size(); ++i)
+                    {
+                        std::string text = messages[i].sender + ": " + messages[i].text;
+                        if (text.size() > 42) text.resize(42);
+                        uiCanvas->addText({.x = 24.0f,
+                                           .y = static_cast<float>(size.height) - 88.0f +
+                                                static_cast<float>(line++) * 20.0f,
+                                           .scale = 2.0f,
+                                           .color = {0.75f, 0.9f, 1.0f, 1.0f}, .text = text});
+                    }
+                }
+            }
+
             // M16.6: navigation radar (bottom-right) + destination readout.
             {
-                constexpr float kRadarRange = 2000.0f;
-                constexpr float kRadarRadius = 72.0f;
-                const float rx = static_cast<float>(size.width) - 176.0f;
-                const float ry = static_cast<float>(size.height) - 176.0f;
-                const float ccx = rx + 80.0f;
-                const float ccy = ry + 88.0f;
-                uiCanvas->addPanel({.x = rx, .y = ry, .w = 160.0f, .h = 160.0f,
+                const float kRadarRange = radarRange;
+                constexpr float kRadarRadius = 110.0f;
+                const float rx = static_cast<float>(size.width) - 256.0f;
+                const float ry = static_cast<float>(size.height) - 256.0f;
+                const float ccx = rx + 120.0f;
+                const float ccy = ry + 128.0f;
+                uiCanvas->addPanel({.x = rx, .y = ry, .w = 240.0f, .h = 240.0f,
                                     .outlineWidth = 2.0f,
                                     .fillColor = {0.04f, 0.08f, 0.14f, 0.85f}});
                 const starforge::math::Vec4f ringColor{0.15f, 0.35f, 0.5f, 1.0f};
@@ -1245,8 +1303,11 @@ int main()
                 }
                 uiCanvas->addRect({.x = ccx - 2.0f, .y = ccy - 2.0f, .w = 4.0f, .h = 4.0f,
                                    .color = {1.0f, 1.0f, 1.0f, 1.0f}}); // player
+                char radarLabel[32];
+                std::snprintf(radarLabel, sizeof(radarLabel), "RADAR %.1fkm (+/-)",
+                              radarRange / 1000.0f);
                 uiCanvas->addText({.x = rx + 8.0f, .y = ry + 4.0f, .scale = 2.0f,
-                                   .color = {0.6f, 0.9f, 1.0f, 1.0f}, .text = "RADAR 2km"});
+                                   .color = {0.6f, 0.9f, 1.0f, 1.0f}, .text = radarLabel});
                 if (const auto* target = targeting.selected())
                 {
                     const auto p = starforge::game::projectRadar(
@@ -1262,6 +1323,39 @@ int main()
                                        .color = {0.8f, 0.95f, 1.0f, 1.0f}, .text = nav});
                 }
             }
+            // M16.8: clickable station / inventory screen.
+            if (flight.mode == starforge::game::FlightMode::Ui)
+            {
+                const auto panel = starforge::game::stationPanelRect(
+                    static_cast<float>(size.width), static_cast<float>(size.height));
+                uiCanvas->addPanel({.x = panel.x, .y = panel.y, .w = panel.w, .h = panel.h,
+                                    .outlineWidth = 2.0f,
+                                    .fillColor = {0.06f, 0.11f, 0.2f, 0.92f},
+                                    .accentColor = {0.95f, 0.7f, 0.2f, 1.0f}});
+                uiCanvas->addText({.x = panel.x + 12.0f, .y = panel.y + 8.0f, .scale = 2.0f,
+                                   .color = {0.9f, 0.95f, 1.0f, 1.0f}, .text = "STATION A / CARGO"});
+                char status[96];
+                std::snprintf(status, sizeof(status), "CR %.0f  ORE %d  %s",
+                              static_cast<float>(simulation.credits()),
+                              simulation.cargoCount("ore"),
+                              simulation.isDocked() ? "DOCKED" : "APPROACH");
+                uiCanvas->addText({.x = panel.x + 12.0f, .y = panel.y + 68.0f, .scale = 2.0f,
+                                   .color = {0.6f, 0.9f, 0.7f, 1.0f}, .text = status});
+                for (const auto& button : starforge::game::stationButtons())
+                {
+                    const bool hot = uiState.hovered(button.id);
+                    uiCanvas->addPanel({.x = panel.x + button.x, .y = panel.y + button.y,
+                                        .w = button.w, .h = button.h, .outlineWidth = 1.5f,
+                                        .fillColor = hot ? starforge::math::Vec4f{0.2f, 0.45f, 0.3f, 1.0f}
+                                                         : starforge::math::Vec4f{0.1f, 0.2f, 0.32f, 1.0f},
+                                        .outlineColor = {0.02f, 0.04f, 0.08f, 1.0f},
+                                        .accentColor = {0.95f, 0.7f, 0.2f, 1.0f}});
+                    uiCanvas->addText({.x = panel.x + button.x + 8.0f,
+                                       .y = panel.y + button.y + 10.0f, .scale = 2.0f,
+                                       .color = {0.95f, 0.98f, 1.0f, 1.0f}, .text = button.label});
+                }
+            }
+
             // M16.7: comms log + chat entry in UI mode.
             if (flight.mode == starforge::game::FlightMode::Ui)
             {
@@ -1300,9 +1394,6 @@ int main()
             }
             uiCanvas->record(fc);
 
-            hud->record(fc, hudParams);
-            if (flight.mode == starforge::game::FlightMode::Ui)
-                hud->record(fc, uiParams);
         });
         if (!frame)
         {

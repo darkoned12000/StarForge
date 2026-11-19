@@ -75,11 +75,13 @@ add_executable(starforge_tests
     test_targeting.cpp
     test_ui_radar.cpp
     test_ui_comms.cpp
+    test_ui_station.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/game_bridge.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/game_simulation.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/ui_state.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/targeting.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/ui_comms.cpp
+    ${PROJECT_SOURCE_DIR}/apps/game/ui_station.cpp
 )
 
 target_link_libraries(starforge_tests
