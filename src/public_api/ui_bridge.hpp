@@ -10,6 +10,14 @@
 namespace starforge::public_api_bridge
 {
 
+// One already-expanded UI quad (widget text/glyphs are expanded at add time
+// so draw order equals insertion order).
+struct RawUiQuad
+{
+    float x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;
+    float color[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+};
+
 struct RawUiTextDraw
 {
     float x = 0.0f;
@@ -17,6 +25,13 @@ struct RawUiTextDraw
     float scale = 2.0f;
     float color[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     std::string text;
+};
+
+struct RawUiColors
+{
+    float fill[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    float outline[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    float accent[4] = {1.0f, 0.7f, 0.2f, 1.0f};
 };
 
 class RawUiCanvas
@@ -40,6 +55,10 @@ public:
     RawUiCanvas& operator=(const RawUiCanvas&) = delete;
 
     void clear() noexcept;
+    void addRect(float x, float y, float w, float h, const float color[4]);
+    void addPanel(float x, float y, float w, float h, float outlineWidth, const RawUiColors& colors);
+    void addBar(float x, float y, float w, float h, float value,
+                const float fill[4], const float track[4]);
     void addText(const RawUiTextDraw& draw);
     void render(VkCommandBuffer cmd, float width, float height);
     [[nodiscard]] std::size_t vertexCount() const noexcept;

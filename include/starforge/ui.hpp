@@ -33,6 +33,32 @@ public:
         std::string text;
     };
 
+    // Flat rectangle in window-pixel coordinates.
+    struct RectDraw
+    {
+        float x = 0.0f, y = 0.0f, w = 1.0f, h = 1.0f;
+        math::Vec4f color{1.0f, 1.0f, 1.0f, 1.0f};
+    };
+
+    // Outlined toon panel: border, inset fill, thin rim accent.
+    struct PanelDraw
+    {
+        float x = 0.0f, y = 0.0f, w = 100.0f, h = 50.0f;
+        float outlineWidth = 2.0f;
+        math::Vec4f fillColor{0.08f, 0.12f, 0.22f, 1.0f};
+        math::Vec4f outlineColor{0.02f, 0.02f, 0.04f, 1.0f};
+        math::Vec4f accentColor{0.95f, 0.65f, 0.15f, 1.0f};
+    };
+
+    // Progress bar: track + value-driven fill.
+    struct BarDraw
+    {
+        float x = 0.0f, y = 0.0f, w = 100.0f, h = 8.0f;
+        float value = 1.0f;
+        math::Vec4f fillColor{0.2f, 0.8f, 0.4f, 1.0f};
+        math::Vec4f trackColor{0.05f, 0.05f, 0.1f, 1.0f};
+    };
+
     [[nodiscard]] static std::expected<UiCanvas, std::string> create(Renderer& renderer,
                                                                      const CreateInfo& info);
     ~UiCanvas();
@@ -42,6 +68,11 @@ public:
     UiCanvas& operator=(const UiCanvas&) = delete;
 
     void clear() noexcept;
+    // Widgets are queued in insertion order; backgrounds should be added
+    // before text so text composites on top.
+    void addRect(const RectDraw& draw);
+    void addPanel(const PanelDraw& draw);
+    void addBar(const BarDraw& draw);
     void addText(const TextDraw& draw);
     void record(FrameContext& frameContext);
 

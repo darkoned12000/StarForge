@@ -205,9 +205,11 @@ TEST_CASE("Public UiCanvas: move-only and records text through the renderer")
     REQUIRE_MESSAGE(canvas.has_value(), canvas.error());
 
     canvas->clear();
+    canvas->addPanel({.x = 8.0f, .y = 8.0f, .w = 110.0f, .h = 50.0f});
+    canvas->addBar({.x = 16.0f, .y = 44.0f, .w = 94.0f, .h = 6.0f, .value = 0.75f});
     canvas->addText({.x = 16.0f, .y = 16.0f, .scale = 2.0f,
                      .color = {1.0f, 0.9f, 0.2f, 1.0f}, .text = "UI"});
-    CHECK(canvas->vertexCount() == 0); // built at record time
+    CHECK(canvas->vertexCount() > 0); // expanded at add time in M16.3
 
     auto frame = renderer->renderFrame({}, [&](starforge::FrameContext& fc) {
         canvas->record(fc);
@@ -219,5 +221,9 @@ TEST_CASE("Public UiCanvas: move-only and records text through the renderer")
     auto moved = std::move(*canvas);
     canvas->clear();
     CHECK(canvas->vertexCount() == 0);
+    CHECK(moved.vertexCount() > 0);
+    // A button is a panel whose state tints the fill; hover/press handled in
+    // M16.4 via hit-testing, so just check the primitive queues here.
+    moved.addRect({.x = 4.0f, .y = 4.0f, .w = 8.0f, .h = 8.0f});
     CHECK(moved.vertexCount() > 0);
 }

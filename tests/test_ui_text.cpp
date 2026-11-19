@@ -43,3 +43,34 @@ TEST_CASE("M16.2: glyph bit patterns and text metrics")
     CHECK(textCells("ABC") == 5);
     CHECK(textCells("HELLO") == 9);
 }
+
+#include "gameplay/ui_shapes.hpp"
+
+TEST_CASE("M16.3: toon widget geometry is deterministic")
+{
+    using namespace starforge::gameplay::ui_shapes;
+
+    const auto panel = panelQuads(10.0f, 20.0f, 100.0f, 50.0f, 2.0f);
+    REQUIRE(panel.size() == 3);
+    CHECK(panel[0].colorIndex == 1); // outline
+    CHECK(panel[0].quad.x0 == 10.0f);
+    CHECK(panel[0].quad.x1 == 110.0f);
+    CHECK(panel[1].colorIndex == 0); // inset fill
+    CHECK(panel[1].quad.x0 == 12.0f);
+    CHECK(panel[1].quad.x1 == 108.0f);
+    CHECK(panel[2].colorIndex == 2); // rim accent
+    CHECK(panel[2].quad.y0 == 22.0f); // inset by outline width from panel y=20
+    CHECK(panel[2].quad.y1 == 27.0f); // min(3*ow, h*0.1) = 5 px tall
+
+    const auto bar = barQuads(0.0f, 0.0f, 100.0f, 10.0f, 0.25f);
+    REQUIRE(bar.size() == 2);
+    CHECK(bar[0].colorIndex == 1); // track
+    CHECK(bar[1].colorIndex == 0); // fill
+    CHECK(bar[1].quad.x0 == 0.0f);
+    CHECK(bar[1].quad.x1 == 25.0f);
+
+    const auto empty = barQuads(0.0f, 0.0f, 100.0f, 10.0f, -1.0f);
+    CHECK(empty[1].quad.x1 == 0.0f); // clamped to zero
+    const auto full = barQuads(0.0f, 0.0f, 100.0f, 10.0f, 5.0f);
+    CHECK(full[1].quad.x1 == 100.0f); // clamped to full
+}

@@ -103,9 +103,10 @@ convenience wrapper around the same path.
   a cheap impostor tier for distant rocks. `record()` takes an instance array.
 - `starforge::Hud` — toon-styled HUD with outlined flat panels, a portrait
   frame and accent bars; `record()` draws into an active frame.
-- `starforge::UiCanvas` — retained-mode toon UI canvas (M16). `addText()`
-  queues bitmap-font draws in window-pixel coordinates; `record()` emits one
-  draw into an active frame. Extends in M16.3 with rect/bar/button widgets.
+- `starforge::UiCanvas` — retained-mode toon UI canvas (M16). `addRect()`,
+  `addPanel()` (outline + fill + rim accent), `addBar()` (value-driven fill)
+  and `addText()` queue bitmap-font/widget draws in window-pixel coordinates;
+  `record()` emits one draw into an active frame in insertion order.
 - `starforge::Audio` — backend-neutral audio: `create`, `loadFromMemory`
   (WAV/FLAC/MP3 bytes), `play`/`stop`/`isPlaying`, per-bus gain
   (`setBusVolume`), `setListener`, `setEmitter` (3D positional audio with

@@ -53,6 +53,44 @@ void UiCanvas::clear() noexcept
     if (impl_) impl_->backend->clear();
 }
 
+namespace
+{
+void copyColor(const math::Vec4f& value, float out[4]) noexcept
+{
+    out[0] = value.x();
+    out[1] = value.y();
+    out[2] = value.z();
+    out[3] = value.w();
+}
+} // namespace
+
+void UiCanvas::addRect(const RectDraw& draw)
+{
+    if (!impl_) return;
+    float color[4];
+    copyColor(draw.color, color);
+    impl_->backend->addRect(draw.x, draw.y, draw.w, draw.h, color);
+}
+
+void UiCanvas::addPanel(const PanelDraw& draw)
+{
+    if (!impl_) return;
+    bridge::RawUiColors colors;
+    copyColor(draw.fillColor, colors.fill);
+    copyColor(draw.outlineColor, colors.outline);
+    copyColor(draw.accentColor, colors.accent);
+    impl_->backend->addPanel(draw.x, draw.y, draw.w, draw.h, draw.outlineWidth, colors);
+}
+
+void UiCanvas::addBar(const BarDraw& draw)
+{
+    if (!impl_) return;
+    float fill[4], track[4];
+    copyColor(draw.fillColor, fill);
+    copyColor(draw.trackColor, track);
+    impl_->backend->addBar(draw.x, draw.y, draw.w, draw.h, draw.value, fill, track);
+}
+
 void UiCanvas::addText(const TextDraw& draw)
 {
     if (!impl_) return;
