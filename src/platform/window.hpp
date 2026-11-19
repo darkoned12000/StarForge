@@ -43,6 +43,7 @@ enum class PlatformKey
     Left,
     Right,
     LeftShift,
+    Tab,
     Count,
 };
 

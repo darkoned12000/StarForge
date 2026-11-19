@@ -21,6 +21,7 @@ enum class Key
     Left,
     Right,
     LeftShift,
+    Tab,
     Count,
 };
 

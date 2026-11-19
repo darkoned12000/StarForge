@@ -246,6 +246,18 @@ TEST_CASE("M16.3: composite UI panel golden (T3)")
         rects.push_back({q.quad.x0,q.quad.y0,q.quad.x1,q.quad.y1,*barPalette[bi++]});
     for (const auto& g : gameplay::ui_text::textQuads("M16", 16.0f, 14.0f, 2.0f))
         rects.push_back({g.x0,g.y0,g.x1,g.y1,textColor});
+    // Crosshair + selected-target bracket (M16.5 reticle primitives).
+    const std::array<float,4> reticle{1.0f,1.0f,1.0f,0.9f};
+    const std::array<float,4> bracket{1.0f,0.3f,0.2f,1.0f};
+    const float mx = 64.0f, my = 64.0f;
+    rects.push_back({mx-18,my-1,mx-8,my+1,reticle});
+    rects.push_back({mx+8,my-1,mx+18,my+1,reticle});
+    rects.push_back({mx-1,my-18,mx+1,my-8,reticle});
+    rects.push_back({mx-1,my+8,mx+1,my+18,reticle});
+    rects.push_back({mx-30,my-30,mx-18,my-28,bracket});
+    rects.push_back({mx+18,my-30,mx+30,my-28,bracket});
+    rects.push_back({mx-30,my-30,mx-28,my-18,bracket});
+    rects.push_back({mx+28,my-30,mx+30,my-18,bracket});
 
     std::vector<environment::UiVertex> vertices;
     const auto ndc = [](float px, float py) -> std::array<float,4> {

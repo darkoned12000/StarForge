@@ -72,9 +72,11 @@ add_executable(starforge_tests
     test_public_input_edges.cpp
     test_ui_text.cpp
     test_ui_state.cpp
+    test_targeting.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/game_bridge.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/game_simulation.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/ui_state.cpp
+    ${PROJECT_SOURCE_DIR}/apps/game/targeting.cpp
 )
 
 target_link_libraries(starforge_tests

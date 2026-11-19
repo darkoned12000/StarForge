@@ -142,6 +142,9 @@ bool Application::isKeyDown(Key key) const noexcept
     case Key::LeftShift:
         platformKey = platform::PlatformKey::LeftShift;
         break;
+    case Key::Tab:
+        platformKey = platform::PlatformKey::Tab;
+        break;
     default:
         return false;
     }

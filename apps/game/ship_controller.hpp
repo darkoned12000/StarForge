@@ -66,6 +66,7 @@ struct InputEdge
     bool mouseLeftDown = false;
     bool mouseRightDown = false;
     bool boostDown = false; // Left Shift held -> afterburner
+    bool tabPressed = false; // edge: cycle target
 };
 
 inline constexpr float kThrottleStep = 0.25f;

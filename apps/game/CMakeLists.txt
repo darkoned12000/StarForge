@@ -7,6 +7,7 @@ add_executable(starforge_game
     game_bridge.cpp
     game_simulation.cpp
     ui_state.cpp
+    targeting.cpp
 )
 
 target_link_libraries(starforge_game

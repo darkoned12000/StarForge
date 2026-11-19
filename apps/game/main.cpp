@@ -19,11 +19,13 @@
 #include "starforge/starfield.hpp"
 #include "starforge/sun.hpp"
 #include "starforge/toon.hpp"
+#include "starforge/ui.hpp"
 #include "starforge/world.hpp"
 
 #include "game_bridge.hpp"
 #include "game_simulation.hpp"
 #include "ship_controller.hpp"
+#include "targeting.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -107,6 +109,7 @@ struct InputTracker
     bool prevDown = false;
     bool prevLeft = false;
     bool prevRight = false;
+    bool prevTab = false;
 };
 
 [[nodiscard]] starforge::game::InputEdge readInput(starforge::Application& app, InputTracker& tracker)
@@ -145,6 +148,9 @@ struct InputTracker
     edge.mouseLeftDown = app.isMouseButtonDown(starforge::MouseButton::Left);
     edge.mouseRightDown = app.isMouseButtonDown(starforge::MouseButton::Right);
     edge.boostDown = app.isKeyDown(starforge::Key::LeftShift);
+    const bool tab = app.isKeyDown(starforge::Key::Tab);
+    edge.tabPressed = tab && !tracker.prevTab;
+    tracker.prevTab = tab;
     return edge;
 }
 
@@ -290,6 +296,14 @@ int main()
         logError(hud.error().c_str());
         return EXIT_FAILURE;
     }
+
+    // M16: toon UI canvas for the flight HUD and target reticle.
+    auto uiCanvas = starforge::UiCanvas::create(*renderer, {});
+    if (!uiCanvas)
+    {
+        logError(uiCanvas.error().c_str());
+        return EXIT_FAILURE;
+    }
     // The facade defaults to the silent backend (for CI/headless tests), so
     // opt into real hardware here; fall back gracefully if no device exists.
     auto audio = starforge::Audio::create({
@@ -317,6 +331,7 @@ int main()
     starforge::game::GameWorld world;
     starforge::game::FlightState flight;
     starforge::game::GameSimulation simulation;
+    starforge::game::TargetingState targeting;
     simulation.spawnHostile();
     logInfo("First Flight: ship + hostile + trading loop ready. W/S throttle, mouse steer, Space UI, P pause.");
 
@@ -414,6 +429,12 @@ int main()
                     logError(h.error().c_str());
                     return EXIT_FAILURE;
                 }
+                uiCanvas = starforge::UiCanvas::create(*renderer, {});
+                if (!uiCanvas)
+                {
+                    logError(uiCanvas.error().c_str());
+                    return EXIT_FAILURE;
+                }
             }
             needRecreate = false;
         }
@@ -444,6 +465,7 @@ int main()
             pending.mouseLeftDown = edge.mouseLeftDown;
             pending.mouseRightDown = edge.mouseRightDown;
             pending.boostDown = edge.boostDown;
+            pending.tabPressed = pending.tabPressed || edge.tabPressed;
         }
 
         // Scroll-wheel FOV zoom (runs every frame, not step-gated).
@@ -470,6 +492,11 @@ int main()
             {
                 flight.paused = !flight.paused;
                 pending.pausePressed = false;
+            }
+            if (!flight.paused && pending.tabPressed)
+            {
+                targeting.cycleNext();
+                pending.tabPressed = false;
             }
             if (!flight.paused && pending.spacePressed)
             {
@@ -629,6 +656,22 @@ int main()
         }
         lastFirePrimary = flight.firePrimary;
         lastFireSecondary = flight.fireSecondary;
+
+        // M16.5: rebuild target contacts from live simulation state each frame.
+        {
+            const auto hostile = simulation.hostile();
+            std::vector<starforge::game::TargetContact> contacts;
+            if (hostile.alive)
+            {
+                const float dx = hostile.position.x, dy = hostile.position.y, dz = hostile.position.z;
+                contacts.push_back({"hostile-1", true,
+                                    std::sqrt(dx * dx + dy * dy + dz * dz),
+                                    hostile.shield, hostile.hull});
+            }
+            contacts.push_back({"station-a", false, 1500.0f, 0.0f, 0.0f});
+            targeting.setContacts(std::move(contacts));
+            targeting.tick(frameDt, flight.firePrimary && !flight.paused);
+        }
 
         hudTimer += frameDt;
         if (hudTimer >= 1.0f)
@@ -1016,6 +1059,58 @@ int main()
             // old 64 per-rock Toon draws (M15.0.9).
             rockField->record(fc, rockContext, rockInstances.data(),
                               static_cast<std::uint32_t>(rockInstances.size()));
+
+            // M16.5 flight HUD + targeting reticle (toon canvas, one draw).
+            uiCanvas->clear();
+            const float hudScale = 3.0f;
+            const float cx = static_cast<float>(size.width) * 0.5f;
+            const float cy = static_cast<float>(size.height) * 0.5f;
+            uiCanvas->addPanel({.x = 16.0f, .y = 16.0f, .w = 320.0f, .h = 176.0f,
+                                .outlineWidth = 2.0f,
+                                .fillColor = {0.05f, 0.09f, 0.18f, 0.85f}});
+            const auto hudText = [&](float tx, float ty, const char* label, float value) {
+                char buffer[48];
+                std::snprintf(buffer, sizeof(buffer), "%s %.0f", label, value);
+                uiCanvas->addText({.x = tx, .y = ty, .scale = hudScale,
+                                   .color = {0.85f, 0.95f, 1.0f, 1.0f}, .text = buffer});
+            };
+            hudText(28.0f, 26.0f, "THROTTLE", flight.throttle * 100.0f);
+            hudText(28.0f, 50.0f, "SPEED", starforge::game::targetSpeed(flight));
+            hudText(28.0f, 74.0f, "SHIELD", simulation.playerShield());
+            hudText(28.0f, 98.0f, "HULL", simulation.playerHull());
+            hudText(28.0f, 122.0f, "CREDITS", static_cast<float>(simulation.credits()));
+            hudText(28.0f, 146.0f, "CARGO", static_cast<float>(simulation.cargoUsed()));
+            uiCanvas->addBar({.x = 150.0f, .y = 82.0f, .w = 170.0f, .h = 10.0f,
+                              .value = simulation.playerShield() / 100.0f,
+                              .fillColor = {0.2f, 0.6f, 1.0f, 1.0f}});
+            uiCanvas->addBar({.x = 150.0f, .y = 106.0f, .w = 170.0f, .h = 10.0f,
+                              .value = simulation.playerHull() / 100.0f,
+                              .fillColor = {0.2f, 0.9f, 0.4f, 1.0f}});
+            // Crosshair: four short strokes around screen centre.
+            const auto reticle = starforge::math::Vec4f{1.0f, 1.0f, 1.0f, 0.9f};
+            uiCanvas->addRect({.x = cx - 18.0f, .y = cy - 1.0f, .w = 10.0f, .h = 2.0f, .color = reticle});
+            uiCanvas->addRect({.x = cx + 8.0f, .y = cy - 1.0f, .w = 10.0f, .h = 2.0f, .color = reticle});
+            uiCanvas->addRect({.x = cx - 1.0f, .y = cy - 18.0f, .w = 2.0f, .h = 10.0f, .color = reticle});
+            uiCanvas->addRect({.x = cx - 1.0f, .y = cy + 8.0f, .w = 2.0f, .h = 10.0f, .color = reticle});
+            // Selected target bracket + lock bar.
+            if (const auto* target = targeting.selected())
+            {
+                const starforge::math::Vec4f tc = target->hostile
+                    ? starforge::math::Vec4f{1.0f, 0.3f, 0.2f, 1.0f}
+                    : starforge::math::Vec4f{0.3f, 0.8f, 1.0f, 1.0f};
+                const float bx = cx - 30.0f, by = cy - 30.0f;
+                uiCanvas->addRect({.x = bx, .y = by, .w = 12.0f, .h = 2.0f, .color = tc});
+                uiCanvas->addRect({.x = bx + 48.0f, .y = by, .w = 12.0f, .h = 2.0f, .color = tc});
+                uiCanvas->addRect({.x = bx, .y = by, .w = 2.0f, .h = 12.0f, .color = tc});
+                uiCanvas->addRect({.x = bx + 58.0f, .y = by, .w = 2.0f, .h = 12.0f, .color = tc});
+                uiCanvas->addText({.x = cx - 60.0f, .y = cy + 36.0f, .scale = 2.0f, .color = tc,
+                                   .text = target->id});
+                if (targeting.lockProgress() > 0.0f)
+                    uiCanvas->addBar({.x = cx - 40.0f, .y = cy + 56.0f, .w = 80.0f, .h = 6.0f,
+                                      .value = targeting.lockProgress(), .fillColor = tc});
+            }
+            uiCanvas->record(fc);
+
             hud->record(fc, hudParams);
             if (flight.mode == starforge::game::FlightMode::Ui)
                 hud->record(fc, uiParams);
