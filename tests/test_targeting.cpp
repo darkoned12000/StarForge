@@ -19,9 +19,12 @@ TEST_CASE("M16.5: cycling preserves selection by id across frame rebuilds")
 {
     TargetingState state;
     state.setContacts(contacts());
+    CHECK_FALSE(state.hasSelection()); // no auto-target at startup
+    CHECK(state.count() == 3);
+
+    state.cycleNext();
     REQUIRE(state.selected() != nullptr);
     CHECK(state.selected()->id == "rock-1");
-    CHECK(state.count() == 3);
 
     state.cycleNext();
     REQUIRE(state.selected() != nullptr);
@@ -44,6 +47,7 @@ TEST_CASE("M16.5: lock requires a held trigger on an in-range hostile")
 {
     TargetingState state;
     state.setContacts(contacts());
+    state.cycleNext(); // rock-1
     state.cycleNext(); // hostile-1 at 250 m
     CHECK_FALSE(state.locked());
     CHECK(state.lockProgress() == 0.0f);
@@ -57,10 +61,9 @@ TEST_CASE("M16.5: lock requires a held trigger on an in-range hostile")
     state.tick(0.1f, false);
     CHECK(state.lockProgress() == 0.0f);
 
-    // Friendly target cannot lock (selection survives by id, so cycle to
-    // the friendly contact explicitly).
-    state.setContacts(contacts());
-    state.cyclePrevious(); // rock-1 (friendly)
+    // Friendly target cannot lock.
+    state.setContacts(contacts()); // selection still hostile-1
+    state.cyclePrevious();          // rock-1 (friendly)
     CHECK(state.selected()->id == "rock-1");
     state.tick(2.0f, true);
     CHECK_FALSE(state.locked());
@@ -75,9 +78,10 @@ TEST_CASE("M16.5: clearing handles empty contact lists")
 {
     TargetingState state;
     CHECK(state.selected() == nullptr);
+    CHECK(state.index() == TargetingState::kNoSelection);
     state.cycleNext();
     state.cyclePrevious();
-    CHECK(state.index() == 0);
+    CHECK_FALSE(state.hasSelection());
     state.setContacts({});
     CHECK(state.count() == 0);
     CHECK(state.selected() == nullptr);
@@ -100,4 +104,33 @@ TEST_CASE("M16 polish: T lock prefers the nearest hostile")
                        {"close-hostile", true, 120.0f, 10.0f, 10.0f}});
     state.lockNearest();
     CHECK(state.selected()->id == "close-hostile");
+}
+
+TEST_CASE("M16 polish: T toggles lock on / off and survives rebuilds")
+{
+    TargetingState state;
+    state.setContacts(contacts());
+    CHECK_FALSE(state.hasSelection());
+
+    state.toggleLock();
+    REQUIRE(state.selected() != nullptr);
+    CHECK(state.selected()->id == "hostile-1");
+
+    // Frame rebuild keeps the lock by id.
+    state.setContacts(contacts());
+    REQUIRE(state.selected() != nullptr);
+    CHECK(state.selected()->id == "hostile-1");
+
+    // Pressing T again un-targets without dropping the contact list.
+    state.toggleLock();
+    CHECK_FALSE(state.hasSelection());
+    CHECK(state.count() == 3);
+
+    // Locking again works.
+    state.toggleLock();
+    CHECK(state.selected()->id == "hostile-1");
+
+    // If a selected contact vanishes on rebuild, selection clears.
+    state.setContacts({{"station-a", false, 1200.0f, 0.0f, 0.0f}});
+    CHECK_FALSE(state.hasSelection());
 }

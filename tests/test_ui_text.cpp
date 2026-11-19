@@ -60,7 +60,7 @@ TEST_CASE("M16.3: toon widget geometry is deterministic")
     CHECK(panel[1].quad.x1 == 108.0f);
     CHECK(panel[2].colorIndex == 2); // rim accent
     CHECK(panel[2].quad.y0 == 22.0f); // inset by outline width from panel y=20
-    CHECK(panel[2].quad.y1 == 27.0f); // min(3*ow, h*0.1) = 5 px tall
+    CHECK(panel[2].quad.y1 == 24.0f); // thin 2 px strip so it clears titles
 
     const auto bar = barQuads(0.0f, 0.0f, 100.0f, 10.0f, 0.25f);
     REQUIRE(bar.size() == 2);

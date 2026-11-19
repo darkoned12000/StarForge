@@ -42,16 +42,26 @@ struct GameEvent
     Type type = Type::None;
     float amount = 0.0f;
     std::string text;
+    // Id of the NPC that produced a HostileHit / HostileDestroyed event.
+    std::string sourceId;
 };
 
-struct HostileInfo
+// Plain-data view of an NPC. `hostile` ships attack the player; neutral ships
+// simply travel through the sector and are useful for exercising targeting.
+struct NpcInfo
 {
+    std::string id;
     RawVec3f position{0.0f, 0.0f, 0.0f}; // ship-relative metres
     bool alive = false;
+    bool hostile = true;
     bool engaging = false;
     float shield = 0.0f;
     float hull = 0.0f;
 };
+
+// Kept as an alias so existing call sites/tests that speak "hostile" keep
+// compiling while the simulation supports a mix of hostile and neutral NPCs.
+using HostileInfo = NpcInfo;
 
 // Owns all M15 gameplay state. The game loop feeds flight state and fires
 // input edges; headless tests drive the exact same API.
@@ -60,12 +70,26 @@ class GameSimulation
 public:
     GameSimulation();
 
+    // --- NPCs (M16 polish) ---
+    // Spawns a set of `count` ships travelling through the sector. A mix of
+    // hostile (attack the player) and neutral (travel only) ships is created
+    // so targeting can be exercised against moving, non-attacking contacts.
+    void spawnNpcs(int count = 5);
+    [[nodiscard]] const std::vector<NpcInfo>& npcs() const noexcept { return npcInfo_; }
+
+    // Legacy single-hostile API (used by the original combat tests). Calling
+    // spawnHostile() replaces the NPC set with a single aggressive ship.
     void spawnHostile();
-    [[nodiscard]] bool hostileAlive() const noexcept { return hostile_.alive; }
+    [[nodiscard]] bool hostileAlive() const noexcept;
     [[nodiscard]] HostileInfo hostile() const noexcept;
 
-    // One fixed simulation step. `shipPosition` and `shipForward` are in the
-    // ship-relative frame (ship at origin). Returns events produced this step.
+    // Which NPC the player's weapons are aimed at (empty = no explicit lock;
+    // weapons then fall back to the nearest hostile in the forward cone).
+    void setTargetId(std::string id) noexcept { targetId_ = std::move(id); }
+    [[nodiscard]] const std::string& targetId() const noexcept { return targetId_; }
+
+    // One fixed simulation step. `shipForward` is in the ship-relative frame
+    // (ship at origin). Returns events produced this step.
     std::vector<GameEvent> step(float dt, const RawVec3f& shipForward,
                                 bool firePrimary, bool fireSecondary);
 
@@ -109,20 +133,27 @@ public:
     [[nodiscard]] std::string currentSystem() const noexcept { return jump_.currentSystem(); }
 
 private:
-    struct HostileState
+    struct NpcState
     {
+        std::string id;
         RawVec3f position{};
         RawVec3f velocity{};
         bool alive = false;
+        bool hostile = true;
         bool engaging = true;
         float cooldown = 0.0f;
-        float phase = 0.0f;      // drives orbit/strafe manoeuvres
+        float phase = 0.0f;      // drives orbit/strafe/travel manoeuvres
         float evadeTimer = 0.0f; // set when hit -> break off and evade
         gameplay::DamageState damage;
     };
 
+    // Refresh the plain-data view after mutating the internal NPC states.
+    void refreshNpcInfo() noexcept;
+
     gameplay::DamageState player_;
-    HostileState hostile_;
+    std::vector<NpcState> npcs_;
+    std::vector<NpcInfo> npcInfo_;
+    std::string targetId_;
     float primaryCooldown_ = 0.0f;
     float secondaryCooldown_ = 0.0f;
     gameplay::EconomyState economy_;

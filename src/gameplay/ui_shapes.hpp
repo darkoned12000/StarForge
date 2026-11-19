@@ -24,7 +24,8 @@ panelQuads(float x, float y, float w, float h, float outlineWidth)
     const float ow = std::clamp(outlineWidth, 0.0f, std::min(w, h) * 0.25f);
     out.push_back({{x, y, x + w, y + h}, 1}); // outline
     out.push_back({{x + ow, y + ow, x + w - ow, y + h - ow}, 0}); // fill
-    const float accentH = std::min(3.0f * ow, h * 0.1f);
+    // Thin top strip so it never collides with panel titles/text.
+    const float accentH = std::min(2.0f, h * 0.04f);
     out.push_back({{x + ow, y + ow, x + w - ow, y + ow + accentH}, 2}); // rim accent
     return out;
 }

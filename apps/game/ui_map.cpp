@@ -23,27 +23,46 @@ MapLayout mapLayout(float windowWidth, float windowHeight,
                     const std::string& currentSystem, float jumpRange)
 {
     MapLayout layout;
-    layout.panel = UiRect{windowWidth * 0.5f - 300.0f, windowHeight * 0.5f - 190.0f,
-                          600.0f, 380.0f};
-    layout.centreX = layout.panel.x + 190.0f;
-    layout.centreY = layout.panel.y + 190.0f;
+    // Wide chart on the left, dedicated info column on the right.
+    layout.panel = UiRect{windowWidth * 0.5f - 360.0f, windowHeight * 0.5f - 235.0f,
+                          720.0f, 470.0f};
+    layout.mapSection = UiRect{layout.panel.x + 8.0f, layout.panel.y + 44.0f,
+                               452.0f, 414.0f};
+    layout.infoSection = UiRect{layout.panel.x + 474.0f, layout.panel.y + 44.0f,
+                                234.0f, 414.0f};
+    layout.dividerX = layout.panel.x + 464.0f;
+    layout.centreX = layout.mapSection.x + layout.mapSection.w * 0.5f;
+    layout.centreY = layout.mapSection.y + layout.mapSection.h * 0.5f;
+
     const auto& systems = knownSystems();
     auto originIt = std::find_if(systems.begin(), systems.end(),
                                  [&](const auto& s) { return s.id == currentSystem; });
     if (originIt == systems.end()) originIt = systems.begin();
+    constexpr float kPixelsPerUnit = 95.0f;
     for (const auto& sys : systems)
     {
-        const auto p = projectSystem(sys, *originIt, 110.0f, jumpRange);
+        const auto p = projectSystem(sys, *originIt, kPixelsPerUnit, jumpRange);
         MapLayout::SystemHit hit;
         hit.id = sys.id;
         hit.point = p;
         hit.current = sys.id == currentSystem;
-        hit.rect = UiRect{layout.centreX + p.x - 6.0f, layout.centreY + p.y - 6.0f, 12.0f, 12.0f};
+        // Hit box is a little larger than the drawn dot for easy clicking.
+        hit.rect = UiRect{layout.centreX + p.x - 9.0f, layout.centreY + p.y - 9.0f,
+                          18.0f, 18.0f};
         layout.systems.push_back(hit);
     }
-    layout.jumpButton = UiRect{layout.panel.x + 390.0f, layout.panel.y + 310.0f,
-                               190.0f, 40.0f};
+    layout.jumpButton = UiRect{layout.infoSection.x + 12.0f,
+                               layout.infoSection.y + layout.infoSection.h - 56.0f,
+                               layout.infoSection.w - 24.0f, 44.0f};
     return layout;
+}
+
+std::string jumpButtonLabel(const std::string& selectedSystem,
+                            const std::string& currentSystem)
+{
+    if (selectedSystem.empty() || selectedSystem == currentSystem)
+        return "Select system";
+    return "Jump to " + selectedSystem;
 }
 
 std::vector<SectorObject> sectorObjects(const std::string& systemId)

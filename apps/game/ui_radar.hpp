@@ -33,6 +33,7 @@ enum class RadarKind
 {
     Rock,
     Hostile,
+    Neutral,
     Planet,
     Station,
 };

@@ -44,12 +44,21 @@ struct SectorObject
 
 [[nodiscard]] std::vector<SectorObject> sectorObjects(const std::string& systemId);
 
-// Shared layout for hit-testing and rendering the map panel.
+// Label for the map's primary action button.
+[[nodiscard]] std::string jumpButtonLabel(const std::string& selectedSystem,
+                                          const std::string& currentSystem);
+
+// Shared layout for hit-testing and rendering the map. The panel is split
+// into a left-hand star chart and a right-hand information section so text
+// can never overlap the chart.
 struct MapLayout
 {
     UiRect panel{};
+    UiRect mapSection{};
+    UiRect infoSection{};
     float centreX = 0.0f;
     float centreY = 0.0f;
+    float dividerX = 0.0f;
     struct SystemHit
     {
         std::string id;

@@ -7,9 +7,10 @@ namespace starforge::game
 
 void TargetingState::setContacts(std::vector<TargetContact> contacts)
 {
-    const std::string selectedId = index_ < contacts_.size() ? contacts_[index_].id : std::string{};
+    const bool hadSelection = index_ < contacts_.size();
+    const std::string selectedId = hadSelection ? contacts_[index_].id : std::string{};
     contacts_ = std::move(contacts);
-    index_ = 0;
+    index_ = kNoSelection;
     if (!selectedId.empty())
     {
         for (std::size_t i = 0; i < contacts_.size(); ++i)
@@ -18,21 +19,23 @@ void TargetingState::setContacts(std::vector<TargetContact> contacts)
                 index_ = i;
                 return;
             }
+        // The previously selected contact disappeared - clear the lock.
+        lockProgress_ = 0.0f;
     }
-    lockProgress_ = 0.0f;
 }
 
 void TargetingState::cycleNext() noexcept
 {
     if (contacts_.empty()) return;
-    index_ = (index_ + 1) % contacts_.size();
+    index_ = index_ == kNoSelection ? 0 : (index_ + 1) % contacts_.size();
     lockProgress_ = 0.0f;
 }
 
 void TargetingState::cyclePrevious() noexcept
 {
     if (contacts_.empty()) return;
-    index_ = (index_ + contacts_.size() - 1) % contacts_.size();
+    index_ = index_ == kNoSelection ? contacts_.size() - 1
+                                    : (index_ + contacts_.size() - 1) % contacts_.size();
     lockProgress_ = 0.0f;
 }
 
@@ -58,11 +61,18 @@ void TargetingState::lockNearest() noexcept
     lockProgress_ = 0.0f;
 }
 
+void TargetingState::toggleLock() noexcept
+{
+    if (hasSelection())
+        clearSelection();
+    else
+        lockNearest();
+}
+
 void TargetingState::clearSelection() noexcept
 {
-    index_ = 0;
+    index_ = kNoSelection;
     lockProgress_ = 0.0f;
-    contacts_.clear();
 }
 
 const TargetContact* TargetingState::selected() const noexcept

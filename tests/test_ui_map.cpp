@@ -52,3 +52,15 @@ TEST_CASE("M16 polish: sector drill-in lists notable objects")
     CHECK(hasHostile);
     CHECK_FALSE(starforge::game::sectorObjects("unknown").empty());
 }
+
+TEST_CASE("M16 polish: map layout separates chart from info and labels jumps")
+{
+    const auto layout = starforge::game::mapLayout(1920.0f, 1080.0f, "sol", 2.0f);
+    CHECK(layout.infoSection.x > layout.mapSection.x + layout.mapSection.w);
+    CHECK(layout.dividerX > layout.mapSection.x + layout.mapSection.w);
+    CHECK(layout.dividerX < layout.infoSection.x);
+    CHECK_FALSE(layout.systems.empty());
+
+    CHECK(starforge::game::jumpButtonLabel("barnard", "sol") == "Jump to barnard");
+    CHECK(starforge::game::jumpButtonLabel("sol", "sol") == "Select system");
+}

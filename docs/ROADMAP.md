@@ -1340,6 +1340,20 @@ sector map is clickable with system selection, a JUMP HERE button, clamped
 labels, drill-in object list and a pulsing current-system marker; the NAV
 readout is labelled.
 
+**M16 UI polish round 2 (2026-11-19):** the sector now spawns five travelling
+NPCs (a mix of hostile and neutral ships) so targeting can be tested against
+moving, non-attacking contacts; player weapons can be aimed at the selected
+NPC by id. `T` now toggles lock on/off and the game starts with no target.
+The pause menu fits its labels inside the buttons, and choosing Sector Map
+closes the menu and opens an immediately-interactive chart. The map was
+redesigned as a sci-fi star chart with a starfield, nav grid, dashed range
+rings and a dedicated info column separated by a glowing divider; current
+position is green, selected destination yellow, joined by a dotted route, and
+the action button reads `Jump to <name>`. The NAV readout moved above the
+radar, Cargo sits on its own HUD line, the radar gained a rotating sweep and
+a periodic ping, and panel accent strips were thinned so they no longer touch
+titles. Verification: CTest 12/12, 378 CPU cases, zero validation errors.
+
 ### M17 – Asset Pipeline
 
 - **Goal:** Mesh/material/audio loading (stb, tinygltf, meshoptimizer),

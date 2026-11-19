@@ -167,3 +167,60 @@ TEST_CASE("M15.0.6: five-minute flight simulation stays under the frame budget (
     const double p95 = timings[(timings.size() * 95) / 100];
     CHECK(p95 < 6.94); // ADR-004 interval; gameplay must leave room for rendering
 }
+
+TEST_CASE("M16 polish: spawnNpcs creates traveling hostiles and neutrals")
+{
+    GameSimulation sim;
+    sim.spawnNpcs(5);
+    REQUIRE(sim.npcs().size() == 5);
+
+    int hostiles = 0, neutrals = 0;
+    for (const auto& npc : sim.npcs())
+    {
+        CHECK(npc.alive);
+        CHECK_FALSE(npc.id.empty());
+        if (npc.hostile) ++hostiles; else ++neutrals;
+    }
+    CHECK(hostiles >= 1);
+    CHECK(neutrals >= 1); // not every NPC attacks the player
+    CHECK(sim.hostileAlive());
+
+    // Every NPC keeps moving through the sector over time.
+    const auto before = sim.npcs();
+    for (int i = 0; i < 120; ++i)
+        (void)sim.step(kStep, kForward, false, false);
+    const auto after = sim.npcs();
+    std::size_t moved = 0;
+    for (std::size_t i = 0; i < before.size(); ++i)
+    {
+        const auto& a = before[i].position;
+        const auto& b = after[i].position;
+        if (std::abs(a.x - b.x) + std::abs(a.y - b.y) + std::abs(a.z - b.z) > 1.0f)
+            ++moved;
+    }
+    CHECK(moved == before.size());
+}
+
+TEST_CASE("M16 polish: weapons can be aimed at a selected neutral NPC")
+{
+    GameSimulation sim;
+    sim.spawnNpcs(5);
+
+    const auto neutral = std::find_if(sim.npcs().begin(), sim.npcs().end(),
+        [](const NpcInfo& n) { return !n.hostile; });
+    REQUIRE(neutral != sim.npcs().end());
+    sim.setTargetId(neutral->id);
+
+    bool hitNeutral = false;
+    for (int i = 0; i < 600; ++i)
+        for (const auto& event : sim.step(kStep, kForward, true, false))
+            if (event.type == GameEvent::Type::HostileHit && event.sourceId == neutral->id)
+                hitNeutral = true;
+    CHECK(hitNeutral);
+
+    // The selected neutral can be destroyed just like a hostile.
+    const auto now = std::find_if(sim.npcs().begin(), sim.npcs().end(),
+        [&](const NpcInfo& n) { return n.id == neutral->id; });
+    REQUIRE(now != sim.npcs().end());
+    CHECK_FALSE(now->alive);
+}

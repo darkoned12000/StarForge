@@ -381,8 +381,18 @@ int main()
     starforge::game::CommsLog comms;
     starforge::game::TextEntry textEntry;
     starforge::game::UiState uiState;
-    simulation.spawnHostile();
-    logInfo("First Flight: ship + hostile + trading loop ready. W/S throttle, mouse steer, Space UI, P pause.");
+    // M16 polish: spawn a set of travelling NPCs (hostiles + neutrals) so
+    // targeting can be exercised against several moving contacts.
+    simulation.spawnNpcs(5);
+    logInfo("First Flight: ship + 5 NPCs + trading loop ready. W/S throttle, mouse steer, T lock/untarget, Space UI, P pause.");
+    // Resolve an NPC's last known position for combat effects (the NPC stays
+    // in the list after death, so its position is still available here).
+    auto npcPositionById = [&simulation](const std::string& id) -> starforge::game::RawVec3f {
+        for (const auto& npc : simulation.npcs())
+            if (npc.id == id)
+                return npc.position;
+        return {};
+    };
 
     bool needRecreate = false;
     float time = 0.0f;
@@ -563,13 +573,23 @@ int main()
                 inputTracker.prevZoomIn = zoomIn;
                 inputTracker.prevZoomOut = zoomOut;
                 const bool mapKey = app->isKeyDown(starforge::Key::M);
-                if (mapKey && !inputTracker.prevMap) mapVisible = !mapVisible;
+                if (mapKey && !inputTracker.prevMap)
+                {
+                    mapVisible = !mapVisible;
+                    if (mapVisible)
+                    {
+                        // Free the cursor so the map is immediately clickable.
+                        flight.paused = false;
+                        flight.mode = starforge::game::FlightMode::Ui;
+                    }
+                }
                 inputTracker.prevMap = mapKey;
                 const bool lockKey = app->isKeyDown(starforge::Key::T);
                 if (lockKey && !inputTracker.prevLock)
                 {
-                    targeting.lockNearest();
-                    logInfo("[TGT] locked nearest contact");
+                    targeting.toggleLock();
+                    logInfo(targeting.hasSelection() ? "[TGT] locked nearest contact"
+                                                      : "[TGT] target cleared");
                 }
                 inputTracker.prevLock = lockKey;
             }
@@ -600,15 +620,21 @@ int main()
             }
         }
 
+        // One hit-test frame shared by the pause menu, station screen and
+        // sector map. Calling beginFrame once keeps every widget's hover /
+        // click state alive for the whole frame (including rendering).
+        {
+            const auto cursor = app->mousePosition();
+            uiState.beginFrame(cursor.x, cursor.y,
+                               app->mouseButtonPressed(starforge::MouseButton::Left));
+        }
+
         // Pause menu: clickable Resume / Map / Quit buttons.
         if (flight.paused)
         {
-            const auto cursor = app->mousePosition();
             const auto fb = app->framebufferSize();
-            const starforge::game::UiRect panel{fb.width * 0.5f - 100.0f,
-                                                fb.height * 0.5f - 80.0f, 200.0f, 240.0f};
-            uiState.beginFrame(cursor.x, cursor.y,
-                               app->mouseButtonPressed(starforge::MouseButton::Left));
+            const starforge::game::UiRect panel{fb.width * 0.5f - 110.0f,
+                                                fb.height * 0.5f - 80.0f, 220.0f, 240.0f};
             for (const auto& button : starforge::game::menuButtons())
                 uiState.addWidget(button.id,
                                   starforge::game::UiRect{panel.x + button.x,
@@ -623,7 +649,12 @@ int main()
                     flight.paused = false;
                     break;
                 case starforge::game::MenuAction::ToggleMap:
-                    mapVisible = !mapVisible;
+                    // Opening the map from the menu closes the menu and enters
+                    // UI mode so the cursor is free and the map is immediately
+                    // interactive - no need to dismiss the menu first.
+                    mapVisible = true;
+                    flight.paused = false;
+                    flight.mode = starforge::game::FlightMode::Ui;
                     break;
                 case starforge::game::MenuAction::Quit:
                     quitRequested = true;
@@ -640,10 +671,7 @@ int main()
             // M16.8: clickable station screen. Register widgets in the same
             // geometry the renderer uses, then apply any clicked action.
             {
-                const auto cursor = app->mousePosition();
                 const auto fb = app->framebufferSize();
-                uiState.beginFrame(cursor.x, cursor.y,
-                                   app->mouseButtonPressed(starforge::MouseButton::Left));
                 const auto panel = starforge::game::stationPanelRect(
                     static_cast<float>(fb.width), static_cast<float>(fb.height));
                 for (const auto& button : starforge::game::stationButtons())
@@ -653,35 +681,6 @@ int main()
                 for (const auto& button : starforge::game::stationButtons())
                     if (uiState.clicked(button.id))
                         starforge::game::applyStationAction(button.id, simulation, comms);
-
-                // Interactive sector map: click a system to select it, then
-                // JUMP if it is within range.
-                if (mapVisible)
-                {
-                    const auto layout = starforge::game::mapLayout(
-                        static_cast<float>(fb.width), static_cast<float>(fb.height),
-                        simulation.currentSystem(), simulation.jumpRangeLy());
-                    for (const auto& sys : layout.systems)
-                        uiState.addWidget("map:" + sys.id, sys.rect);
-                    uiState.addWidget("map-jump", layout.jumpButton);
-                    for (const auto& sys : layout.systems)
-                        if (uiState.clicked("map:" + sys.id)) selectedSystem = sys.id;
-                    if (uiState.clicked("map-jump"))
-                    {
-                        const auto& found = std::find_if(layout.systems.begin(), layout.systems.end(),
-                            [&](const auto& s) { return s.id == selectedSystem; });
-                        if (found != layout.systems.end() && found->point.reachable)
-                        {
-                            const float dist = found->point.distance;
-                            if (simulation.jump(selectedSystem, dist))
-                                comms.push(starforge::game::CommsChannel::System, "nav",
-                                           "Jumped to " + selectedSystem);
-                        }
-                        else
-                            comms.push(starforge::game::CommsChannel::System, "nav",
-                                       "System out of jump range");
-                    }
-                }
             }
             handleUiActions(*app, uiTracker, simulation, comms);
             // M16.7: chat text entry (SDL text input, not key-code mapping).
@@ -705,6 +704,42 @@ int main()
         {
             app->takeTextInput(); // drain typing while flying
         }
+
+        // Interactive sector map: click a system to select it, then JUMP TO
+        // <name> if it is within range. Runs whenever the map is open so a
+        // map opened from the pause menu is interactive immediately.
+        if (mapVisible && !flight.paused)
+        {
+            const auto fb = app->framebufferSize();
+            const auto layout = starforge::game::mapLayout(
+                static_cast<float>(fb.width), static_cast<float>(fb.height),
+                simulation.currentSystem(), simulation.jumpRangeLy());
+            for (const auto& sys : layout.systems)
+                uiState.addWidget("map:" + sys.id, sys.rect);
+            uiState.addWidget("map-jump", layout.jumpButton);
+            for (const auto& sys : layout.systems)
+                if (uiState.clicked("map:" + sys.id))
+                {
+                    selectedSystem = sys.id;
+                    comms.push(starforge::game::CommsChannel::System, "nav",
+                               "Selected " + selectedSystem);
+                }
+            if (uiState.clicked("map-jump"))
+            {
+                const auto found = std::find_if(layout.systems.begin(), layout.systems.end(),
+                    [&](const auto& s) { return s.id == selectedSystem; });
+                if (found != layout.systems.end() && found->point.reachable)
+                {
+                    if (simulation.jump(selectedSystem, found->point.distance))
+                        comms.push(starforge::game::CommsChannel::System, "nav",
+                                   "Jumped to " + selectedSystem);
+                }
+                else
+                    comms.push(starforge::game::CommsChannel::System, "nav",
+                               "System out of jump range");
+            }
+        }
+
         comms.tick(frameDt);
         toasts.tick(frameDt);
 
@@ -758,12 +793,13 @@ int main()
                     break;
                 case starforge::game::GameEvent::Type::HostileDestroyed:
                     comms.push(starforge::game::CommsChannel::Combat, "combat",
-                               "Hostile destroyed");
-                    toasts.push(starforge::game::CommsChannel::Combat, "", "HOSTILE DESTROYED", 3.0f);
+                               (event.sourceId.empty() ? std::string("NPC")
+                                                       : event.sourceId + " destroyed"));
+                    toasts.push(starforge::game::CommsChannel::Combat, "", "TARGET DESTROYED", 3.0f);
                     explosionTimer = 1.0f;
-                    explosionPos = simulation.hostile().position;
+                    explosionPos = npcPositionById(event.sourceId);
                     if (boomVoice.has_value()) audio->play(*boomVoice, true);
-                    logInfo("[COMBAT] hostile destroyed");
+                    logInfo(("[COMBAT] NPC destroyed: " + event.sourceId).c_str());
                     break;
                 default:
                     break;
@@ -844,20 +880,23 @@ int main()
         lastFirePrimary = flight.firePrimary;
         lastFireSecondary = flight.fireSecondary;
 
-        // M16.5: rebuild target contacts from live simulation state each frame.
+        // M16.5: rebuild target contacts from every live NPC each frame.
         {
-            const auto hostile = simulation.hostile();
             std::vector<starforge::game::TargetContact> contacts;
-            if (hostile.alive)
+            for (const auto& npc : simulation.npcs())
             {
-                const float dx = hostile.position.x, dy = hostile.position.y, dz = hostile.position.z;
-                contacts.push_back({"hostile-1", true,
+                if (!npc.alive) continue;
+                const float dx = npc.position.x, dy = npc.position.y, dz = npc.position.z;
+                contacts.push_back({npc.id, npc.hostile,
                                     std::sqrt(dx * dx + dy * dy + dz * dz),
-                                    hostile.shield, hostile.hull});
+                                    npc.shield, npc.hull});
             }
             contacts.push_back({"station-a", false, 1500.0f, 0.0f, 0.0f});
             targeting.setContacts(std::move(contacts));
             targeting.tick(frameDt, flight.firePrimary && !flight.paused);
+            // Point the ship's weapons at whatever the player has selected.
+            const auto* selectedContact = targeting.selected();
+            simulation.setTargetId(selectedContact ? selectedContact->id : std::string{});
         }
 
         hudTimer += frameDt;
@@ -881,7 +920,9 @@ int main()
             const double sdz = kSunWorld.z - ship.position.z;
             const double sunDist = std::sqrt(sdx * sdx + sdy * sdy + sdz * sdz);
 
-            const auto hostileInfo = simulation.hostile();
+            std::size_t aliveNpcs = 0, aliveHostiles = 0;
+            for (const auto& npc : simulation.npcs())
+                if (npc.alive) { ++aliveNpcs; if (npc.hostile) ++aliveHostiles; }
             std::printf(
                 "[HUD] throttle %.0f%% speed %.0f m/s cell (%.0f,%.0f,%.0f) rocks %zu planet %.0f m sun %.0f m mode %s%s\n",
                 flight.throttle * 100.0f, effectiveSpeed, cell.x, cell.y, cell.z,
@@ -889,10 +930,11 @@ int main()
                 flight.mode == starforge::game::FlightMode::Ui ? "UI" : "FLIGHT",
                 flight.paused ? " PAUSED" : "");
             std::printf(
-                "[M15] shield %.0f hull %.0f hostile %s (s%.0f/h%.0f) credits %d cargo %d system %s jump %.1fly missions %d%s\n",
+                "[M15] shield %.0f hull %.0f NPCs %zu/%zu (hostiles %zu) target %s credits %d cargo %d system %s jump %.1fly missions %d%s\n",
                 simulation.playerShield(), simulation.playerHull(),
-                hostileInfo.alive ? (hostileInfo.engaging ? "ENGAGE" : "EVADE") : "DESTROYED",
-                hostileInfo.shield, hostileInfo.hull, simulation.credits(), simulation.cargoUsed(),
+                aliveNpcs, simulation.npcs().size(), aliveHostiles,
+                targeting.hasSelection() ? targeting.selected()->id.c_str() : "NONE",
+                simulation.credits(), simulation.cargoUsed(),
                 simulation.currentSystem().c_str(), simulation.jumpRangeLy(),
                 simulation.completedMissions(), simulation.isDocked() ? " DOCKED" : "");
             std::fflush(stdout);
@@ -969,26 +1011,41 @@ int main()
         toonParams.rimStrength = 0.6f;
         toonParams.outlineWidth = 2.0f;
 
-        // Hostile ship (M15.0.5): red hull with a fresnel shield shell.
-        const auto hostileInfo = simulation.hostile();
-        starforge::Toon::Context hostileContext;
-        starforge::Toon::Params hostileParams;
-        if (hostileInfo.alive)
+        // M16 polish: render every live NPC. Hostiles keep the brown/red
+        // hull with a shield shell; neutral traders use a cooler cyan hull.
+        struct NpcRender
         {
+            starforge::Toon::Context context;
+            starforge::Toon::Params params;
+        };
+        std::vector<NpcRender> npcRenders;
+        for (const auto& npc : simulation.npcs())
+        {
+            if (!npc.alive) continue;
             starforge::math::Mat4f hm(1.0f);
-            hm.columns[3] = {hostileInfo.position.x, hostileInfo.position.y,
-                             hostileInfo.position.z, 1.0f};
-            hostileContext.viewProj = viewProj * hm;
-            hostileContext.modelView = view * hm;
-            hostileContext.lightDirectionView = toonContext.lightDirectionView;
-            hostileContext.resolution = {static_cast<float>(size.width), static_cast<float>(size.height)};
-            hostileParams.baseColor = {0.58f, 0.42f, 0.24f, 1.0f}; // brown NPC hull
-            hostileParams.shadowColor = {0.22f, 0.14f, 0.07f, 1.0f};
-            hostileParams.bandCount = 3.0f;
-            hostileParams.rimStrength = 0.7f;
-            hostileParams.outlineWidth = 2.0f;
-            hostileParams.capabilities = hostileInfo.shield > 0.0f ? 2u : 0u; // fresnel shield
-            hostileParams.emissiveColor = {0.2f, 0.05f, 0.5f, 0.6f};
+            hm.columns[3] = {npc.position.x, npc.position.y, npc.position.z, 1.0f};
+            NpcRender r;
+            r.context.viewProj = viewProj * hm;
+            r.context.modelView = view * hm;
+            r.context.lightDirectionView = toonContext.lightDirectionView;
+            r.context.resolution = {static_cast<float>(size.width), static_cast<float>(size.height)};
+            if (npc.hostile)
+            {
+                r.params.baseColor = {0.58f, 0.42f, 0.24f, 1.0f}; // brown NPC hull
+                r.params.shadowColor = {0.22f, 0.14f, 0.07f, 1.0f};
+                r.params.emissiveColor = {0.2f, 0.05f, 0.5f, 0.6f};
+            }
+            else
+            {
+                r.params.baseColor = {0.22f, 0.55f, 0.62f, 1.0f}; // cyan neutral hull
+                r.params.shadowColor = {0.08f, 0.2f, 0.26f, 1.0f};
+                r.params.emissiveColor = {0.05f, 0.2f, 0.28f, 0.4f};
+            }
+            r.params.bandCount = 3.0f;
+            r.params.rimStrength = 0.7f;
+            r.params.outlineWidth = 2.0f;
+            r.params.capabilities = npc.shield > 0.0f ? 2u : 0u; // fresnel shield
+            npcRenders.push_back(std::move(r));
         }
 
         // Visible combat feedback (M15.0.5): emissive muzzle flash while
@@ -1238,7 +1295,7 @@ int main()
             sun->record(fc, sunContext, sun3DParams);
             planet->record(fc, planetContext, planetParams);
             toon->record(fc, toonContext, toonParams);
-            if (hostileInfo.alive) toon->record(fc, hostileContext, hostileParams);
+            for (const auto& r : npcRenders) toon->record(fc, r.context, r.params);
             if (flight.firePrimary) toon->record(fc, muzzleContext, muzzleParams);
             if (shieldFlash > 0.0f) toon->record(fc, flashContext, flashParams);
             if (explosionTimer > 0.0f) toon->record(fc, boomContext, boomParams);
@@ -1252,9 +1309,10 @@ int main()
             const float hudScale = 3.0f;
             const float cx = static_cast<float>(size.width) * 0.5f;
             const float cy = static_cast<float>(size.height) * 0.5f;
-            uiCanvas->addPanel({.x = 16.0f, .y = 16.0f, .w = 430.0f, .h = 180.0f,
+            uiCanvas->addPanel({.x = 16.0f, .y = 16.0f, .w = 430.0f, .h = 212.0f,
                                 .outlineWidth = 2.0f,
-                                .fillColor = {0.05f, 0.09f, 0.18f, 0.85f}});
+                                .fillColor = {0.05f, 0.09f, 0.18f, 0.85f},
+                                .accentColor = {0.4f, 0.8f, 1.0f, 1.0f}});
             const auto hudText = [&](float tx, float ty, const char* label, float value) {
                 char buffer[48];
                 std::snprintf(buffer, sizeof(buffer), "%s %.0f", label, value);
@@ -1286,7 +1344,7 @@ int main()
             uiCanvas->addText({.x = 34.0f, .y = 115.0f, .scale = hudScale,
                                .color = {0.02f, 0.05f, 0.1f, 1.0f}, .text = hullLabel});
             hudText(28.0f, 148.0f, "CREDITS", static_cast<float>(simulation.credits()));
-            hudText(288.0f, 148.0f, "CARGO", static_cast<float>(simulation.cargoUsed()));
+            hudText(28.0f, 178.0f, "CARGO", static_cast<float>(simulation.cargoUsed()));
 
             // Crosshair: four strokes + centre dot, all around screen centre.
             const auto reticle = starforge::math::Vec4f{1.0f, 1.0f, 1.0f, 0.95f};
@@ -1295,20 +1353,47 @@ int main()
             uiCanvas->addRect({.x = cx - 1.0f, .y = cy - 20.0f, .w = 2.0f, .h = 12.0f, .color = reticle});
             uiCanvas->addRect({.x = cx - 1.0f, .y = cy + 8.0f, .w = 2.0f, .h = 12.0f, .color = reticle});
             uiCanvas->addRect({.x = cx - 2.0f, .y = cy - 2.0f, .w = 4.0f, .h = 4.0f, .color = reticle});
-            // Target box follows the actual hostile on screen, plus a
-            // direction chevron pointing toward it when it is off-centre.
-            if (hostileInfo.alive)
+            // Target box follows the selected NPC on screen (or the nearest
+            // hostile when nothing is locked), with a direction chevron.
+            const auto* selectedContact = targeting.selected();
+            const starforge::game::NpcInfo* trackedNpc = nullptr;
+            if (selectedContact)
             {
-                const auto* target = targeting.selected();
-                const bool lockedTarget = target && target->hostile;
-                const starforge::math::Vec4f tc{1.0f, 0.3f, 0.2f, 1.0f};
-                const starforge::math::Vec4f weak{1.0f, 0.3f, 0.2f, 0.5f};
-                const starforge::math::Vec4f boxColor = lockedTarget ? tc : weak;
+                for (const auto& npc : simulation.npcs())
+                    if (npc.alive && npc.id == selectedContact->id)
+                    {
+                        trackedNpc = &npc;
+                        break;
+                    }
+            }
+            if (!trackedNpc)
+            {
+                float best = 1e30f;
+                for (const auto& npc : simulation.npcs())
+                {
+                    if (!npc.alive || !npc.hostile) continue;
+                    const float d = std::sqrt(npc.position.x * npc.position.x +
+                                              npc.position.y * npc.position.y +
+                                              npc.position.z * npc.position.z);
+                    if (d < best) { best = d; trackedNpc = &npc; }
+                }
+            }
+            if (trackedNpc)
+            {
+                const bool lockedTarget = selectedContact &&
+                                          selectedContact->id == trackedNpc->id &&
+                                          trackedNpc->hostile;
+                const starforge::math::Vec4f hostileTc{1.0f, 0.3f, 0.2f, 1.0f};
+                const starforge::math::Vec4f neutralTc{0.3f, 1.0f, 0.85f, 1.0f};
+                const starforge::math::Vec4f tc = trackedNpc->hostile ? hostileTc : neutralTc;
+                const starforge::math::Vec4f boxColor = lockedTarget || selectedContact
+                    ? tc
+                    : starforge::math::Vec4f{tc.x(), tc.y(), tc.z(), 0.5f};
 
                 const starforge::math::Vec4f clip =
-                    viewProj * starforge::math::Vec4f{hostileInfo.position.x,
-                                                      hostileInfo.position.y,
-                                                      hostileInfo.position.z, 1.0f};
+                    viewProj * starforge::math::Vec4f{trackedNpc->position.x,
+                                                      trackedNpc->position.y,
+                                                      trackedNpc->position.z, 1.0f};
                 const float tw = static_cast<float>(size.width);
                 const float th = static_cast<float>(size.height);
                 bool onScreen = false;
@@ -1331,8 +1416,6 @@ int main()
                     uiCanvas->addRect({.x = bx, .y = by + 40.0f, .w = 2.0f, .h = 12.0f, .color = boxColor});
                     uiCanvas->addRect({.x = bx + 50.0f, .y = by + 40.0f, .w = 2.0f, .h = 12.0f, .color = boxColor});
                 }
-                // Chevron at a fixed radius from the reticle pointing at the
-                // target; doubles as an off-screen direction indicator.
                 const float aimX = tx - cx, aimY = ty - cy;
                 const float aimLen = std::sqrt(aimX * aimX + aimY * aimY);
                 if (aimLen > 30.0f)
@@ -1357,7 +1440,7 @@ int main()
                                     .outlineWidth = 2.0f,
                                     .fillColor = {0.04f, 0.08f, 0.14f, 0.88f},
                                     .accentColor = {0.35f, 0.8f, 1.0f, 1.0f}});
-                uiCanvas->addText({.x = commsX + 10.0f, .y = commsY + 8.0f, .scale = 2.0f,
+                uiCanvas->addText({.x = commsX + 10.0f, .y = commsY + 14.0f, .scale = 2.0f,
                                    .color = {0.4f, 0.9f, 1.0f, 1.0f}, .text = "COMMS"});
                 const auto& messages = comms.messages();
                 std::size_t shown = 0;
@@ -1406,11 +1489,37 @@ int main()
                     switch (kind)
                     {
                     case starforge::game::RadarKind::Hostile: return {1.0f, 0.25f, 0.2f, 1.0f};
+                    case starforge::game::RadarKind::Neutral: return {0.3f, 1.0f, 0.85f, 1.0f};
                     case starforge::game::RadarKind::Planet:  return {0.2f, 0.55f, 1.0f, 1.0f};
                     case starforge::game::RadarKind::Station: return {0.3f, 1.0f, 0.6f, 1.0f};
                     default:                                  return {0.7f, 0.7f, 0.7f, 1.0f};
                     }
                 };
+                // M16 polish: continuous rotating sweep + an expanding ping
+                // every few seconds, so the radar reads as an active scanner.
+                {
+                    const float sweep = time * 1.7f;
+                    const float sweepUx = std::cos(sweep), sweepUy = std::sin(sweep);
+                    const starforge::math::Vec4f sweepColor{0.2f, 0.9f, 0.7f, 0.55f};
+                    for (int i = 1; i <= 22; ++i)
+                    {
+                        const float t = static_cast<float>(i) / 22.0f * kRadarRadius;
+                        uiCanvas->addRect({.x = ccx + sweepUx * t - 1.0f,
+                                           .y = ccy + sweepUy * t - 1.0f,
+                                           .w = 2.0f, .h = 2.0f, .color = sweepColor});
+                    }
+                    const float ping = std::fmod(time, 3.0f) / 3.0f;
+                    const float pingR = 12.0f + ping * (kRadarRadius - 12.0f);
+                    const starforge::math::Vec4f pingColor{0.3f, 1.0f, 0.8f,
+                                                            (1.0f - ping) * 0.45f};
+                    for (int i = 0; i < 24; ++i)
+                    {
+                        const float a = static_cast<float>(i) / 24.0f * 6.2831853f;
+                        uiCanvas->addRect({.x = ccx + std::cos(a) * pingR - 1.0f,
+                                           .y = ccy + std::sin(a) * pingR - 1.0f,
+                                           .w = 3.0f, .h = 3.0f, .color = pingColor});
+                    }
+                }
                 // Contacts arrive as camera-relative WORLD offsets. Rotate
                 // them into the ship's local basis so a 180 turn moves them
                 // from behind to ahead on the radar.
@@ -1449,10 +1558,12 @@ int main()
                 plotWorld("planet", planetRel.x(), planetRel.y(), planetRel.z(),
                           starforge::game::RadarKind::Planet);
                 plotWorld("station-a", 400.0f, 0.0f, -1200.0f, starforge::game::RadarKind::Station);
-                const auto hostile = simulation.hostile();
-                if (hostile.alive)
-                    plotWorld("hostile", hostile.position.x, hostile.position.y,
-                              hostile.position.z, starforge::game::RadarKind::Hostile);
+                for (const auto& npc : simulation.npcs())
+                    if (npc.alive)
+                        plotWorld(npc.id.c_str(), npc.position.x, npc.position.y,
+                                  npc.position.z,
+                                  npc.hostile ? starforge::game::RadarKind::Hostile
+                                              : starforge::game::RadarKind::Neutral);
                 int radarRocks = 0;
                 for (const auto* rock : sorted)
                 {
@@ -1467,28 +1578,39 @@ int main()
                 char radarLabel[32];
                 std::snprintf(radarLabel, sizeof(radarLabel), "RADAR %.1fkm (+/-)",
                               radarRange / 1000.0f);
-                uiCanvas->addText({.x = rx + 8.0f, .y = ry + 4.0f, .scale = 2.0f,
+                uiCanvas->addText({.x = rx + 8.0f, .y = ry + 12.0f, .scale = 2.0f,
                                    .color = {0.6f, 0.9f, 1.0f, 1.0f}, .text = radarLabel});
+                // Selected-target navigation readout, placed directly ABOVE
+                // the radar. BRG is degrees clockwise from straight ahead.
                 if (const auto* target = targeting.selected())
                 {
-                    const bool isHostile = target->id == "hostile-1" && hostile.alive;
-                    const float wx = isHostile ? hostile.position.x : 400.0f;
-                    const float wy = isHostile ? hostile.position.y : 0.0f;
-                    const float wz = isHostile ? hostile.position.z : -1200.0f;
+                    float wx = 400.0f, wy = 0.0f, wz = -1200.0f; // station fallback
+                    for (const auto& npc : simulation.npcs())
+                        if (npc.alive && npc.id == target->id)
+                        {
+                            wx = npc.position.x;
+                            wy = npc.position.y;
+                            wz = npc.position.z;
+                            break;
+                        }
                     const auto [localX, localF] = starforge::game::toShipLocal(
                         {wx, wy, wz}, {shipRight.x(), shipRight.y(), shipRight.z()},
                         {shipForward.x(), shipForward.y(), shipForward.z()});
                     const auto p = starforge::game::projectRadar(
-                        {target->id, localX, localF,
-                         target->hostile ? starforge::game::RadarKind::Hostile
-                                         : starforge::game::RadarKind::Station},
+                        {target->id, localX, localF, starforge::game::RadarKind::Station},
                         kRadarRange, kRadarRadius);
-                    char nav[64];
-                    std::snprintf(nav, sizeof(nav), "NAV TGT %.0fm BRG %.0fdeg",
-                                  p.distance, p.bearing);
-                    uiCanvas->addText({.x = 16.0f, .y = static_cast<float>(size.height) - 28.0f,
+                    char nav[96];
+                    std::snprintf(nav, sizeof(nav), "NAV TGT %s  %.0fm  BRG %.0fdeg",
+                                  target->id.c_str(), p.distance, p.bearing);
+                    uiCanvas->addText({.x = rx + 4.0f, .y = ry - 26.0f,
                                        .scale = 2.0f,
                                        .color = {0.8f, 0.95f, 1.0f, 1.0f}, .text = nav});
+                }
+                else
+                {
+                    uiCanvas->addText({.x = rx + 4.0f, .y = ry - 26.0f, .scale = 2.0f,
+                                       .color = {0.45f, 0.6f, 0.7f, 1.0f},
+                                       .text = "NO TARGET - press T to lock"});
                 }
             }
             // M16.8: clickable station / inventory screen.
@@ -1500,7 +1622,7 @@ int main()
                                     .outlineWidth = 2.0f,
                                     .fillColor = {0.06f, 0.11f, 0.2f, 0.92f},
                                     .accentColor = {0.95f, 0.7f, 0.2f, 1.0f}});
-                uiCanvas->addText({.x = panel.x + 14.0f, .y = panel.y + 12.0f, .scale = 2.0f,
+                uiCanvas->addText({.x = panel.x + 14.0f, .y = panel.y + 16.0f, .scale = 2.0f,
                                    .color = {0.9f, 0.95f, 1.0f, 1.0f}, .text = "STATION A / CARGO"});
                 char status[96];
                 std::snprintf(status, sizeof(status), "CR %.0f  ORE %d  %s",
@@ -1541,56 +1663,175 @@ int main()
                 }
             }
 
-            // M16.9: interactive galaxy map with sector drill-in (M toggles).
+            // M16.9: sci-fi sector chart with a separate info column.
             if (mapVisible)
             {
                 const auto layout = starforge::game::mapLayout(
                     static_cast<float>(size.width), static_cast<float>(size.height),
                     simulation.currentSystem(), simulation.jumpRangeLy());
+                const auto& ms = layout.mapSection;
+                const auto& is = layout.infoSection;
                 uiCanvas->addPanel({.x = layout.panel.x, .y = layout.panel.y,
                                     .w = layout.panel.w, .h = layout.panel.h,
                                     .outlineWidth = 2.0f,
-                                    .fillColor = {0.04f, 0.07f, 0.13f, 0.94f},
-                                    .accentColor = {0.4f, 0.7f, 1.0f, 1.0f}});
-                uiCanvas->addText({.x = layout.panel.x + 12.0f, .y = layout.panel.y + 10.0f,
-                                   .scale = 2.0f, .color = {0.5f, 0.85f, 1.0f, 1.0f},
-                                   .text = "SECTOR MAP (M) - click a system"});
+                                    .fillColor = {0.02f, 0.04f, 0.09f, 0.96f},
+                                    .accentColor = {0.3f, 0.8f, 1.0f, 1.0f}});
+
+                // Header strip + section captions.
+                uiCanvas->addRect({.x = layout.panel.x + 2.0f, .y = layout.panel.y + 34.0f,
+                                   .w = layout.panel.w - 4.0f, .h = 2.0f,
+                                   .color = {0.15f, 0.4f, 0.55f, 1.0f}});
+                uiCanvas->addText({.x = layout.panel.x + 14.0f, .y = layout.panel.y + 14.0f,
+                                   .scale = 2.0f, .color = {0.5f, 0.9f, 1.0f, 1.0f},
+                                   .text = "SECTOR CHART"});
+                uiCanvas->addText({.x = is.x + 4.0f, .y = ms.y + 4.0f, .scale = 1.0f,
+                                   .color = {0.5f, 0.85f, 1.0f, 1.0f},
+                                   .text = "DESTINATION DATA"});
+
+                // Chart backdrop: deterministic star dots + nav grid.
+                const starforge::math::Vec4f starColor{0.45f, 0.7f, 0.85f, 0.5f};
+                for (int i = 0; i < 90; ++i)
+                {
+                    const float rx = std::fmod(static_cast<float>(i) * 0.6180339f, 1.0f);
+                    const float ry = std::fmod(static_cast<float>(i) * 0.4142135f, 1.0f);
+                    uiCanvas->addRect({.x = ms.x + rx * ms.w, .y = ms.y + ry * ms.h,
+                                       .w = (i % 7 == 0) ? 2.0f : 1.0f,
+                                       .h = (i % 7 == 0) ? 2.0f : 1.0f, .color = starColor});
+                }
+                const starforge::math::Vec4f gridColor{0.12f, 0.3f, 0.42f, 0.55f};
+                for (float gx = ms.x; gx <= ms.x + ms.w; gx += 56.0f)
+                    uiCanvas->addRect({.x = gx, .y = ms.y, .w = 1.0f, .h = ms.h, .color = gridColor});
+                for (float gy = ms.y; gy <= ms.y + ms.h; gy += 56.0f)
+                    uiCanvas->addRect({.x = ms.x, .y = gy, .w = ms.w, .h = 1.0f, .color = gridColor});
+                // Dashed range rings around the current position.
+                for (float r : {70.0f, 140.0f, 210.0f})
+                {
+                    for (int i = 0; i < 48; ++i)
+                    {
+                        if (i % 2) continue;
+                        const float a = static_cast<float>(i) / 48.0f * 6.2831853f;
+                        uiCanvas->addRect({.x = layout.centreX + std::cos(a) * r - 1.0f,
+                                           .y = layout.centreY + std::sin(a) * r - 1.0f,
+                                           .w = 2.0f, .h = 2.0f,
+                                           .color = {0.18f, 0.45f, 0.6f, 0.6f}});
+                    }
+                }
+                // Bright cyan corner brackets frame the chart.
+                const starforge::math::Vec4f bracket{0.3f, 0.9f, 1.0f, 1.0f};
+                for (const auto& c : {std::pair<float, float>{ms.x, ms.y},
+                                      std::pair<float, float>{ms.x + ms.w, ms.y},
+                                      std::pair<float, float>{ms.x, ms.y + ms.h},
+                                      std::pair<float, float>{ms.x + ms.w, ms.y + ms.h}})
+                {
+                    const bool left = c.first < layout.centreX;
+                    const bool top = c.second < layout.centreY;
+                    uiCanvas->addRect({.x = left ? c.first : c.first - 22.0f,
+                                       .y = c.second, .w = 22.0f, .h = 2.0f, .color = bracket});
+                    uiCanvas->addRect({.x = c.first,
+                                       .y = top ? c.second : c.second - 22.0f,
+                                       .w = 2.0f, .h = 22.0f, .color = bracket});
+                }
+
+                // Glowing divider between chart and info column.
+                uiCanvas->addRect({.x = layout.dividerX, .y = ms.y, .w = 2.0f, .h = ms.h,
+                                   .color = {0.3f, 0.8f, 1.0f, 0.9f}});
+
+                const starforge::math::Vec4f currentColor{0.25f, 1.0f, 0.5f, 1.0f};
+                const starforge::math::Vec4f selectedColor{1.0f, 0.9f, 0.2f, 1.0f};
+                const starforge::game::MapPoint* currentPoint = nullptr;
+                const starforge::game::MapPoint* selectedPoint = nullptr;
                 for (const auto& sys : layout.systems)
                 {
-                    const auto dotColor = sys.current
-                        ? starforge::math::Vec4f{1.0f, 1.0f, 0.3f, 1.0f}
-                        : sys.id == selectedSystem
-                            ? starforge::math::Vec4f{1.0f, 0.7f, 0.2f, 1.0f}
-                            : sys.point.reachable
-                                ? starforge::math::Vec4f{0.3f, 1.0f, 0.6f, 1.0f}
-                                : starforge::math::Vec4f{0.5f, 0.5f, 0.7f, 1.0f};
-                    const float pulse = sys.current ? 8.0f + 2.0f * std::sin(time * 3.0f) : 5.0f;
-                    uiCanvas->addRect({.x = layout.centreX + sys.point.x - pulse * 0.5f,
-                                       .y = layout.centreY + sys.point.y - pulse * 0.5f,
-                                       .w = pulse, .h = pulse, .color = dotColor});
+                    if (sys.current) currentPoint = &sys.point;
+                    if (sys.id == selectedSystem) selectedPoint = &sys.point;
+                }
+
+                // Slim dotted route between current and selected destination.
+                if (currentPoint && selectedPoint && currentPoint != selectedPoint)
+                {
+                    for (int step = 0; step <= 60; ++step)
+                    {
+                        if (step % 3) continue;
+                        const float t = static_cast<float>(step) / 60.0f;
+                        const float px = layout.centreX + currentPoint->x +
+                                         (selectedPoint->x - currentPoint->x) * t;
+                        const float py = layout.centreY + currentPoint->y +
+                                         (selectedPoint->y - currentPoint->y) * t;
+                        uiCanvas->addRect({.x = px - 1.0f, .y = py - 1.0f, .w = 2.0f, .h = 2.0f,
+                                           .color = {1.0f, 0.9f, 0.3f, 0.85f}});
+                    }
+                }
+
+                // Systems: current = greenish, selection = yellow, others cool.
+                for (const auto& sys : layout.systems)
+                {
+                    const auto dotColor = sys.current ? currentColor
+                        : sys.id == selectedSystem ? selectedColor
+                        : sys.point.reachable
+                            ? starforge::math::Vec4f{0.3f, 0.8f, 1.0f, 1.0f}
+                            : starforge::math::Vec4f{0.45f, 0.5f, 0.65f, 1.0f};
+                    if (sys.current)
+                    {
+                        const float pulse = 10.0f + 2.0f * std::sin(time * 3.0f);
+                        uiCanvas->addRect({.x = layout.centreX + sys.point.x - pulse,
+                                           .y = layout.centreY + sys.point.y - 1.0f,
+                                           .w = pulse * 2.0f, .h = 2.0f,
+                                           .color = {currentColor.x(), currentColor.y(),
+                                                     currentColor.z(), 0.5f}});
+                        uiCanvas->addRect({.x = layout.centreX + sys.point.x - 1.0f,
+                                           .y = layout.centreY + sys.point.y - pulse,
+                                           .w = 2.0f, .h = pulse * 2.0f,
+                                           .color = {currentColor.x(), currentColor.y(),
+                                                     currentColor.z(), 0.5f}});
+                    }
+                    const float dot = sys.current || sys.id == selectedSystem ? 9.0f : 6.0f;
+                    uiCanvas->addRect({.x = layout.centreX + sys.point.x - dot * 0.5f,
+                                       .y = layout.centreY + sys.point.y - dot * 0.5f,
+                                       .w = dot, .h = dot, .color = dotColor});
                     float lx = layout.centreX + sys.point.x + 10.0f;
-                    float ly = layout.centreY + sys.point.y - 2.0f;
-                    lx = std::clamp(lx, layout.panel.x + 8.0f, layout.panel.x + 350.0f);
-                    ly = std::clamp(ly, layout.panel.y + 34.0f, layout.panel.y + 280.0f);
+                    float ly = layout.centreY + sys.point.y + 8.0f;
+                    lx = std::clamp(lx, ms.x + 4.0f, ms.x + ms.w - 96.0f);
+                    ly = std::clamp(ly, ms.y + 4.0f, ms.y + ms.h - 12.0f);
                     uiCanvas->addText({.x = lx, .y = ly, .scale = 1.0f,
                                        .color = dotColor, .text = sys.id});
                 }
-                const float dx = layout.panel.x + 370.0f;
-                uiCanvas->addText({.x = dx, .y = layout.panel.y + 46.0f, .scale = 2.0f,
-                                   .color = {0.6f, 0.9f, 1.0f, 1.0f},
-                                   .text = "SECTOR: " + selectedSystem});
+
+                // --- Information column (never overlaps the chart) ---
+                const float ix = is.x + 8.0f;
+                std::string dest = selectedSystem;
+                if (dest.size() > 19) dest.resize(19);
+                uiCanvas->addText({.x = ix, .y = is.y + 24.0f, .scale = 1.0f,
+                                   .color = {0.55f, 0.75f, 0.9f, 1.0f}, .text = "SYSTEM"});
+                uiCanvas->addText({.x = ix, .y = is.y + 38.0f, .scale = 2.0f,
+                                   .color = selectedColor, .text = dest});
+                const bool reachable = selectedPoint && selectedPoint->reachable;
+                uiCanvas->addText({.x = ix, .y = is.y + 66.0f, .scale = 1.0f,
+                                   .color = reachable
+                                       ? starforge::math::Vec4f{0.3f, 1.0f, 0.6f, 1.0f}
+                                       : starforge::math::Vec4f{1.0f, 0.5f, 0.3f, 1.0f},
+                                   .text = reachable ? "IN JUMP RANGE" : "OUT OF RANGE"});
+                if (selectedPoint)
+                {
+                    char dtext[48];
+                    std::snprintf(dtext, sizeof(dtext), "DIST %.2f ly", selectedPoint->distance);
+                    uiCanvas->addText({.x = ix, .y = is.y + 84.0f, .scale = 1.0f,
+                                       .color = {0.7f, 0.85f, 0.95f, 1.0f}, .text = dtext});
+                }
+                uiCanvas->addText({.x = ix, .y = is.y + 116.0f, .scale = 1.0f,
+                                   .color = {0.55f, 0.75f, 0.9f, 1.0f},
+                                   .text = "OBJECTS IN SYSTEM"});
                 const auto objects = starforge::game::sectorObjects(selectedSystem);
                 std::size_t row = 0;
                 for (const auto& obj : objects)
                 {
                     std::string label = obj.kind + ": " + obj.id;
-                    if (label.size() > 26) label.resize(26);
-                    uiCanvas->addText({.x = dx, .y = layout.panel.y + 76.0f +
-                                            static_cast<float>(row++) * 24.0f,
+                    if (label.size() > 32) label.resize(32);
+                    uiCanvas->addText({.x = ix, .y = is.y + 134.0f +
+                                            static_cast<float>(row++) * 16.0f,
                                        .scale = 1.0f,
                                        .color = obj.kind == "hostile"
-                                           ? starforge::math::Vec4f{1.0f, 0.3f, 0.2f, 1.0f}
-                                           : starforge::math::Vec4f{0.8f, 0.9f, 1.0f, 1.0f},
+                                           ? starforge::math::Vec4f{1.0f, 0.4f, 0.3f, 1.0f}
+                                           : starforge::math::Vec4f{0.8f, 0.92f, 1.0f, 1.0f},
                                        .text = label});
                 }
                 const bool jumpHot = uiState.hovered("map-jump");
@@ -1598,19 +1839,22 @@ int main()
                                     .w = layout.jumpButton.w, .h = layout.jumpButton.h,
                                     .outlineWidth = 1.5f,
                                     .fillColor = jumpHot
-                                        ? starforge::math::Vec4f{0.2f, 0.45f, 0.3f, 1.0f}
-                                        : starforge::math::Vec4f{0.1f, 0.2f, 0.32f, 1.0f}});
-                uiCanvas->addText({.x = layout.jumpButton.x + 16.0f,
-                                   .y = layout.jumpButton.y + 12.0f, .scale = 2.0f,
-                                   .color = {0.95f, 0.98f, 1.0f, 1.0f}, .text = "JUMP HERE"});
+                                        ? starforge::math::Vec4f{0.25f, 0.5f, 0.35f, 1.0f}
+                                        : starforge::math::Vec4f{0.12f, 0.24f, 0.38f, 1.0f},
+                                    .accentColor = {0.3f, 1.0f, 0.6f, 1.0f}});
+                const auto jumpLabel = starforge::game::jumpButtonLabel(
+                    selectedSystem, simulation.currentSystem());
+                uiCanvas->addText({.x = layout.jumpButton.x + 14.0f,
+                                   .y = layout.jumpButton.y + 18.0f, .scale = 1.0f,
+                                   .color = {0.95f, 0.98f, 1.0f, 1.0f}, .text = jumpLabel});
             }
 
             // M16.9: clickable pause menu with Quit.
             if (flight.paused)
             {
-                const float px = static_cast<float>(size.width) * 0.5f - 100.0f;
+                const float px = static_cast<float>(size.width) * 0.5f - 110.0f;
                 const float py = static_cast<float>(size.height) * 0.5f - 80.0f;
-                uiCanvas->addPanel({.x = px, .y = py, .w = 200.0f, .h = 240.0f,
+                uiCanvas->addPanel({.x = px, .y = py, .w = 220.0f, .h = 240.0f,
                                     .outlineWidth = 2.0f,
                                     .fillColor = {0.06f, 0.09f, 0.16f, 0.95f},
                                     .accentColor = {0.95f, 0.7f, 0.2f, 1.0f}});
