@@ -23,6 +23,7 @@ add_executable(starforge_tests
     test_asset_material.cpp
     test_asset_lod.cpp
     test_asset_texture.cpp
+    test_asset_content.cpp
     test_vulkan_version.cpp
     test_gpu_capabilities.cpp
     test_swapchain_selection.cpp
@@ -146,6 +147,7 @@ target_compile_definitions(starforge_tests
         STARFORGE_BUDGETS_FILE="${PROJECT_SOURCE_DIR}/benchmarks/budgets.json"
         STARFORGE_M5_BASELINE_DIR="${PROJECT_SOURCE_DIR}/benchmarks/baselines"
         STARFORGE_M5_REPORT_FILE="${PROJECT_SOURCE_DIR}/benchmarks/m5-vs-budget.md"
+        STARFORGE_ASSET_DIR="${PROJECT_SOURCE_DIR}/assets/models"
 )
 
 add_test(NAME starforge_tests COMMAND starforge_tests)
