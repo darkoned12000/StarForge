@@ -4,6 +4,13 @@ add_library(starforge_asset STATIC
     file_watcher.cpp
     hot_reload.cpp
     material_mapping.cpp
+    mesh_optimizer.cpp
+    lod_chain.cpp
+)
+
+target_link_libraries(starforge_asset
+    PUBLIC
+        meshoptimizer
 )
 
 target_include_directories(starforge_asset

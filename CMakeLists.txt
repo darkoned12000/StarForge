@@ -65,6 +65,11 @@ option(STARFORGE_USE_MINIAUDIO
     ON
 )
 
+option(STARFORGE_USE_MESHOPTIMIZER
+    "Fetch and build meshoptimizer for asset LODs (M17)"
+    ON
+)
+
 option(STARFORGE_ENABLE_PROFILING
     "Compile the internal SF_PROFILE_* instrumentation (5.5.1e); OFF compiles it out entirely"
     ON
@@ -160,6 +165,22 @@ if(STARFORGE_USE_MINIAUDIO)
         GIT_SHALLOW TRUE
     )
     FetchContent_MakeAvailable(miniaudio)
+endif()
+
+# meshoptimizer (M17 asset LODs) — pinned. Provides vertex-cache/overdraw
+# optimisation and mesh simplification used to build authored LOD chains.
+if(STARFORGE_USE_MESHOPTIMIZER)
+    include(FetchContent)
+    set(MESHOPTIMIZER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(MESHOPTIMIZER_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+    set(MESHOPTIMIZER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(MESHOPTIMIZER_BUILD_FUZZERS OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(meshoptimizer
+        GIT_REPOSITORY https://github.com/zeux/meshoptimizer.git
+        GIT_TAG v0.25
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(meshoptimizer)
 endif()
 
 # GLM (math library) — FetchContent fallback if not installed system-wide.
