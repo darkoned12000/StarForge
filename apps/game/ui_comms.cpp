@@ -16,6 +16,7 @@ void CommsLog::tick(float dt) noexcept
 {
     if (dt <= 0.0f) return;
     for (auto& message : messages_) message.ttl -= dt;
+    if (!expireAfterTtl_) return;
     messages_.erase(std::remove_if(messages_.begin(), messages_.end(),
                                    [](const CommsMessage& m) { return m.ttl <= 0.0f; }),
                     messages_.end());
@@ -24,6 +25,19 @@ void CommsLog::tick(float dt) noexcept
 void CommsLog::clear() noexcept
 {
     messages_.clear();
+    scrollOffset_ = 0;
+}
+
+std::pair<std::size_t, std::size_t>
+CommsLog::visibleRange(std::size_t windowSize) const noexcept
+{
+    const std::size_t n = messages_.size();
+    if (n == 0 || windowSize == 0) return {0, 0};
+    const std::size_t maxOffset = n > windowSize ? n - windowSize : 0;
+    const std::size_t offset = std::min(scrollOffset_, maxOffset);
+    const std::size_t end = n - offset;
+    const std::size_t begin = end > windowSize ? end - windowSize : 0;
+    return {begin, end};
 }
 
 void TextEntry::begin(std::string prompt) noexcept
@@ -55,6 +69,20 @@ std::string TextEntry::submit()
     std::string result = text_;
     text_.clear();
     return result;
+}
+
+std::string npcReply(const std::string& npcId)
+{
+    static const char* replies[] = {
+        "copy that, standing by",
+        "affirmative, clear skies",
+        "roger, adjusting course",
+        "no copy, say again",
+        "copy, good hunting out there",
+    };
+    std::size_t hash = 0;
+    for (const char c : npcId) hash = hash * 131u + static_cast<unsigned char>(c);
+    return replies[hash % (sizeof(replies) / sizeof(replies[0]))];
 }
 
 } // namespace starforge::game

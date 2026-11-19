@@ -163,6 +163,12 @@ bool Application::isKeyDown(Key key) const noexcept
     case Key::T:
         platformKey = platform::PlatformKey::T;
         break;
+    case Key::PageUp:
+        platformKey = platform::PlatformKey::PageUp;
+        break;
+    case Key::PageDown:
+        platformKey = platform::PlatformKey::PageDown;
+        break;
     default:
         return false;
     }

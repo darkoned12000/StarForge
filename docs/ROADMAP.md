@@ -1354,6 +1354,18 @@ radar, Cargo sits on its own HUD line, the radar gained a rotating sweep and
 a periodic ping, and panel accent strips were thinned so they no longer touch
 titles. Verification: CTest 12/12, 378 CPU cases, zero validation errors.
 
+**M16 UI polish round 3 (2026-11-19):** comms keeps a permanent 200-line
+scrollable history (PageUp/PageDown or wheel) with an always-visible chat
+input box — Enter toggles it, send chats to sector traffic with canned NPC
+replies until a chat AI is wired. Each system now has a distinct environment
+theme (nebula, planet, sun colours/size) plus a HUD system readout, so jumps
+are visibly different. Fixed the haul-quest deadlock: alpha-centauri is now
+inside the base jump range and the jump uses the real chart distance; quest
+status is shown in the station panel. Radar hostiles are now plain red dots
+without the lock-on-style ring; a yellow bracket marks the selected target
+so an untargeted radar has no "lock" indicator. Verification: CTest 12/12,
+382 CPU cases, zero validation errors.
+
 ### M17 – Asset Pipeline
 
 - **Goal:** Mesh/material/audio loading (stb, tinygltf, meshoptimizer),

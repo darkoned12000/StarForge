@@ -1,4 +1,5 @@
 #include "ui_station.hpp"
+#include "ui_map.hpp"
 
 namespace starforge::game
 {
@@ -69,7 +70,9 @@ bool applyStationAction(std::string_view id, GameSimulation& simulation, CommsLo
     }
     if (id == "jump")
     {
-        if (simulation.jump("alpha-centauri", 1.5f))
+        const float distance = starforge::game::systemDistanceLy(
+            simulation.currentSystem(), "alpha-centauri");
+        if (distance > 0.0f && simulation.jump("alpha-centauri", distance))
             comms.push(CommsChannel::System, "nav", "Jumped to alpha-centauri");
         else
             comms.push(CommsChannel::System, "nav", "Jump range insufficient");

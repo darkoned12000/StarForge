@@ -122,6 +122,9 @@ struct InputTracker
     bool prevZoomOut = false;
     bool prevMap = false;
     bool prevLock = false;
+    bool prevEscape = false;
+    bool prevPageUp = false;
+    bool prevPageDown = false;
 };
 
 [[nodiscard]] starforge::game::InputEdge readInput(starforge::Application& app, InputTracker& tracker)
@@ -247,19 +250,26 @@ void handleUiActions(starforge::Application& app, UiTracker& tracker,
     {
         if (simulation.deliverMission("haul-ore", "ore", 10, "station-b") &&
             simulation.completeMission("haul-ore", "station-b"))
+        {
             logInfo("[MISSION] haul-ore complete");
             comms.push(starforge::game::CommsChannel::System, "missions", "Ore Haul complete: +500 cr");
+        }
+        else
+            comms.push(starforge::game::CommsChannel::System, "missions",
+                       "Accept the haul and carry 10 ore to station-b first");
     }
     if (jumpEdge)
     {
-        if (simulation.jump("alpha-centauri", 1.5f))
+        const float distance = starforge::game::systemDistanceLy(
+            simulation.currentSystem(), "alpha-centauri");
+        if (distance > 0.0f && simulation.jump("alpha-centauri", distance))
         {
             logInfo("[JUMP] entered alpha-centauri");
             comms.push(starforge::game::CommsChannel::System, "nav", "Jumped to alpha-centauri");
         }
         else
         {
-            logError("[JUMP] beyond range - complete the haul mission first");
+            logError("[JUMP] beyond range");
             comms.push(starforge::game::CommsChannel::System, "nav", "Jump range insufficient");
         }
     }
@@ -378,8 +388,11 @@ int main()
     starforge::game::FlightState flight;
     starforge::game::GameSimulation simulation;
     starforge::game::TargetingState targeting;
-    starforge::game::CommsLog comms;
+    // Comms keeps a permanent scrollable history; toasts expire on their TTL.
+    starforge::game::CommsLog comms{false};
+    starforge::game::CommsLog toasts{true};
     starforge::game::TextEntry textEntry;
+    bool chatActive = false;
     starforge::game::UiState uiState;
     // M16 polish: spawn a set of travelling NPCs (hostiles + neutrals) so
     // targeting can be exercised against several moving contacts.
@@ -416,7 +429,6 @@ int main()
     bool mapVisible = false;
     bool quitRequested = false;
     std::string selectedSystem = "sol";
-    starforge::game::CommsLog toasts;
     float cameraDist = 8.0f; // chase-camera distance (fixed for FOV zoom)
     float shieldFlash = 0.0f; // seconds of remaining shield-hit visual
     float explosionTimer = 0.0f; // hostile destruction effect
@@ -552,12 +564,12 @@ int main()
         // while paused, the reported "cannot un-pause" bug).
         // Continuum (mouse steer, weapons) runs inside sim steps.
         {
-            if (pending.pausePressed)
+            if (pending.pausePressed && !chatActive)
             {
                 flight.paused = !flight.paused;
                 pending.pausePressed = false;
             }
-            if (!flight.paused && pending.tabPressed)
+            if (!flight.paused && !chatActive && pending.tabPressed)
             {
                 targeting.cycleNext();
                 pending.tabPressed = false;
@@ -630,7 +642,7 @@ int main()
         }
 
         // Pause menu: clickable Resume / Map / Quit buttons.
-        if (flight.paused)
+        if (flight.paused && !chatActive)
         {
             const auto fb = app->framebufferSize();
             const starforge::game::UiRect panel{fb.width * 0.5f - 110.0f,
@@ -665,8 +677,79 @@ int main()
             }
         }
 
+        // --- Comms chat composer (works in BOTH flight and UI modes) ---
+        // Enter toggles the composer open/closed; type, Enter sends to sector
+        // traffic and Escape cancels. PageUp/PageDown scroll the history.
+        {
+            const std::string typed = app->takeTextInput();
+            const bool enter = app->isKeyDown(starforge::Key::Return);
+            const bool escape = app->isKeyDown(starforge::Key::Escape);
+            const bool backspace = app->isKeyDown(starforge::Key::Backspace);
+            const bool pageUp = app->isKeyDown(starforge::Key::PageUp);
+            const bool pageDown = app->isKeyDown(starforge::Key::PageDown);
+
+            if (enter && !inputTracker.prevReturn)
+            {
+                if (chatActive)
+                {
+                    const std::string line = textEntry.submit();
+                    if (!line.empty())
+                    {
+                        comms.push(starforge::game::CommsChannel::Local, "you", line);
+                        logInfo(("[CHAT] " + line).c_str());
+                        // Canned reply from a nearby NPC until chat AI is wired.
+                        for (const auto& npc : simulation.npcs())
+                            if (npc.alive)
+                            {
+                                comms.push(starforge::game::CommsChannel::Local, npc.id,
+                                           starforge::game::npcReply(npc.id));
+                                break;
+                            }
+                    }
+                    chatActive = false;
+                    textEntry.end();
+                }
+                else
+                {
+                    chatActive = true;
+                    textEntry.begin(">");
+                }
+            }
+            if (escape && !inputTracker.prevEscape && chatActive)
+            {
+                chatActive = false;
+                textEntry.end();
+            }
+            if (chatActive)
+            {
+                textEntry.append(typed);
+                if (backspace && !inputTracker.prevBackspace) textEntry.backspace();
+            }
+
+            if (pageUp && !inputTracker.prevPageUp) comms.scrollBack(3);
+            if (pageDown && !inputTracker.prevPageDown) comms.scrollForward(3);
+
+            inputTracker.prevReturn = enter;
+            inputTracker.prevEscape = escape;
+            inputTracker.prevBackspace = backspace;
+            inputTracker.prevPageUp = pageUp;
+            inputTracker.prevPageDown = pageDown;
+        }
+        if (chatActive)
+        {
+            // Typing letters must not steer the ship or fire weapons.
+            pending.wPressed = false;
+            pending.sPressed = false;
+            pending.aDown = false;
+            pending.dDown = false;
+            pending.spacePressed = false;
+            pending.pausePressed = false;
+            pending.mouseDx = 0.0f;
+            pending.mouseDy = 0.0f;
+        }
+
         // UI-mode trading / mission / jump actions.
-        if (flight.mode == starforge::game::FlightMode::Ui && !flight.paused)
+        if (flight.mode == starforge::game::FlightMode::Ui && !flight.paused && !chatActive)
         {
             // M16.8: clickable station screen. Register widgets in the same
             // geometry the renderer uses, then apply any clicked action.
@@ -683,32 +766,12 @@ int main()
                         starforge::game::applyStationAction(button.id, simulation, comms);
             }
             handleUiActions(*app, uiTracker, simulation, comms);
-            // M16.7: chat text entry (SDL text input, not key-code mapping).
-            textEntry.append(app->takeTextInput());
-            const bool backspace = app->isKeyDown(starforge::Key::Backspace);
-            if (backspace && !inputTracker.prevBackspace) textEntry.backspace();
-            inputTracker.prevBackspace = backspace;
-            const bool enter = app->isKeyDown(starforge::Key::Return);
-            if (enter && !inputTracker.prevReturn)
-            {
-                const std::string line = textEntry.submit();
-                if (!line.empty())
-                {
-                    comms.push(starforge::game::CommsChannel::Local, "you", line);
-                    logInfo(("[CHAT] " + line).c_str());
-                }
-            }
-            inputTracker.prevReturn = enter;
-        }
-        else
-        {
-            app->takeTextInput(); // drain typing while flying
         }
 
         // Interactive sector map: click a system to select it, then JUMP TO
         // <name> if it is within range. Runs whenever the map is open so a
         // map opened from the pause menu is interactive immediately.
-        if (mapVisible && !flight.paused)
+        if (mapVisible && !flight.paused && !chatActive)
         {
             const auto fb = app->framebufferSize();
             const auto layout = starforge::game::mapLayout(
@@ -847,14 +910,9 @@ int main()
                         flight.mode == starforge::game::FlightMode::Ui ? "UI" : "FLIGHT");
             if (flight.mode == starforge::game::FlightMode::Ui)
             {
-                textEntry.begin(">");
                 std::printf("[UI] Up=dock  Down=undock  Left=buy 5 ore  Right=sell 5 ore\n");
                 std::printf("[UI] W=accept haul-ore  S=deliver+complete  A=jump (needs unlock)\n");
-                std::printf("[UI] Type to chat, Enter=send, Backspace=delete\n");
-            }
-            else
-            {
-                textEntry.end();
+                std::printf("[UI] Enter=toggle chat, PgUp/PgDn=comms history\n");
             }
             std::fflush(stdout);
             lastMode = flight.mode;
@@ -956,6 +1014,8 @@ int main()
         // Chase camera follows the ship: eye sits behind and above the
         // ship, looking ahead down the forward vector. No astronomical
         // coordinates reach the GPU — everything is ship-relative.
+        // M16 polish: each system gets a distinct look so jumps are visible.
+        const auto visual = starforge::game::systemVisual(simulation.currentSystem());
         const auto ship = world.shipTransform();
         const starforge::math::Vec4f shipQuat{
             ship.orientation.x, ship.orientation.y, ship.orientation.z, ship.orientation.w};
@@ -985,6 +1045,10 @@ int main()
         starContext.viewProj = viewProj;
         starContext.invViewProj = invViewProj;
         starContext.time = time;
+        starContext.clearColor = {.red = visual.nebulaColor[0] * 0.25f,
+                                  .green = visual.nebulaColor[1] * 0.25f,
+                                  .blue = visual.nebulaColor[2] * 0.25f,
+                                  .alpha = 1.0f};
         if (flight.paused)
         {
             // Dark red tint while paused: visible without needing the console.
@@ -1138,7 +1202,8 @@ int main()
         nebContext.time = time;
 
         starforge::Nebula::Params nebParams;
-        nebParams.baseColor = {0.30f, 0.15f, 0.50f, 1.0f};
+        nebParams.baseColor = {visual.nebulaColor[0], visual.nebulaColor[1],
+                               visual.nebulaColor[2], visual.nebulaColor[3]};
         nebParams.density = 1.0f;
         nebParams.scattering = 0.45f;
         nebParams.time = time;
@@ -1162,11 +1227,14 @@ int main()
             kSunWorld.x, kSunWorld.y, kSunWorld.z).value_or(starforge::WorldPosition{});
         sun3DParams.radius = kSunRadius; // 4 km celestial photosphere radius
         sun3DParams.coronaRadiusMultiplier = kSunCoronaMultiplier; // Corona reaches out to 12 km
-        sun3DParams.coreColor = {1.0f, 0.95f, 0.82f, 1.0f}; // Blazing yellow-white core
-        sun3DParams.limbColor = {0.95f, 0.40f, 0.05f, 1.0f}; // Deep amber solar rim
-        sun3DParams.coronaColor = {1.0f, 0.65f, 0.20f, 1.0f}; // Glowing outer corona
+        sun3DParams.coreColor = {visual.sunCore[0], visual.sunCore[1],
+                                 visual.sunCore[2], visual.sunCore[3]};
+        sun3DParams.limbColor = {visual.sunLimb[0], visual.sunLimb[1],
+                                 visual.sunLimb[2], visual.sunLimb[3]};
+        sun3DParams.coronaColor = {visual.sunCorona[0], visual.sunCorona[1],
+                                   visual.sunCorona[2], visual.sunCorona[3]};
         sun3DParams.limbDarkeningCoeff = 0.6f;
-        sun3DParams.coronaIntensity = 1.0f;
+        sun3DParams.coronaIntensity = visual.coronaIntensity;
         sun3DParams.time = time;
 
         // M15.0.4 planet: WORLD-anchored (~63 km from spawn), computed
@@ -1185,10 +1253,13 @@ int main()
         planetContext.time = time;
         starforge::Planet::Params planetParams;
         planetParams.center = planetRel;
-        planetParams.radius = 6000.0f;
-        planetParams.baseColor = {0.18f, 0.5f, 1.0f, 1.0f};
-        planetParams.shadowColor = {0.12f, 0.35f, 0.65f, 1.0f}; // clearly opaque night side
-        planetParams.rimColor = {0.6f, 0.8f, 1.0f, 1.0f};
+        planetParams.radius = visual.planetRadius;
+        planetParams.baseColor = {visual.planetBase[0], visual.planetBase[1],
+                                  visual.planetBase[2], visual.planetBase[3]};
+        planetParams.shadowColor = {visual.planetShadow[0], visual.planetShadow[1],
+                                    visual.planetShadow[2], visual.planetShadow[3]};
+        planetParams.rimColor = {visual.planetRim[0], visual.planetRim[1],
+                                 visual.planetRim[2], visual.planetRim[3]};
         // Light direction must be planet->sun (not ship->sun), otherwise the
         // terminator points the wrong way because the two bodies are far apart.
         planetParams.sunDirection = starforge::math::normalize(
@@ -1345,6 +1416,10 @@ int main()
                                .color = {0.02f, 0.05f, 0.1f, 1.0f}, .text = hullLabel});
             hudText(28.0f, 148.0f, "CREDITS", static_cast<float>(simulation.credits()));
             hudText(28.0f, 178.0f, "CARGO", static_cast<float>(simulation.cargoUsed()));
+            uiCanvas->addText({.x = 28.0f, .y = 202.0f, .scale = 1.0f,
+                               .color = {0.55f, 0.9f, 1.0f, 1.0f},
+                               .text = "SYSTEM: " + simulation.currentSystem() +
+                                       " - " + visual.description});
 
             // Crosshair: four strokes + centre dot, all around screen centre.
             const auto reticle = starforge::math::Vec4f{1.0f, 1.0f, 1.0f, 0.95f};
@@ -1431,39 +1506,60 @@ int main()
                     uiCanvas->addBar({.x = cx - 40.0f, .y = cy + 44.0f, .w = 80.0f, .h = 6.0f,
                                       .value = targeting.lockProgress(), .fillColor = tc});
             }
-            // M16.7: comms panel is ALWAYS visible bottom-left. Combat
+            // M16.7: comms panel is ALWAYS visible bottom-left with a full
+            // scrollable history and an always-present chat input box. Combat
             // alerts go to toasts only (top-centre), so they are not doubled.
             {
                 const float commsX = 16.0f;
                 const float commsY = static_cast<float>(size.height) - 232.0f;
+                constexpr std::size_t kCommsLines = 7;
                 uiCanvas->addPanel({.x = commsX, .y = commsY, .w = 420.0f, .h = 216.0f,
                                     .outlineWidth = 2.0f,
-                                    .fillColor = {0.04f, 0.08f, 0.14f, 0.88f},
+                                    .fillColor = {0.04f, 0.08f, 0.14f, 0.9f},
                                     .accentColor = {0.35f, 0.8f, 1.0f, 1.0f}});
                 uiCanvas->addText({.x = commsX + 10.0f, .y = commsY + 14.0f, .scale = 2.0f,
-                                   .color = {0.4f, 0.9f, 1.0f, 1.0f}, .text = "COMMS"});
-                const auto& messages = comms.messages();
-                std::size_t shown = 0;
-                for (auto it = messages.rbegin(); it != messages.rend() && shown < 8; ++it)
+                                   .color = {0.4f, 0.9f, 1.0f, 1.0f},
+                                   .text = chatActive ? "COMMS  [CHAT]" : "COMMS"});
+                if (comms.scrolledUp())
                 {
-                    if (it->channel == starforge::game::CommsChannel::Combat) continue;
-                    std::string text = it->sender + ": " + it->text;
+                    uiCanvas->addText({.x = commsX + 250.0f, .y = commsY + 14.0f, .scale = 1.0f,
+                                       .color = {1.0f, 0.85f, 0.4f, 1.0f},
+                                       .text = "PgUp/PgDn - history"});
+                }
+                const auto& messages = comms.messages();
+                const auto [first, last] = comms.visibleRange(kCommsLines);
+                std::size_t row = 0;
+                for (std::size_t i = first; i < last; ++i)
+                {
+                    const auto& msg = messages[i];
+                    if (msg.channel == starforge::game::CommsChannel::Combat) continue;
+                    std::string text = msg.sender + ": " + msg.text;
                     if (text.size() > 48) text.resize(48);
-                    const float ly = commsY + 30.0f + static_cast<float>(shown++) * 19.0f;
-                    const auto lc = it->channel == starforge::game::CommsChannel::Trade
+                    const float ly = commsY + 32.0f + static_cast<float>(row++) * 19.0f;
+                    const auto lc = msg.channel == starforge::game::CommsChannel::Trade
                         ? starforge::math::Vec4f{0.3f, 1.0f, 0.6f, 1.0f}
-                        : starforge::math::Vec4f{0.75f, 0.9f, 1.0f, 1.0f};
+                        : msg.channel == starforge::game::CommsChannel::Local
+                            ? starforge::math::Vec4f{1.0f, 0.95f, 0.7f, 1.0f}
+                            : starforge::math::Vec4f{0.75f, 0.9f, 1.0f, 1.0f};
                     uiCanvas->addText({.x = commsX + 10.0f, .y = ly, .scale = 2.0f,
                                        .color = lc, .text = text});
                 }
-                // In UI mode the chat entry sits at the bottom of the panel.
-                if (flight.mode == starforge::game::FlightMode::Ui)
-                {
-                    std::string entry = textEntry.prompt() + textEntry.text();
-                    if (entry.empty()) entry = ">";
-                    uiCanvas->addText({.x = commsX + 10.0f, .y = commsY + 188.0f, .scale = 2.0f,
-                                       .color = {1.0f, 1.0f, 1.0f, 1.0f}, .text = entry});
-                }
+                // Always-visible chat input box. Enter toggles it; type to
+                // talk to sector traffic (canned replies until chat AI lands).
+                const float inputY = commsY + 178.0f;
+                uiCanvas->addRect({.x = commsX + 8.0f, .y = inputY, .w = 404.0f, .h = 28.0f,
+                                   .color = chatActive
+                                       ? starforge::math::Vec4f{0.10f, 0.28f, 0.34f, 1.0f}
+                                       : starforge::math::Vec4f{0.07f, 0.13f, 0.20f, 1.0f}});
+                std::string entry = chatActive
+                    ? (textEntry.prompt() + textEntry.text())
+                    : std::string("> press ENTER to chat");
+                if (chatActive && static_cast<int>(time * 2.0f) % 2 == 0) entry += "_";
+                uiCanvas->addText({.x = commsX + 14.0f, .y = inputY + 6.0f, .scale = 2.0f,
+                                   .color = chatActive
+                                       ? starforge::math::Vec4f{0.6f, 1.0f, 0.8f, 1.0f}
+                                       : starforge::math::Vec4f{0.5f, 0.65f, 0.75f, 1.0f},
+                                   .text = entry});
             }
 
             // M16.6: navigation radar (bottom-right) + destination readout.
@@ -1541,19 +1637,10 @@ int main()
                         {id, localX, localF, kind}, kRadarRange, kRadarRadius);
                     if (!p.visible) return;
                     const bool threat = kind == starforge::game::RadarKind::Hostile;
-                    const float dotSize = threat ? 7.0f : 3.0f;
+                    const float dotSize = threat ? 5.0f : 3.0f;
                     uiCanvas->addRect({.x = ccx + p.x - dotSize * 0.5f,
                                        .y = ccy + p.y - dotSize * 0.5f,
                                        .w = dotSize, .h = dotSize, .color = radarColor(kind)});
-                    if (threat)
-                    {
-                        const float pulse = 12.0f + 4.0f * std::sin(time * 5.0f);
-                        const starforge::math::Vec4f ring{1.0f, 0.15f, 0.1f, 0.7f};
-                        uiCanvas->addRect({.x = ccx + p.x - pulse, .y = ccy + p.y - 1.0f,
-                                           .w = pulse * 2.0f, .h = 2.0f, .color = ring});
-                        uiCanvas->addRect({.x = ccx + p.x - 1.0f, .y = ccy + p.y - pulse,
-                                           .w = 2.0f, .h = pulse * 2.0f, .color = ring});
-                    }
                 };
                 plotWorld("planet", planetRel.x(), planetRel.y(), planetRel.z(),
                           starforge::game::RadarKind::Planet);
@@ -1572,6 +1659,33 @@ int main()
                               static_cast<float>(rock->position.y),
                               static_cast<float>(rock->position.z),
                               starforge::game::RadarKind::Rock);
+                }
+                // Selected target wears a yellow bracket on the radar, so it
+                // is obvious which blip is locked (no target = no bracket).
+                if (const auto* target = targeting.selected())
+                {
+                    float wx = 400.0f, wy = 0.0f, wz = -1200.0f;
+                    for (const auto& npc : simulation.npcs())
+                        if (npc.alive && npc.id == target->id)
+                        {
+                            wx = npc.position.x; wy = npc.position.y; wz = npc.position.z;
+                            break;
+                        }
+                    const auto [lx, lf] = starforge::game::toShipLocal(
+                        {wx, wy, wz}, {shipRight.x(), shipRight.y(), shipRight.z()},
+                        {shipForward.x(), shipForward.y(), shipForward.z()});
+                    const auto tp = starforge::game::projectRadar(
+                        {target->id, lx, lf, starforge::game::RadarKind::Station},
+                        kRadarRange, kRadarRadius);
+                    if (tp.visible)
+                    {
+                        const starforge::math::Vec4f marker{1.0f, 0.92f, 0.25f, 1.0f};
+                        const float bx = ccx + tp.x, by = ccy + tp.y;
+                        uiCanvas->addRect({.x = bx - 8.0f, .y = by - 8.0f, .w = 6.0f, .h = 2.0f, .color = marker});
+                        uiCanvas->addRect({.x = bx + 2.0f, .y = by - 8.0f, .w = 6.0f, .h = 2.0f, .color = marker});
+                        uiCanvas->addRect({.x = bx - 8.0f, .y = by + 6.0f, .w = 6.0f, .h = 2.0f, .color = marker});
+                        uiCanvas->addRect({.x = bx + 2.0f, .y = by + 6.0f, .w = 6.0f, .h = 2.0f, .color = marker});
+                    }
                 }
                 uiCanvas->addRect({.x = ccx - 2.0f, .y = ccy - 2.0f, .w = 4.0f, .h = 4.0f,
                                    .color = {1.0f, 1.0f, 1.0f, 1.0f}}); // player
@@ -1631,6 +1745,16 @@ int main()
                               simulation.isDocked() ? "DOCKED" : "APPROACH");
                 uiCanvas->addText({.x = panel.x + 14.0f, .y = panel.y + 46.0f, .scale = 2.0f,
                                    .color = {0.6f, 0.9f, 0.7f, 1.0f}, .text = status});
+                // Quest status so the haul mission is discoverable/completable.
+                std::string quest;
+                if (simulation.missionCompleted("haul-ore"))
+                    quest = "HAUL: complete (+500cr, range 2.0ly)";
+                else if (simulation.missionActive("haul-ore"))
+                    quest = "HAUL: deliver 10 ore to station-b, then COMPLETE";
+                else
+                    quest = "HAUL: accept contract to begin";
+                uiCanvas->addText({.x = panel.x + 14.0f, .y = panel.y + 364.0f, .scale = 1.0f,
+                                   .color = {1.0f, 0.85f, 0.45f, 1.0f}, .text = quest});
                 for (const auto& button : starforge::game::stationButtons())
                 {
                     const bool hot = uiState.hovered(button.id);

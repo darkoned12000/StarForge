@@ -224,3 +224,17 @@ TEST_CASE("M16 polish: weapons can be aimed at a selected neutral NPC")
     REQUIRE(now != sim.npcs().end());
     CHECK_FALSE(now->alive);
 }
+
+TEST_CASE("M16 polish: mission state is queryable for the haul quest")
+{
+    GameSimulation sim;
+    CHECK_FALSE(sim.missionActive("haul-ore"));
+    CHECK_FALSE(sim.missionCompleted("haul-ore"));
+    REQUIRE(sim.acceptMission("haul-ore"));
+    CHECK(sim.missionActive("haul-ore"));
+    REQUIRE(sim.buy("station-a", "ore", 10));
+    REQUIRE(sim.deliverMission("haul-ore", "ore", 10, "station-b"));
+    REQUIRE(sim.completeMission("haul-ore", "station-b"));
+    CHECK_FALSE(sim.missionActive("haul-ore"));
+    CHECK(sim.missionCompleted("haul-ore"));
+}

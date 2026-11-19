@@ -22,10 +22,17 @@ TEST_CASE("M16.9: map projects systems relative to current location")
     const auto p = projectSystem(alpha, origin, 100.0f, 1.0f);
     CHECK(p.x == doctest::Approx((alpha.x - origin.x) * 100.0f));
     CHECK(p.y == doctest::Approx((alpha.y - origin.y) * 100.0f));
-    CHECK(p.distance > 1.0f);
-    CHECK_FALSE(p.reachable); // beyond 1.0 jump range
+    // alpha-centauri is inside the base 1.0 ly range so the haul quest can
+    // be completed and the destination reached from the start.
+    CHECK(p.distance > 0.0f);
+    CHECK(p.distance < 1.0f);
+    CHECK(p.reachable);
 
-    const auto reachable = projectSystem(alpha, origin, 100.0f, p.distance + 0.1f);
+    // A farther system (proxima) is still gated by jump range.
+    const MapSystem far{"far", 5.0f, 5.0f};
+    const auto beyond = projectSystem(far, origin, 100.0f, 1.0f);
+    CHECK_FALSE(beyond.reachable);
+    const auto reachable = projectSystem(far, origin, 100.0f, beyond.distance + 0.1f);
     CHECK(reachable.reachable);
 }
 
@@ -63,4 +70,18 @@ TEST_CASE("M16 polish: map layout separates chart from info and labels jumps")
 
     CHECK(starforge::game::jumpButtonLabel("barnard", "sol") == "Jump to barnard");
     CHECK(starforge::game::jumpButtonLabel("sol", "sol") == "Select system");
+}
+
+TEST_CASE("M16 polish: alpha-centauri is reachable and systems look distinct")
+{
+    const float dist = starforge::game::systemDistanceLy("sol", "alpha-centauri");
+    CHECK(dist > 0.0f);
+    CHECK(dist < 1.0f); // inside the base 1.0 ly jump range
+
+    const auto sol = starforge::game::systemVisual("sol");
+    const auto ac = starforge::game::systemVisual("alpha-centauri");
+    const auto barnard = starforge::game::systemVisual("barnard");
+    CHECK(sol.description != ac.description);
+    CHECK(ac.planetBase != barnard.planetBase);
+    CHECK_FALSE(ac.description.empty());
 }

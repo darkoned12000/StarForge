@@ -52,6 +52,8 @@ enum class PlatformKey
     Minus,
     M,
     T,
+    PageUp,
+    PageDown,
     Count,
 };
 

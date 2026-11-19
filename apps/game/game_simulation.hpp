@@ -122,6 +122,8 @@ public:
                                       int amount, const std::string& station);
     [[nodiscard]] bool completeMission(const std::string& id, const std::string& station);
     [[nodiscard]] int completedMissions() const noexcept;
+    [[nodiscard]] bool missionActive(const std::string& id) const noexcept;
+    [[nodiscard]] bool missionCompleted(const std::string& id) const noexcept;
     [[nodiscard]] float jumpRangeLy() const noexcept { return progression_.jumpRangeLy(); }
 
     // --- M15.4 authored overrides + jumping ---

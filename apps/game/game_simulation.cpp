@@ -400,6 +400,18 @@ int GameSimulation::completedMissions() const noexcept
     return progression_.completedMissions();
 }
 
+bool GameSimulation::missionActive(const std::string& id) const noexcept
+{
+    const auto* state = missions_.state(id);
+    return state && state->status == gameplay::MissionStatus::Active;
+}
+
+bool GameSimulation::missionCompleted(const std::string& id) const noexcept
+{
+    const auto* state = missions_.state(id);
+    return state && state->status == gameplay::MissionStatus::Completed;
+}
+
 void GameSimulation::addAuthored(gameplay::ContentPlacement placement)
 {
     layered_.addAuthored(std::move(placement));
