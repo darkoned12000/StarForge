@@ -85,6 +85,14 @@ struct ToonMaterialDesc
     std::string name;
 };
 
+struct MeshData
+{
+    std::vector<MeshVertexData> vertices;
+    std::vector<std::uint32_t> indices; // already expanded: i-th vertex
+    MeshMaterialData material;
+    std::string name;
+};
+
 enum class MaterialVariant
 {
     Default,
@@ -98,6 +106,8 @@ enum class MaterialVariant
 class StreamingTexture
 {
 public:
+    StreamingTexture() noexcept;
+
     static std::expected<StreamingTexture, std::string>
     fromRGBA(std::uint32_t width, std::uint32_t height, std::span<const std::uint8_t> rgba,
              std::size_t budgetBytes = 4u * 1024u * 1024u);
@@ -126,18 +136,49 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
+// M17.4: generates simplified LOD levels (index 0 = the optimised base).
+[[nodiscard]] std::expected<std::vector<MeshData>, std::string>
+generateAssetLods(const MeshData& base, std::span<const float> ratios);
+
+// M17.4: distance-based LOD selection with hysteresis, over an ordered list
+// of level distances (finest first).
+class AssetLodSelector
+{
+public:
+    explicit AssetLodSelector(std::vector<float> maxDistances) noexcept;
+    [[nodiscard]] std::size_t update(float distance, float hysteresis) noexcept;
+    [[nodiscard]] std::size_t current() const noexcept { return current_; }
+    void reset() noexcept { current_ = 0; }
+    [[nodiscard]] std::size_t count() const noexcept { return distances_.size(); }
+
+private:
+    std::vector<float> distances_;
+    std::size_t current_ = 0;
+};
+
+// M17.2: polls authored asset files for changes so the game can hot-reload.
+class AssetWatcher
+{
+public:
+    AssetWatcher();
+    ~AssetWatcher();
+    AssetWatcher(AssetWatcher&&) noexcept;
+    AssetWatcher& operator=(AssetWatcher&&) noexcept;
+    AssetWatcher(const AssetWatcher&) = delete;
+    AssetWatcher& operator=(const AssetWatcher&) = delete;
+
+    bool watch(const std::string& path);
+    [[nodiscard]] std::vector<std::string> poll();
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
 [[nodiscard]] ToonMaterialDesc mapAssetMaterial(const MeshMaterialData& material);
 [[nodiscard]] ToonMaterialDesc applyAssetMaterialVariant(const ToonMaterialDesc& base,
                                                          MaterialVariant variant);
 [[nodiscard]] std::string_view materialVariantName(MaterialVariant variant) noexcept;
-
-struct MeshData
-{
-    std::vector<MeshVertexData> vertices;
-    std::vector<std::uint32_t> indices; // already expanded: i-th vertex
-    MeshMaterialData material;
-    std::string name;
-};
 
 class Asset
 {

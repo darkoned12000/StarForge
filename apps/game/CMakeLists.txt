@@ -14,6 +14,11 @@ add_executable(starforge_game
     ui_menu.cpp
 )
 
+target_compile_definitions(starforge_game
+    PRIVATE
+        STARFORGE_ASSET_DIR="${PROJECT_SOURCE_DIR}/assets/models"
+)
+
 target_link_libraries(starforge_game
     PRIVATE
         starforge_public_api

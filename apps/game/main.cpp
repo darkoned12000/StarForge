@@ -9,6 +9,7 @@
 // game bridge (no TU includes both public and internal math).
 
 #include "starforge/application.hpp"
+#include "starforge/asset.hpp"
 #include "starforge/asteroid_field.hpp"
 #include "starforge/audio.hpp"
 #include "starforge/hud.hpp"
@@ -38,8 +39,14 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
+#include <string>
 #include <thread>
 #include <vector>
+
+#ifndef STARFORGE_ASSET_DIR
+#define STARFORGE_ASSET_DIR "assets/models"
+#endif
 
 namespace
 {
@@ -101,6 +108,96 @@ starforge::math::Vec3d upFromQuat(starforge::math::Vec4f q)
 {
     return starforge::math::Vec3f{static_cast<float>(v.x()), static_cast<float>(v.y()),
                                    static_cast<float>(v.z())};
+}
+
+// M17: authored glTF model with per-part LODs, streamed mips and toon
+// material mapping. Everything here uses the public API only.
+struct AuthoredPart
+{
+    std::vector<starforge::Toon::ToonMesh> lods;
+    starforge::ToonMaterialDesc material;
+    starforge::StreamingTexture texture;
+    std::size_t activeMip = 0;
+};
+
+struct AuthoredModel
+{
+    std::string path;
+    std::unique_ptr<starforge::Asset> asset;
+    std::vector<AuthoredPart> parts;
+    starforge::AssetLodSelector selector{std::vector<float>{}};
+    std::size_t activeLod = 0;
+    bool loaded = false;
+};
+
+[[nodiscard]] starforge::Toon::Params
+makeToonParams(const starforge::ToonMaterialDesc& desc, starforge::MaterialVariant variant)
+{
+    const auto mapped = starforge::applyAssetMaterialVariant(desc, variant);
+    starforge::Toon::Params params;
+    params.baseColor = mapped.baseColor;
+    params.shadowColor = mapped.shadowColor;
+    params.midColor = mapped.midColor;
+    params.bandCount = mapped.bandCount;
+    params.rimStrength = mapped.rimStrength;
+    params.outlineWidth = mapped.outlineWidth;
+    params.capabilities = mapped.capabilities;
+    params.emissiveColor = mapped.emissiveColor;
+    params.fresnelColor = mapped.fresnelColor;
+    params.materialParams = {mapped.fresnelPower, 0.0f, 0.0f, 0.0f};
+    return params;
+}
+
+// Loads an authored GLB and builds GPU meshes for it. The `screenPixels`
+// hint picks the streamed mip used for the base-colour texture.
+[[nodiscard]] bool loadAuthoredModel(starforge::Toon& toon, const std::string& path,
+                                     float screenPixels, AuthoredModel& out, std::string& error)
+{
+    auto asset = starforge::Asset::loadFromFile(path);
+    if (!asset) { error = asset.error(); return false; }
+    out.path = path;
+    out.asset = std::make_unique<starforge::Asset>(std::move(*asset));
+    out.parts.clear();
+    out.selector = starforge::AssetLodSelector(
+        std::vector<float>{250.0f, 1000.0f, 1.0e9f});
+    out.activeLod = 0;
+
+    for (const auto& mesh : out.asset->meshes())
+    {
+        auto levels = starforge::generateAssetLods(mesh, std::vector<float>{0.5f, 0.25f});
+        if (!levels) { error = levels.error(); return false; }
+
+        AuthoredPart part;
+        part.material = starforge::mapAssetMaterial(mesh.material);
+        if (mesh.material.hasBaseColorTexture && !mesh.material.textureRGBA.empty())
+        {
+            auto texture = starforge::StreamingTexture::fromRGBA(
+                mesh.material.textureWidth, mesh.material.textureHeight,
+                mesh.material.textureRGBA);
+            if (texture)
+            {
+                part.activeMip = texture->selectMip(static_cast<std::uint32_t>(screenPixels));
+                (void)texture->request(part.activeMip);
+                part.texture = std::move(*texture);
+            }
+        }
+        for (const auto& level : *levels)
+        {
+            const auto pixels = part.texture.mipCount() > 0
+                ? part.texture.data(part.activeMip)
+                : std::span<const std::uint8_t>{};
+            const auto width = part.texture.mipCount() > 0
+                ? part.texture.width(part.activeMip) : 1u;
+            const auto height = part.texture.mipCount() > 0
+                ? part.texture.height(part.activeMip) : 1u;
+            auto gpu = toon.createMeshFromAsset(level, pixels, width, height);
+            if (!gpu) { error = gpu.error(); return false; }
+            part.lods.push_back(std::move(*gpu));
+        }
+        out.parts.push_back(std::move(part));
+    }
+    out.loaded = !out.parts.empty();
+    return out.loaded;
 }
 
 // Build the input edges for this frame from the public API.
@@ -313,6 +410,23 @@ int main()
         logError(toon.error().c_str());
         return EXIT_FAILURE;
     }
+
+    // M17: load authored hero ship + station meshes through the asset facade.
+    AuthoredModel shipModel;
+    AuthoredModel stationModel;
+    starforge::AssetWatcher assetWatcher;
+    std::string assetError;
+    const std::string shipPath = std::string(STARFORGE_ASSET_DIR) + "/hero_ship.glb";
+    const std::string stationPath = std::string(STARFORGE_ASSET_DIR) + "/station.glb";
+    if (!loadAuthoredModel(*toon, shipPath, 512.0f, shipModel, assetError))
+        logError(("[ASSET] hero ship: " + assetError).c_str());
+    if (!loadAuthoredModel(*toon, stationPath, 128.0f, stationModel, assetError))
+        logError(("[ASSET] station: " + assetError).c_str());
+    if (shipModel.loaded) assetWatcher.watch(shipPath);
+    if (stationModel.loaded) assetWatcher.watch(stationPath);
+    logInfo(("[ASSET] loaded " + std::to_string(shipModel.parts.size()) +
+             " ship parts, " + std::to_string(stationModel.parts.size()) +
+             " station parts").c_str());
 
     auto nebula = starforge::Nebula::create(*renderer, {});
     if (!nebula)
@@ -805,6 +919,46 @@ int main()
 
         comms.tick(frameDt);
         toasts.tick(frameDt);
+
+        // M17: poll authored assets and hot-reload any that changed on disk.
+        for (const auto& changed : assetWatcher.poll())
+        {
+            std::string reloadError;
+            const bool isShip = changed == shipPath;
+            auto& target = isShip ? shipModel : stationModel;
+            if (loadAuthoredModel(*toon, changed, isShip ? 512.0f : 128.0f,
+                                  target, reloadError))
+            {
+                comms.push(starforge::game::CommsChannel::System, "assets",
+                           std::string("Hot-reloaded ") + (isShip ? "hero ship" : "station"));
+                logInfo(("[ASSET] hot-reloaded " + changed).c_str());
+            }
+            else
+                logError(("[ASSET] reload failed: " + reloadError).c_str());
+        }
+
+        // M17: pick the station LOD from its range (rigid demo placement).
+        if (stationModel.loaded)
+            stationModel.activeLod = stationModel.selector.update(1200.0f, 40.0f);
+
+        // M17: streamed mip follows the camera zoom (FOV). Rebuild GPU
+        // meshes only when the chosen mip actually changes.
+        for (auto* model : {&shipModel, &stationModel})
+        {
+            if (!model->loaded) continue;
+            const auto* firstPart = &model->parts.front();
+            if (firstPart->texture.mipCount() == 0) continue;
+            const auto wanted = firstPart->texture.selectMip(
+                static_cast<std::uint32_t>(256.0f / std::max(0.4f, cameraFov)));
+            if (wanted == firstPart->activeMip) continue;
+            for (auto& part : model->parts)
+                if (part.texture.mipCount() > 0) (void)part.texture.request(wanted);
+            if (loadAuthoredModel(*toon, model->path,
+                                  256.0f / std::max(0.4f, cameraFov), *model, assetError))
+                firstPart = &model->parts.front();
+            else
+                logError(("[ASSET] mip stream failed: " + assetError).c_str());
+        }
 
         // --- Fixed-step simulation (M15.0.1) + streaming (M15.0.3) ---
         if (!flight.paused)
@@ -1365,7 +1519,43 @@ int main()
             nebula->record(fc, nebContext, nebParams);
             sun->record(fc, sunContext, sun3DParams);
             planet->record(fc, planetContext, planetParams);
-            toon->record(fc, toonContext, toonParams);
+            // M17: authored hero ship (material variant + streamed mip + LOD).
+            if (shipModel.loaded)
+            {
+                auto variant = starforge::MaterialVariant::Default;
+                if (simulation.playerHull() < 50.0f)
+                    variant = starforge::MaterialVariant::Damaged;
+                else if (simulation.playerShield() > 0.0f)
+                    variant = starforge::MaterialVariant::Shielded;
+                if (targeting.hasSelection())
+                    variant = starforge::MaterialVariant::Highlighted;
+                for (const auto& part : shipModel.parts)
+                {
+                    const auto& mesh = part.lods[shipModel.activeLod];
+                    toon->recordMesh(fc, toonContext, makeToonParams(part.material, variant), mesh);
+                }
+            }
+            else
+                toon->record(fc, toonContext, toonParams);
+
+            // M17: authored station at a fixed sector position.
+            if (stationModel.loaded)
+            {
+                starforge::math::Mat4f stationModel4(1.0f);
+                stationModel4.columns[3] = {400.0f, 0.0f, -1200.0f, 1.0f};
+                starforge::Toon::Context stationContext;
+                stationContext.viewProj = viewProj * stationModel4;
+                stationContext.modelView = view * stationModel4;
+                stationContext.lightDirectionView = toonContext.lightDirectionView;
+                stationContext.resolution = toonContext.resolution;
+                for (const auto& part : stationModel.parts)
+                {
+                    const auto& mesh = part.lods[stationModel.activeLod];
+                    toon->recordMesh(fc, stationContext,
+                                     makeToonParams(part.material, starforge::MaterialVariant::Default),
+                                     mesh);
+                }
+            }
             for (const auto& r : npcRenders) toon->record(fc, r.context, r.params);
             if (flight.firePrimary) toon->record(fc, muzzleContext, muzzleParams);
             if (shieldFlash > 0.0f) toon->record(fc, flashContext, flashParams);
@@ -1420,6 +1610,14 @@ int main()
                                .color = {0.55f, 0.9f, 1.0f, 1.0f},
                                .text = "SYSTEM: " + simulation.currentSystem() +
                                        " - " + visual.description});
+            char assetStatus[160];
+            std::snprintf(assetStatus, sizeof(assetStatus),
+                          "ASSETS ship %zu/station %zu parts  LOD %zu/%zu  MIP %zu",
+                          shipModel.parts.size(), stationModel.parts.size(),
+                          shipModel.activeLod, stationModel.activeLod,
+                          shipModel.parts.empty() ? 0 : shipModel.parts.front().activeMip);
+            uiCanvas->addText({.x = 28.0f, .y = 214.0f, .scale = 1.0f,
+                               .color = {0.6f, 0.85f, 0.7f, 1.0f}, .text = assetStatus});
 
             // Crosshair: four strokes + centre dot, all around screen centre.
             const auto reticle = starforge::math::Vec4f{1.0f, 1.0f, 1.0f, 0.95f};

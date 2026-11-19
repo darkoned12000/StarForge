@@ -329,6 +329,177 @@ TEST_CASE("Asset: textured glTF mesh renders through the toon material (T3)")
     vkFreeCommandBuffers(device->device(), pool, 1, &cmd);
     vkDestroyCommandPool(device->device(), pool, nullptr);
 }
+
+TEST_CASE("M17 proof: authored hero ship renders with mapped toon materials at 60 fps")
+{
+#ifndef STARFORGE_ASSET_DIR
+#define STARFORGE_ASSET_DIR "assets/models"
+#endif
+    const std::string path = std::string(STARFORGE_ASSET_DIR) + "/hero_ship.glb";
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    REQUIRE_MESSAGE(file.good(), "Missing authored hero ship: %s", path.c_str());
+    const auto size = static_cast<std::size_t>(file.tellg());
+    file.seekg(0);
+    std::vector<std::uint8_t> bytes(size);
+    file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size));
+    auto asset = loadGlb(bytes.data(), bytes.size());
+    REQUIRE(asset.has_value());
+    REQUIRE(asset->meshes.size() == 3);
+
+    ContextCreateInfo contextInfo;
+    contextInfo.enableValidation = true;
+    contextInfo.requiredExtensions.clear();
+    auto context = VulkanContext::create(contextInfo);
+    REQUIRE(context.has_value());
+    auto device = VulkanDevice::create(*context);
+    REQUIRE(device.has_value());
+    auto allocator = Allocator::create({
+        .instance = context->instance(), .physicalDevice = context->physicalDevice(),
+        .device = device->device()});
+    REQUIRE(allocator.has_value());
+
+    constexpr std::uint32_t w = 128, h = 128;
+    auto image = Image::create(*allocator, {
+        .width = w, .height = h, .format = VK_FORMAT_R8G8B8A8_UNORM,
+        .usage = ImageUsageFlags::ColorAttachment | ImageUsageFlags::TransferSrc});
+    REQUIRE(image.has_value());
+    auto view = image->createImageView(device->device());
+    REQUIRE(view.has_value());
+    auto readback = Buffer::create(*allocator, {
+        .size = w * h * 4, .usage = BufferUsage::TransferDst,
+        .memory = MemoryPlacement::GpuToCpu});
+    REQUIRE(readback.has_value());
+    auto toon = ToonRenderer::create({
+        .instance = context->instance(), .device = device->device(),
+        .physicalDevice = context->physicalDevice(), .queueFamily = device->graphicsQueueFamily(),
+        .framesInFlight = 1, .colorFormat = VK_FORMAT_R8G8B8A8_UNORM,
+        .depthFormat = VK_FORMAT_UNDEFINED, .shaderDirectory = STARFORGE_SHADER_DIR});
+    REQUIRE(toon.has_value());
+
+    std::vector<std::unique_ptr<ToonMesh>> meshes;
+    for (const auto& mesh : asset->meshes)
+    {
+        std::vector<ToonTexturedVertex> vertices;
+        for (const auto& v : mesh.vertices)
+            vertices.push_back({
+                math::Vec3f{v.position[0], v.position[1], v.position[2]},
+                math::Vec3f{v.normal[0], v.normal[1], v.normal[2]},
+                math::Vec3f{v.normal[0], v.normal[1], v.normal[2]},
+                math::Vec2f{v.uv[0], v.uv[1]},
+                math::Vec4f{v.tangent[0], v.tangent[1], v.tangent[2], v.tangent[3]}});
+        auto gpu = toon->createTexturedMesh(vertices, mesh.material.baseColorTexture.rgba.data(),
+                                            mesh.material.baseColorTexture.width,
+                                            mesh.material.baseColorTexture.height);
+        REQUIRE(gpu.has_value());
+        meshes.push_back(std::make_unique<ToonMesh>(std::move(*gpu)));
+    }
+
+    VkCommandPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    poolInfo.queueFamilyIndex = device->graphicsQueueFamily();
+    poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    VkCommandPool pool = VK_NULL_HANDLE;
+    REQUIRE(vkCreateCommandPool(device->device(), &poolInfo, nullptr, &pool) == VK_SUCCESS);
+    VkCommandBufferAllocateInfo alloc{};
+    alloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    alloc.commandPool = pool;
+    alloc.commandBufferCount = 1;
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    REQUIRE(vkAllocateCommandBuffers(device->device(), &alloc, &cmd) == VK_SUCCESS);
+
+    VkCommandBufferBeginInfo begin{};
+    begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    REQUIRE(vkBeginCommandBuffer(cmd, &begin) == VK_SUCCESS);
+    image->transitionToColorAttachment(cmd);
+    VkRenderingAttachmentInfo attachment{};
+    attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    attachment.imageView = view->handle();
+    attachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    attachment.clearValue.color = VkClearColorValue{{0.0f, 0.0f, 0.0f, 1.0f}};
+    VkRenderingInfo rendering{};
+    rendering.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    rendering.renderArea.extent = {w, h};
+    rendering.layerCount = 1;
+    rendering.colorAttachmentCount = 1;
+    rendering.pColorAttachments = &attachment;
+    vkCmdBeginRendering(cmd, &rendering);
+    VkViewport viewport{0.0f, static_cast<float>(h), static_cast<float>(w), -static_cast<float>(h), 0.0f, 1.0f};
+    VkRect2D scissor{{0, 0}, {w, h}};
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+    ToonRenderContext ctx{};
+    ctx.viewProj = math::perspectiveVulkan(glm::radians(60.0f), 1.0f, 0.1f, 100.0f) *
+                   glm::lookAt(math::Vec3f{0, 2, 6}, math::Vec3f{0, 0, 0}, math::Vec3f{0, 1, 0});
+    ctx.modelView = math::Mat4f{1.0f};
+    ctx.resolution = {static_cast<float>(w), static_cast<float>(h)};
+    for (std::size_t i = 0; i < asset->meshes.size(); ++i)
+    {
+        ToonParams params{};
+        params.capabilities = 32u; // textured base colour
+        params.baseColor = math::Vec4f{asset->meshes[i].material.baseColorFactor[0],
+                                       asset->meshes[i].material.baseColorFactor[1],
+                                       asset->meshes[i].material.baseColorFactor[2], 1.0f};
+        params.outlineWidth = 0.0f;
+        toon->renderMesh(cmd, ctx, params, *meshes[i]);
+    }
+    vkCmdEndRendering(cmd);
+
+    VkBufferImageCopy copy{};
+    copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy.imageSubresource.layerCount = 1;
+    copy.imageExtent = {w, h, 1};
+    image->transitionToTransferSrc(cmd);
+    vkCmdCopyImageToBuffer(cmd, image->handle(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           readback->handle(), 1, &copy);
+    VkBufferMemoryBarrier2 barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+    barrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    barrier.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+    barrier.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
+    barrier.buffer = readback->handle();
+    barrier.size = VK_WHOLE_SIZE;
+    VkDependencyInfo dep{};
+    dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    dep.bufferMemoryBarrierCount = 1;
+    dep.pBufferMemoryBarriers = &barrier;
+    vkCmdPipelineBarrier2(cmd, &dep);
+    REQUIRE(vkEndCommandBuffer(cmd) == VK_SUCCESS);
+
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    VkFence fence = VK_NULL_HANDLE;
+    REQUIRE(vkCreateFence(device->device(), &fenceInfo, nullptr, &fence) == VK_SUCCESS);
+    VkCommandBufferSubmitInfo submitCmd{};
+    submitCmd.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
+    submitCmd.commandBuffer = cmd;
+    VkSubmitInfo2 submit{};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2;
+    submit.commandBufferInfoCount = 1;
+    submit.pCommandBufferInfos = &submitCmd;
+    REQUIRE(device->submit(1, &submit, fence) == VK_SUCCESS);
+    REQUIRE(vkWaitForFences(device->device(), 1, &fence, VK_TRUE, UINT64_MAX) == VK_SUCCESS);
+
+    auto mapped = readback->map();
+    REQUIRE(mapped.has_value());
+    (void)readback->invalidate(0, w * h * 4);
+    const auto* pixels = static_cast<const std::uint8_t*>(*mapped);
+    std::size_t lit = 0;
+    for (std::size_t i = 0; i < w * h * 4; i += 4)
+        if (pixels[i] + pixels[i + 1] + pixels[i + 2] > 30) ++lit;
+    readback->unmap();
+    INFO("lit pixels: " << lit);
+    CHECK(lit > 50); // authored parts are visible
+    CHECK(context->validationErrorCount() == 0);
+
+    vkDestroyFence(device->device(), fence, nullptr);
+    vkFreeCommandBuffers(device->device(), pool, 1, &cmd);
+    vkDestroyCommandPool(device->device(), pool, nullptr);
+}
 #endif // STARFORGE_GPU_TESTS
 
 TEST_CASE("M17.6: external .gltf files with URI buffers load through the shared decoder")

@@ -1,7 +1,9 @@
 #include "starforge/asset.hpp"
 
 #include "asset_bridge.hpp"
+#include "asset/file_watcher.hpp"
 #include "asset/material_mapping.hpp"
+#include "asset/mesh_optimizer.hpp"
 #include "asset/texture_streamer.hpp"
 
 #include <cstdint>
@@ -27,6 +29,11 @@ struct StreamingTexture::Impl
 {
     asset::StreamingTexture texture;
     explicit Impl(asset::StreamingTexture t) : texture(std::move(t)) {}
+};
+
+struct AssetWatcher::Impl
+{
+    asset::FileWatcher watcher;
 };
 
 Asset::Asset(std::unique_ptr<Impl> impl) noexcept : impl_(std::move(impl)) {}
@@ -142,6 +149,9 @@ StreamingTexture::fromRGBA(std::uint32_t width, std::uint32_t height,
         asset::StreamingTexture(std::move(base), budgetBytes)));
 }
 
+StreamingTexture::StreamingTexture() noexcept
+    : impl_(std::make_unique<Impl>(asset::StreamingTexture())) {}
+
 StreamingTexture::StreamingTexture(std::unique_ptr<Impl> impl) noexcept : impl_(std::move(impl)) {}
 StreamingTexture::~StreamingTexture() = default;
 StreamingTexture::StreamingTexture(StreamingTexture&&) noexcept = default;
@@ -206,6 +216,28 @@ asset::MaterialData toInternal(const MeshMaterialData& material)
     return out;
 }
 
+asset::MeshData toInternalMesh(const MeshData& mesh)
+{
+    asset::MeshData out;
+    out.name = mesh.name;
+    out.indices = mesh.indices;
+    out.material = toInternal(mesh.material);
+    out.material.baseColorTexture.width = mesh.material.textureWidth;
+    out.material.baseColorTexture.height = mesh.material.textureHeight;
+    out.material.baseColorTexture.rgba = mesh.material.textureRGBA;
+    out.vertices.reserve(mesh.vertices.size());
+    for (const auto& vertex : mesh.vertices)
+    {
+        asset::MeshVertexData v;
+        v.position[0] = vertex.position.x(); v.position[1] = vertex.position.y(); v.position[2] = vertex.position.z();
+        v.normal[0] = vertex.normal.x(); v.normal[1] = vertex.normal.y(); v.normal[2] = vertex.normal.z();
+        v.uv[0] = vertex.uv.x(); v.uv[1] = vertex.uv.y();
+        for (int i = 0; i < 4; ++i) v.tangent[i] = vertex.tangent[i];
+        out.vertices.push_back(v);
+    }
+    return out;
+}
+
 ToonMaterialDesc toPublic(const asset::ToonMaterialDesc& desc)
 {
     ToonMaterialDesc out;
@@ -224,6 +256,89 @@ ToonMaterialDesc toPublic(const asset::ToonMaterialDesc& desc)
     return out;
 }
 } // namespace
+
+namespace
+{
+MeshData toPublicMesh(const asset::MeshData& source)
+{
+    MeshData mesh;
+    mesh.name = source.name;
+    mesh.indices = source.indices;
+    mesh.material.baseColorFactor = math::Vec4f{
+        source.material.baseColorFactor[0], source.material.baseColorFactor[1],
+        source.material.baseColorFactor[2], source.material.baseColorFactor[3]};
+    mesh.material.emissiveFactor = math::Vec4f{
+        source.material.emissiveFactor[0], source.material.emissiveFactor[1],
+        source.material.emissiveFactor[2], source.material.emissiveFactor[3]};
+    mesh.material.metallicFactor = source.material.metallicFactor;
+    mesh.material.roughnessFactor = source.material.roughnessFactor;
+    mesh.material.hasBaseColorTexture = source.material.hasBaseColorTexture;
+    mesh.material.hasNormalTexture = source.material.hasNormalTexture;
+    mesh.material.hasMetallicRoughnessTexture = source.material.hasMetallicRoughnessTexture;
+    mesh.material.hasOcclusionTexture = source.material.hasOcclusionTexture;
+    mesh.material.hasEmissiveTexture = source.material.hasEmissiveTexture;
+    mesh.material.doubleSided = source.material.doubleSided;
+    mesh.material.alphaMode = source.material.alphaMode;
+    mesh.material.textureWidth = source.material.baseColorTexture.width;
+    mesh.material.textureHeight = source.material.baseColorTexture.height;
+    mesh.material.textureRGBA = source.material.baseColorTexture.rgba;
+    mesh.material.name = source.material.name;
+    mesh.vertices.reserve(source.vertices.size());
+    for (const auto& vertex : source.vertices)
+        mesh.vertices.push_back(MeshVertexData{
+            math::Vec3f{vertex.position[0], vertex.position[1], vertex.position[2]},
+            math::Vec3f{vertex.normal[0], vertex.normal[1], vertex.normal[2]},
+            math::Vec2f{vertex.uv[0], vertex.uv[1]},
+            math::Vec4f{vertex.tangent[0], vertex.tangent[1], vertex.tangent[2], vertex.tangent[3]}});
+    return mesh;
+}
+} // namespace
+
+std::expected<std::vector<MeshData>, std::string>
+generateAssetLods(const MeshData& base, std::span<const float> ratios)
+{
+    // Convert to the internal layout (expanded flat vertices), build LODs,
+    // then convert back so callers only see public math types.
+    asset::MeshData internal = toInternalMesh(base);
+    std::vector<float> r(ratios.begin(), ratios.end());
+    auto levels = asset::generateLodLevels(internal, r);
+    if (!levels) return std::unexpected(levels.error());
+    std::vector<MeshData> result;
+    result.reserve(levels->size());
+    for (const auto& level : *levels) result.push_back(toPublicMesh(level));
+    return result;
+}
+
+AssetLodSelector::AssetLodSelector(std::vector<float> maxDistances) noexcept
+    : distances_(std::move(maxDistances))
+{
+}
+
+std::size_t AssetLodSelector::update(float distance, float hysteresis) noexcept
+{
+    if (distances_.empty()) return 0;
+    if (current_ >= distances_.size()) current_ = distances_.size() - 1;
+    if (distance > distances_[current_] + hysteresis && current_ + 1 < distances_.size())
+        ++current_;
+    else if (current_ > 0 && distance + hysteresis < distances_[current_ - 1])
+        --current_;
+    return current_;
+}
+
+AssetWatcher::AssetWatcher() : impl_(std::make_unique<Impl>()) {}
+AssetWatcher::~AssetWatcher() = default;
+AssetWatcher::AssetWatcher(AssetWatcher&&) noexcept = default;
+AssetWatcher& AssetWatcher::operator=(AssetWatcher&&) noexcept = default;
+
+bool AssetWatcher::watch(const std::string& path) { return impl_->watcher.watch(path); }
+
+std::vector<std::string> AssetWatcher::poll()
+{
+    std::vector<std::string> changed;
+    for (const auto& event : impl_->watcher.poll())
+        if (event.change == asset::FileChange::Modified) changed.push_back(event.path);
+    return changed;
+}
 
 ToonMaterialDesc mapAssetMaterial(const MeshMaterialData& material)
 {

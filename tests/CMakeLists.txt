@@ -238,6 +238,7 @@ target_compile_definitions(starforge_gpu_tests
         STARFORGE_SHADER_DIR="${PROJECT_BINARY_DIR}/shaders"
         STARFORGE_BASELINE_DIR="${CMAKE_CURRENT_BINARY_DIR}/benchmarks/baselines"
         STARFORGE_GOLDEN_DIR="${PROJECT_SOURCE_DIR}/tests/goldens"
+        STARFORGE_ASSET_DIR="${PROJECT_SOURCE_DIR}/assets/models"
         STARFORGE_GPU_TESTS=1
 )
 

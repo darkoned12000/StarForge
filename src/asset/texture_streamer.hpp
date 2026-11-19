@@ -18,6 +18,7 @@ namespace starforge::asset
 class TextureMipChain
 {
 public:
+    TextureMipChain() noexcept = default;
     explicit TextureMipChain(TextureData base);
     [[nodiscard]] std::size_t mipCount() const noexcept { return levels_.size(); }
     [[nodiscard]] const TextureData& level(std::size_t index) const noexcept;
@@ -33,6 +34,7 @@ private:
 class StreamingTexture
 {
 public:
+    StreamingTexture() noexcept = default;
     explicit StreamingTexture(TextureData base, std::size_t budgetBytes = 4u * 1024u * 1024u);
     explicit StreamingTexture(TextureMipChain chain, std::size_t budgetBytes = 4u * 1024u * 1024u);
 

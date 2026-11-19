@@ -42,3 +42,27 @@ TEST_CASE("Public Asset: streamed textures expose mip residency")
     static_assert(std::is_move_constructible_v<StreamingTexture>);
     static_assert(!std::is_copy_constructible_v<StreamingTexture>);
 }
+
+TEST_CASE("Public Asset: LOD generation and watcher are exposed")
+{
+    MeshData mesh;
+    for (int i = 0; i < 36; ++i)
+    {
+        MeshVertexData vertex;
+        vertex.position = math::Vec3f{static_cast<float>(i % 6), static_cast<float>(i / 6), 0.0f};
+        mesh.vertices.push_back(vertex);
+        mesh.indices.push_back(static_cast<std::uint32_t>(i));
+    }
+    const std::vector<float> ratios{0.5f};
+    auto levels = generateAssetLods(mesh, ratios);
+    REQUIRE(levels.has_value());
+    CHECK(levels->size() == 2);
+
+    AssetLodSelector selector{{100.0f, 1000.0f, 1.0e9f}};
+    CHECK(selector.update(50.0f, 20.0f) == 0);
+    CHECK(selector.update(130.0f, 20.0f) == 1);
+
+    AssetWatcher watcher;
+    static_assert(std::is_move_constructible_v<AssetWatcher>);
+    static_assert(!std::is_copy_constructible_v<AssetWatcher>);
+}
