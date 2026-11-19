@@ -80,8 +80,13 @@ rendering library plus the game layer (see ROADMAP for status):
 - `starforge_environment`: starfield, nebula, dust, particles, weapons,
   shields, thruster, FTL, wormhole, storm, asteroid field, toon
   material + outline pass (M8, M9.5).
+- `starforge_asset`: CPU-only glTF 2.0 decoder (GLB + external `.gltf`),
+  asset manager/registry, polling watcher + hot reload, glTF→toon material
+  mapping, meshoptimizer LOD chains and mip-chain texture streaming (M17).
+  It uses nlohmann/json + stb_image only, never Vulkan or engine math.
 - `starforge_public_api`: backend-neutral facades — `Application`,
-  `Renderer`, `Starfield`, `Toon`, `Audio`, math/world (M9, M9.5, M12.5).
+  `Renderer`, `Starfield`, `Toon`, `Asset`, `Audio`, math/world
+  (M9, M9.5, M12.5, M17).
 - `starforge_ecs`: Flecs world, `Transform`/`Velocity`, spatial index,
   ECS → GPU instance stream (M10).
 - `starforge_physics`: Jolt in a camera-relative island, Jolt→scheduler

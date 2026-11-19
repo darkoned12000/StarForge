@@ -1,5 +1,9 @@
 # Milestone 17 — Asset Pipeline: implementation plan
 
+**Status: COMPLETE (2026-11-19).** All steps 1–9 landed on `milestone16`
+(commits `a3cbca3` … `1a59a55` plus the docs/final-verification commit).
+See `ROADMAP.md` for the implementation summary and verification results.
+
 Goal (ROADMAP): mesh/material/audio loading, asset management, hot-reloading,
 LODs, material variants and texture streaming. Proof: load and render a glTF
 mesh with textures at 60 fps with zero validation errors.

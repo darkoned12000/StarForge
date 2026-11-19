@@ -1366,12 +1366,15 @@ without the lock-on-style ring; a yellow bracket marks the selected target
 so an untargeted radar has no "lock" indicator. Verification: CTest 12/12,
 382 CPU cases, zero validation errors.
 
-### M17 – Asset Pipeline
+### M17 – Asset Pipeline — COMPLETE (2026-11-19)
 
 - **Goal:** Mesh/material/audio loading (stb, tinygltf, meshoptimizer),
   asset management, hot-reloading, LODs, material variants, texture
   streaming.
-- **Proof:** Load and render a glTF mesh with textures at 60 fps.
+- **Proof:** Load and render a glTF mesh with textures at 60 fps — the authored
+  hero ship (three textured, multi-material parts) renders in First Flight and
+  in a headless GPU proof with zero validation errors; LOD and streamed-mip
+  selection are exercised in the live loop.
 - **Depends on:** M9 (Public API). **Priority note (review, 2026-11):**
   bring forward alongside M15/M15.0 — procedural geometry is not a
   substitute for authored ships, stations, capital ships, weapons,
@@ -1383,6 +1386,25 @@ so an untargeted radar has no "lock" indicator. Verification: CTest 12/12,
 - **Deliverables to include:** hero ship mesh, station mesh, LOD chains,
   material variants per the M9.5 material-capability model, texture
   streaming, asset hot-reloading, glTF material → toon material mapping.
+
+**M17 implementation summary (commits a3cbca3..1a59a55):** M17.1 CPU asset
+manager (typed handles, path dedup, refcounts, reload queue); M17.2 polling
+file watcher + hot-reload coordinator; M17.3 extended material decoding and
+glTF PBR → toon capability mapping with four named variants; M17.4
+meshoptimizer v0.25 vertex weld/optimise/simplify plus asset LOD chains with
+hysteresis; M17.5 mip-chain generation, budgeted LRU texture residency, public
+`StreamingTexture` and `Toon::createMeshFromAsset` mip upload; M17.6 external
+`.gltf` (file + data URIs) and file-based audio loading; M17.7 authored
+`hero_ship.glb`/`station.glb` generated deterministically by
+`tools/generate_assets.py`; M17.8 full game integration and GPU proof.
+
+Design decisions: the in-house nlohmann/stb decoder is extended rather than
+replaced by tinygltf v3 (a C library with no CMake target that would duplicate
+the GPU-proven decoder); textures stay in the toon BDA packed-RGBA8 path, so
+streaming means mip generation/residency and on-demand GPU upload, not a new
+sampler pipeline. All asset internals are CPU-only and the game consumes them
+through the public `starforge::Asset` facade. Verification: CTest 12/12,
+399 CPU cases, zero validation errors.
 
 ### M18 – Persistence
 

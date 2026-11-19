@@ -87,10 +87,16 @@ convenience wrapper around the same path.
   outline thickness is specified in screen pixels. Diffuse color can use a
   three-stop ramp (`shadowColor` → `midColor` → `baseColor`); a `midColor`
   with alpha 0 uses the midpoint of the shadow and base colors.
-- `starforge::Asset` — CPU-side glTF 2.0 decoder (`loadFromMemory`,
-  `loadFromFile`, `meshes()`) exposing positions, normals, UVs, tangents,
-  indices and glTF base-colour material data (including embedded textures).
-  Pair with `Toon::createMeshFromAsset` to render an imported mesh.
+- `starforge::Asset` — CPU-side glTF 2.0 decoder (`loadFromMemory` for GLB,
+  `loadFromFile` for GLB or ASCII `.gltf` with external/data URIs, `meshes()`)
+  exposing positions, normals, UVs, tangents, indices and glTF material data
+  (base colour, emissive, metallic/roughness, extra texture slots, alpha mode)
+  including embedded textures. M17 adds `mapAssetMaterial` /
+  `applyAssetMaterialVariant` (glTF PBR → toon capability bits),
+  `generateAssetLods` / `AssetLodSelector` (meshoptimizer LODs),
+  `StreamingTexture` (mip chain with budgeted LRU residency) and `AssetWatcher`
+  (file-change polling for hot reload). Pair with `Toon::createMeshFromAsset`
+  (or its mip overload) to render an imported mesh.
 - `starforge::Nebula` — fullscreen cel-style nebula backdrop; `Params::celShaded`
   quantizes the FBM into flat toon bands.
 - `starforge::Sun` — visitable celestial body with an emissive core, corona
@@ -108,7 +114,7 @@ convenience wrapper around the same path.
   and `addText()` queue bitmap-font/widget draws in window-pixel coordinates;
   `record()` emits one draw into an active frame in insertion order.
 - `starforge::Audio` — backend-neutral audio: `create`, `loadFromMemory`
-  (WAV/FLAC/MP3 bytes), `play`/`stop`/`isPlaying`, per-bus gain
+  (WAV/FLAC/MP3 bytes), `loadFromFile` (M17), `play`/`stop`/`isPlaying`, per-bus gain
   (`setBusVolume`), `setListener`, `setEmitter` (3D positional audio with
   Doppler factor), `setEmitterAttenuation`, master volume. `Backend::Silent`
   needs no audio hardware (headless tests); `Backend::Default` uses OS

@@ -46,7 +46,9 @@ criteria.
 - **Flecs 4.2** for ECS
 - **Jolt Physics 5.6** for collisions and dynamics
 - **miniaudio 0.11.26** for 3D audio
-- **nlohmann JSON** for benchmark data
+- **meshoptimizer 0.25** for asset vertex optimisation and LOD generation (M17)
+- **stb_image / stb_image_write** for embedded glTF and golden image decoding
+- **nlohmann JSON** for benchmark data and glTF parsing
 - **doctest** for CPU/GPU test suites
 
 Cross-platform architecture is a design requirement; Linux / EndeavourOS is
