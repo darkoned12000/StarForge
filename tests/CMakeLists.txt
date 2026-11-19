@@ -77,6 +77,7 @@ add_executable(starforge_tests
     test_ui_comms.cpp
     test_ui_station.cpp
     test_ui_map.cpp
+    test_m16_exit_proof.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/game_bridge.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/game_simulation.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/ui_state.cpp

@@ -139,6 +139,14 @@ are listed; earlier tasks are prerequisites for later ones.
 
 ---
 
+## Status (2026-11-19): M16 complete — steps 16.1–16.10 ✅
+
+All ten steps were implemented one commit each in strict order, with T1 CPU
+proofs, T3 golden images and T4/T5 budget/exit proofs. The final M16 Proof
+("full game loop playable with UI, no console commands needed") is satisfied
+by `tests/test_m16_exit_proof.cpp`. See the M16 step table in ROADMAP.md for
+per-step completion notes.
+
 ## Decisions (confirmed with user)
 1. **Final UI: custom toon UI** for now. **Fallback: RmlUi** if the custom
    solution cannot deliver the required UI functionality — revisit if any

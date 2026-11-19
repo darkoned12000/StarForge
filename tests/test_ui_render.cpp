@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -540,6 +541,48 @@ TEST_CASE("M16.9: large text draw survives buffer growth")
         if (pixels[i] > 100 && pixels[i+1] > 100) ++lit;
     readback->unmap();
     CHECK(lit > 400); // the whole HUD still renders, not an empty frame
+
+    // T4: repeated busy-HUD frames stay under the ADR-004 interval.
+    std::vector<double> timings;
+    for (int frame = 0; frame < 14; ++frame)
+    {
+        REQUIRE(vkResetCommandBuffer(cmd, 0) == VK_SUCCESS);
+        VkCommandBufferBeginInfo loopBegin{};
+        loopBegin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        loopBegin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        REQUIRE(vkBeginCommandBuffer(cmd, &loopBegin) == VK_SUCCESS);
+        image->transitionToColorAttachment(cmd);
+        VkRenderingAttachmentInfo loopAttachment{};
+        loopAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        loopAttachment.imageView = view->handle();
+        loopAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        loopAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        loopAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        loopAttachment.clearValue.color = VkClearColorValue{{0.0f,0.0f,0.0f,1.0f}};
+        VkRenderingInfo loopRendering{};
+        loopRendering.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+        loopRendering.renderArea.extent = {kW,kH};
+        loopRendering.layerCount = 1;
+        loopRendering.colorAttachmentCount = 1;
+        loopRendering.pColorAttachments = &loopAttachment;
+        vkCmdBeginRendering(cmd, &loopRendering);
+        VkViewport vp{0.0f,static_cast<float>(kH),static_cast<float>(kW),-static_cast<float>(kH),0.0f,1.0f};
+        VkRect2D sc{{0,0},{kW,kH}};
+        vkCmdSetViewport(cmd,0,1,&vp);
+        vkCmdSetScissor(cmd,0,1,&sc);
+        renderer->render(cmd, vertices);
+        vkCmdEndRendering(cmd);
+        REQUIRE(vkEndCommandBuffer(cmd) == VK_SUCCESS);
+        REQUIRE(vkResetFences(device->device(),1,&fence) == VK_SUCCESS);
+        const auto started = std::chrono::steady_clock::now();
+        REQUIRE(device->submit(1,&submit,fence) == VK_SUCCESS);
+        REQUIRE(vkWaitForFences(device->device(),1,&fence,VK_TRUE,UINT64_MAX) == VK_SUCCESS);
+        const auto ended = std::chrono::steady_clock::now();
+        if (frame >= 2)
+            timings.push_back(std::chrono::duration<double,std::milli>(ended-started).count());
+    }
+    std::sort(timings.begin(), timings.end());
+    CHECK(timings[(timings.size()*95)/100] < 6.94);
     CHECK(context->validationErrorCount() == 0);
     vkDestroyFence(device->device(),fence,nullptr);
     vkFreeCommandBuffers(device->device(),pool,1,&cmd);
