@@ -83,7 +83,7 @@ struct SystemVisual
 {
     std::array<float, 4> nebulaColor{0.30f, 0.15f, 0.50f, 1.0f};
     std::array<float, 4> planetBase{0.18f, 0.50f, 1.00f, 1.0f};
-    std::array<float, 4> planetShadow{0.12f, 0.35f, 0.65f, 1.0f};
+    std::array<float, 4> planetShadow{0.015f, 0.04f, 0.10f, 1.0f};
     std::array<float, 4> planetRim{0.60f, 0.80f, 1.00f, 1.0f};
     std::array<float, 4> sunCore{1.00f, 0.95f, 0.82f, 1.0f};
     std::array<float, 4> sunLimb{0.95f, 0.40f, 0.05f, 1.0f};

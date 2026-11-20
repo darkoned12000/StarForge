@@ -29,6 +29,9 @@ struct StationButton
 [[nodiscard]] std::vector<StationButton> stationButtons();
 
 // Applies a clicked button id to the simulation. Returns true if handled.
-bool applyStationAction(std::string_view id, GameSimulation& simulation, CommsLog& comms);
+// `stationDistance` is the real ship-to-station range in metres; dock only
+// succeeds when the ship is actually close (tests may pass the default).
+bool applyStationAction(std::string_view id, GameSimulation& simulation, CommsLog& comms,
+                        double stationDistance = 20.0);
 
 } // namespace starforge::game

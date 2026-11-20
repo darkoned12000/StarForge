@@ -39,7 +39,7 @@ SystemVisual systemVisual(const std::string& systemId)
     {
         v.nebulaColor = {0.08f, 0.32f, 0.30f, 1.0f};
         v.planetBase = {0.12f, 0.62f, 0.42f, 1.0f};
-        v.planetShadow = {0.05f, 0.28f, 0.20f, 1.0f};
+        v.planetShadow = {0.01f, 0.06f, 0.03f, 1.0f};
         v.planetRim = {0.55f, 1.00f, 0.75f, 1.0f};
         v.sunCore = {1.00f, 1.00f, 0.92f, 1.0f};
         v.sunLimb = {0.75f, 0.90f, 0.55f, 1.0f};
@@ -52,7 +52,7 @@ SystemVisual systemVisual(const std::string& systemId)
     {
         v.nebulaColor = {0.38f, 0.10f, 0.08f, 1.0f};
         v.planetBase = {0.72f, 0.22f, 0.12f, 1.0f};
-        v.planetShadow = {0.30f, 0.08f, 0.05f, 1.0f};
+        v.planetShadow = {0.06f, 0.015f, 0.01f, 1.0f};
         v.planetRim = {1.00f, 0.55f, 0.30f, 1.0f};
         v.sunCore = {1.00f, 0.72f, 0.55f, 1.0f};
         v.sunLimb = {0.95f, 0.22f, 0.08f, 1.0f};
@@ -65,7 +65,7 @@ SystemVisual systemVisual(const std::string& systemId)
     {
         v.nebulaColor = {0.10f, 0.14f, 0.42f, 1.0f};
         v.planetBase = {0.38f, 0.28f, 0.78f, 1.0f};
-        v.planetShadow = {0.14f, 0.10f, 0.34f, 1.0f};
+        v.planetShadow = {0.02f, 0.015f, 0.06f, 1.0f};
         v.planetRim = {0.75f, 0.65f, 1.00f, 1.0f};
         v.sunCore = {0.85f, 0.92f, 1.00f, 1.0f};
         v.sunLimb = {0.30f, 0.50f, 0.95f, 1.0f};
@@ -78,7 +78,7 @@ SystemVisual systemVisual(const std::string& systemId)
     {
         v.nebulaColor = {0.40f, 0.24f, 0.06f, 1.0f};
         v.planetBase = {0.85f, 0.48f, 0.18f, 1.0f};
-        v.planetShadow = {0.34f, 0.18f, 0.06f, 1.0f};
+        v.planetShadow = {0.06f, 0.03f, 0.01f, 1.0f};
         v.planetRim = {1.00f, 0.78f, 0.38f, 1.0f};
         v.sunCore = {1.00f, 0.88f, 0.68f, 1.0f};
         v.sunLimb = {1.00f, 0.42f, 0.10f, 1.0f};

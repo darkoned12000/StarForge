@@ -23,11 +23,12 @@ std::vector<StationButton> stationButtons()
             {"jump", "JUMP", 18.0f, 314.0f, 324.0f, 38.0f}};
 }
 
-bool applyStationAction(std::string_view id, GameSimulation& simulation, CommsLog& comms)
+bool applyStationAction(std::string_view id, GameSimulation& simulation, CommsLog& comms,
+                        double stationDistance)
 {
     if (id == "dock")
     {
-        simulation.updateDocking(20.0, 0.0, "station-a");
+        simulation.updateDocking(stationDistance, 0.0, "station-a");
         if (simulation.dock("station-a", "slot-1"))
             comms.push(CommsChannel::Trade, "station-a", "Docking granted");
         return true;

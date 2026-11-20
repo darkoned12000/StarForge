@@ -244,19 +244,28 @@ def build_station() -> bytes:
     hull_mat = glb.material("station-hull", [0.7, 0.75, 0.85, 1.0], 0.5, 0.5, image=station_img)
     ring_mat = glb.material("station-ring", [0.95, 0.75, 0.3, 1.0], 0.8, 0.25, image=station_img)
 
+    import math
+
     hub = Mesh()
     hub.box((0, 0, 0), (2.0, 1.2, 2.0))
+    # Central command spire and docking collar.
+    hub.box((0, 0, 1.25), (0.8, 0.8, 1.1))
+    hub.box((0, 0, -1.25), (1.1, 1.1, 0.5))
     glb.mesh("station-hub", hub, hull_mat)
 
     ring = Mesh()
-    ring.ring(2.6, 0.18, 24)
+    ring.ring(2.6, 0.18, 32)
+    ring.ring(3.3, 0.10, 32)
     glb.mesh("station-ring", ring, ring_mat)
 
     arms = Mesh()
-    for angle in (0, 2.094, 4.189):
-        import math
-        cx, cy = 1.4 * math.cos(angle), 1.4 * math.sin(angle)
-        arms.box((cx, cy, 0), (2.0, 0.2, 0.2))
+    for angle in (0, 1.047, 2.094, 3.142, 4.189, 5.236):
+        cx, cy = 1.6 * math.cos(angle), 1.6 * math.sin(angle)
+        arms.box((cx, cy, 0), (2.4, 0.22, 0.22))
+        # Docking pod at the end of every other arm.
+        if int(round(angle * 100)) % 2 == 0:
+            px, py = 2.9 * math.cos(angle), 2.9 * math.sin(angle)
+            arms.box((px, py, 0), (0.55, 0.45, 0.55))
     glb.mesh("station-arms", arms, hull_mat)
     return glb.build()
 

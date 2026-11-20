@@ -64,6 +64,9 @@ constexpr float kSimStep = 1.0f / 60.0f; // fixed 60 Hz simulation
 // is ~8.5 minutes at full throttle. Direction is well away from the
 // planet (~67 degrees) so the two read as separate objects.
 constexpr starforge::game::RawVec3d kSunWorld{1047000.0 - 21000.0, 12000.0, -18000.0};
+// M17: station is anchored in world space, so flying changes your range to it
+// instead of dragging it along in front of the ship.
+constexpr starforge::game::RawVec3d kStationWorld{120.0, 30.0, -700.0};
 constexpr double kSunRadius = 4000.0;
 constexpr double kSunCoronaMultiplier = 3.0;
 
@@ -276,7 +279,8 @@ struct UiTracker
 
 void handleUiActions(starforge::Application& app, UiTracker& tracker,
                      starforge::game::GameSimulation& simulation,
-                     starforge::game::CommsLog& comms)
+                     starforge::game::CommsLog& comms,
+                     double stationDistance = 20.0)
 {
     const bool up = app.isKeyDown(starforge::Key::Up);
     const bool down = app.isKeyDown(starforge::Key::Down);
@@ -297,7 +301,7 @@ void handleUiActions(starforge::Application& app, UiTracker& tracker,
 
     if (dockEdge)
     {
-        simulation.updateDocking(20.0, 0.0, "station-a");
+        simulation.updateDocking(stationDistance, 0.0, "station-a");
         if (simulation.dock("station-a", "slot-1"))
         {
             logInfo("[TRADE] docked at station-a");
@@ -877,6 +881,11 @@ int main()
         // UI-mode trading / mission / jump actions.
         if (flight.mode == starforge::game::FlightMode::Ui && !flight.paused && !chatActive)
         {
+            const auto stationShip = world.shipTransform().position;
+            const double stationRange = std::sqrt(
+                (kStationWorld.x - stationShip.x) * (kStationWorld.x - stationShip.x) +
+                (kStationWorld.y - stationShip.y) * (kStationWorld.y - stationShip.y) +
+                (kStationWorld.z - stationShip.z) * (kStationWorld.z - stationShip.z));
             // M16.8: clickable station screen. Register widgets in the same
             // geometry the renderer uses, then apply any clicked action.
             {
@@ -889,9 +898,10 @@ int main()
                                                               button.w, button.h});
                 for (const auto& button : starforge::game::stationButtons())
                     if (uiState.clicked(button.id))
-                        starforge::game::applyStationAction(button.id, simulation, comms);
+                        starforge::game::applyStationAction(button.id, simulation, comms,
+                                                            stationRange);
             }
-            handleUiActions(*app, uiTracker, simulation, comms);
+            handleUiActions(*app, uiTracker, simulation, comms, stationRange);
         }
 
         // Interactive sector map: click a system to select it, then JUMP TO
@@ -970,9 +980,16 @@ int main()
                 laserBolts.end());
         }
 
-        // M17: pick the station LOD from its range (rigid demo placement).
+        // M17: pick the station LOD from the real ship-to-station range.
         if (stationModel.loaded)
-            stationModel.activeLod = stationModel.selector.update(260.0f, 40.0f);
+        {
+            const auto shipForLod = world.shipTransform().position;
+            const float stationRange = static_cast<float>(std::sqrt(
+                (kStationWorld.x - shipForLod.x) * (kStationWorld.x - shipForLod.x) +
+                (kStationWorld.y - shipForLod.y) * (kStationWorld.y - shipForLod.y) +
+                (kStationWorld.z - shipForLod.z) * (kStationWorld.z - shipForLod.z)));
+            stationModel.activeLod = stationModel.selector.update(stationRange, 40.0f);
+        }
 
         // M17: streamed mip follows the camera zoom (FOV). Rebuild GPU
         // meshes only when the chosen mip actually changes.
@@ -1432,6 +1449,10 @@ int main()
             static_cast<float>(kPlanetWorld.x - ship.position.x),
             static_cast<float>(kPlanetWorld.y - ship.position.y),
             static_cast<float>(kPlanetWorld.z - ship.position.z)};
+        const starforge::math::Vec3f stationRel{
+            static_cast<float>(kStationWorld.x - ship.position.x),
+            static_cast<float>(kStationWorld.y - ship.position.y),
+            static_cast<float>(kStationWorld.z - ship.position.z)};
         starforge::Planet::RenderContext planetContext;
         planetContext.viewProj = viewProj;
         planetContext.invViewProj = invViewProj;
@@ -1454,7 +1475,7 @@ int main()
                                    kSunWorld.y - kPlanetWorld.y,
                                    kSunWorld.z - kPlanetWorld.z});
         planetParams.fresnelPower = 3.5f;
-        planetParams.rimStrength = 1.2f;
+        planetParams.rimStrength = 0.45f;
         planetParams.atmosphereRatio = 1.18f;
         planetParams.atmosphereColor = {0.35f, 0.6f, 1.0f, 1.0f};
         // The additive limb read as a second, hollow planet at some angles,
@@ -1558,10 +1579,10 @@ int main()
                 auto variant = starforge::MaterialVariant::Default;
                 if (simulation.playerHull() < 50.0f)
                     variant = starforge::MaterialVariant::Damaged;
-                else if (simulation.playerShield() > 0.0f)
+                else if (simulation.playerShield() < 25.0f)
                     variant = starforge::MaterialVariant::Shielded;
-                if (targeting.hasSelection())
-                    variant = starforge::MaterialVariant::Highlighted;
+                // Targeting (T) is purely a HUD/UI concern: never recolour the
+                // ship just because a target was locked.
                 for (const auto& part : shipModel.parts)
                 {
                     const auto& mesh = part.lods[shipModel.activeLod];
@@ -1577,11 +1598,11 @@ int main()
                 starforge::math::Mat4f stationModel4(1.0f);
                 // Bring the outpost into view: scaled up and ahead of the
                 // ship instead of a speck 1.2 km off to the side.
-                constexpr float kStationScale = 12.0f;
+                constexpr float kStationScale = 8.0f;
                 stationModel4.columns[0][0] = kStationScale;
                 stationModel4.columns[1][1] = kStationScale;
                 stationModel4.columns[2][2] = kStationScale;
-                stationModel4.columns[3] = {45.0f, 14.0f, -260.0f, 1.0f};
+                stationModel4.columns[3] = {stationRel.x(), stationRel.y(), stationRel.z(), 1.0f};
                 starforge::Toon::Context stationContext;
                 stationContext.viewProj = viewProj * stationModel4;
                 stationContext.modelView = view * stationModel4;
@@ -1595,13 +1616,13 @@ int main()
                                      mesh);
                 }
             }
-            // M17 polish: thrusters only burn while W/S is held. Each engine
-            // is a bright circular core plus a tapered, fading segment plume
-            // (not a single flat rectangle) like the concept art.
-            const bool thrustersEngaged = !flight.paused &&
-                (app->isKeyDown(starforge::Key::W) || app->isKeyDown(starforge::Key::S));
+            // M17 polish: thrusters follow throttle level. One press of W/S
+            // raises throttle to 25%, which shows a small persistent plume;
+            // it grows with power and disappears entirely at 0%.
+            const bool thrustersEngaged = !flight.paused && flight.throttle > 0.01f;
             if (thrustersEngaged)
             {
+                const float power = std::clamp(flight.throttle, 0.0f, 1.0f);
                 auto drawGlow = [&](float px, float py, float pz,
                                     float sx, float sy, float sz,
                                     float r, float g, float b, float intensity) {
@@ -1623,22 +1644,24 @@ int main()
                     toon->record(fc, glowContext, glowParams);
                 };
 
+                // plume scale grows with throttle: short at 25%, long at 100%.
+                const float plumeLength = 0.35f + power * 2.2f;
+                const float plumeBrightness = 0.35f + power * 0.75f;
                 for (const float ex : {-0.62f, 0.62f})
                 {
                     const float flicker = 0.92f + 0.08f * std::sin(time * 27.0f);
-                    // Bright engine core.
-                    drawGlow(ex, 0.0f, 2.58f, 0.44f, 0.44f, 0.28f,
-                             0.03f, 0.32f, 1.0f, 0.85f * flicker);
-                    // Tapered exhaust: six shrinking, fading additive segments.
-                    for (int segment = 0; segment < 6; ++segment)
+                    drawGlow(ex, 0.0f, 2.58f, 0.42f, 0.42f, 0.26f,
+                              0.03f, 0.32f, 1.0f, plumeBrightness * flicker);
+                    constexpr int kSegments = 10;
+                    for (int segment = 0; segment < kSegments; ++segment)
                     {
-                        const float t = static_cast<float>(segment) / 5.0f;
-                        const float width = 0.40f * (1.0f - t) + 0.06f;
-                        const float length = 0.42f;
-                        const float z = 2.78f + static_cast<float>(segment) * length;
-                        const float intensity = (0.62f * (1.0f - t) + 0.03f) * flicker;
+                        const float t = static_cast<float>(segment) / (kSegments - 1);
+                        const float width = (0.38f * (1.0f - t) + 0.05f) * (0.6f + 0.4f * power);
+                        const float length = plumeLength / kSegments + 0.08f;
+                        const float z = 2.72f + static_cast<float>(segment) * (plumeLength / kSegments);
+                        const float intensity = (0.55f * (1.0f - t) + 0.02f) * plumeBrightness * flicker;
                         drawGlow(ex, 0.0f, z, width, width, length,
-                                 0.02f + 0.03f * t, 0.22f + 0.10f * t, 1.0f, intensity);
+                                  0.02f + 0.03f * t, 0.22f + 0.10f * t, 1.0f, intensity);
                     }
                 }
             }
