@@ -158,7 +158,7 @@ std::vector<GameEvent> GameSimulation::step(float dt, const RawVec3f& shipForwar
 
     primaryCooldown_ = std::max(0.0f, primaryCooldown_ - dt);
     secondaryCooldown_ = std::max(0.0f, secondaryCooldown_ - dt);
-    gameplay::tickDamage(player_, dt, 4.0f);
+    gameplay::tickDamage(player_, dt, 2.0f);
 
     // --- Advance every NPC ---
     for (auto& npc : npcs_)
@@ -183,14 +183,32 @@ std::vector<GameEvent> GameSimulation::step(float dt, const RawVec3f& shipForwar
                                                         -npc.position.z});
             RawVec3f right{RawVec3f{toward.z, 0.0f, -toward.x}};
             right = normalized(right);
-            const float speed = npc.engaging ? 42.0f : 55.0f;
-            const float strafe = std::sin(npc.phase * 0.8f) * 26.0f;
-            const float climb = std::sin(npc.phase * 0.53f + 1.2f) * 14.0f;
+            // Slower, wider orbits so a pilot can actually line up a shot.
+            const float speed = npc.engaging ? 24.0f : 32.0f;
+            const float strafe = std::sin(npc.phase * 0.8f) * 12.0f;
+            const float climb = std::sin(npc.phase * 0.53f + 1.2f) * 7.0f;
             const float radial = npc.engaging ? speed : -speed;
             npc.velocity = RawVec3f{
                 toward.x * radial + right.x * strafe,
                 toward.y * radial + climb,
                 toward.z * radial + right.z * strafe};
+
+            // Keep hostiles in the player's forward arc: steer gently toward
+            // a standoff point ahead of the ship instead of drifting behind
+            // where they cannot be seen or targeted.
+            const float sideOffset = (&npc - npcs_.data()) % 2 == 0 ? 45.0f : -45.0f;
+            const RawVec3f desired{
+                shipForward.x * 190.0f + right.x * sideOffset,
+                shipForward.y * 190.0f + climb * 0.5f,
+                shipForward.z * 190.0f + right.z * sideOffset};
+            const RawVec3f toDesired = normalized(RawVec3f{
+                desired.x - npc.position.x,
+                desired.y - npc.position.y,
+                desired.z - npc.position.z});
+            npc.velocity = RawVec3f{
+                npc.velocity.x + toDesired.x * 14.0f,
+                npc.velocity.y + toDesired.y * 14.0f,
+                npc.velocity.z + toDesired.z * 14.0f};
         }
         else
         {
@@ -213,8 +231,8 @@ std::vector<GameEvent> GameSimulation::step(float dt, const RawVec3f& shipForwar
         // Only hostile ships engage the player with weapons.
         if (npc.hostile && distance < 400.0f && npc.cooldown <= 0.0f)
         {
-            npc.cooldown = 1.2f;
-            auto result = gameplay::applyDamage(player_, 12.0f, gameplay::Subsystem::Hull);
+            npc.cooldown = 1.5f;
+            auto result = gameplay::applyDamage(player_, 8.0f, gameplay::Subsystem::Hull);
             if (result.shieldAbsorbed > 0.0f)
                 events.push_back(GameEvent{GameEvent::Type::PlayerShieldHit,
                                            result.shieldAbsorbed, "shield", npc.id});

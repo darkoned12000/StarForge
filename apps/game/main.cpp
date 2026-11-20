@@ -596,6 +596,8 @@ int main()
     // Station interaction is opt-in via the proximity prompt; the old Space
     // toggle no longer opens the trade screen.
     bool stationOpen = false;
+    enum class StationTab { Trade, Missions };
+    StationTab stationTab = StationTab::Trade;
     double stationRangeMetres = 1.0e9;
     starforge::game::UiState uiState;
     // M16 polish: spawn a set of travelling NPCs (hostiles + neutrals) so
@@ -1038,10 +1040,25 @@ int main()
                 const auto fb = app->framebufferSize();
                 const auto panel = starforge::game::stationPanelRect(
                     static_cast<float>(fb.width), static_cast<float>(fb.height));
+                uiState.addWidget("tab:trade",
+                                  starforge::game::UiRect{panel.x + 18.0f, panel.y + 50.0f,
+                                                          150.0f, 28.0f});
+                uiState.addWidget("tab:missions",
+                                  starforge::game::UiRect{panel.x + 176.0f, panel.y + 50.0f,
+                                                          150.0f, 28.0f});
+                if (uiState.clicked("tab:trade")) stationTab = StationTab::Trade;
+                if (uiState.clicked("tab:missions")) stationTab = StationTab::Missions;
                 for (const auto& button : starforge::game::stationButtons())
+                {
+                    const bool onTrade = button.id == "buy-5" || button.id == "sell-5" ||
+                                         button.id == "dock" || button.id == "undock";
+                    const bool always = button.id == "close";
+                    if (!always && (stationTab == StationTab::Trade ? !onTrade : onTrade))
+                        continue;
                     uiState.addWidget(button.id,
                                       starforge::game::UiRect{panel.x + button.x, panel.y + button.y,
                                                               button.w, button.h});
+                }
                 for (const auto& button : starforge::game::stationButtons())
                 {
                     if (!uiState.clicked(button.id)) continue;
@@ -1119,6 +1136,11 @@ int main()
         // the visual beam agrees with the damage resolution in GameSimulation.
         if (!flight.paused)
         {
+            const auto boltShip = world.shipTransform();
+            const auto boltQuat = starforge::math::Vec4f{
+                boltShip.orientation.x, boltShip.orientation.y,
+                boltShip.orientation.z, boltShip.orientation.w};
+            const auto boltModel = matFromQuat(boltQuat);
             boltCooldown = std::max(0.0f, boltCooldown - frameDt);
             if (flight.firePrimary && boltCooldown <= 0.0f)
             {
@@ -1128,26 +1150,30 @@ int main()
                 // crosshair up with it to land shots on a moving target.
                 for (const float bx : {-0.72f, 0.72f})
                     laserBolts.push_back({
-                        {bx, 0.0f, -1.2f}, {0.0f, 0.0f, -1.0f}, 0.9f});
+                        {bx, 0.0f, -1.2f}, {0.0f, 0.0f, -1.0f}, 1.2f});
             }
             // Test each tracer against nearby asteroids; shots no longer pass
             // straight through rocks, and destroyed rocks shed fragments.
             const auto rocksInRange = world.visibleAsteroids(600.0);
             for (auto& bolt : laserBolts)
             {
-                bolt.position = bolt.position + bolt.direction * (220.0f * frameDt);
+                bolt.position = bolt.position + bolt.direction * (600.0f * frameDt);
                 bolt.life -= frameDt;
+                // Bolts live in ship-local space; asteroids are camera-relative
+                // world offsets. Rotate the bolt into the world frame first.
+                const auto boltWorld4 = boltModel * starforge::math::Vec4f{
+                    bolt.position.x(), bolt.position.y(), bolt.position.z(), 1.0f};
                 for (const auto& rock : rocksInRange)
                 {
-                    const float dx = static_cast<float>(rock.position.x) - bolt.position.x();
-                    const float dy = static_cast<float>(rock.position.y) - bolt.position.y();
-                    const float dz = static_cast<float>(rock.position.z) - bolt.position.z();
+                    const float dx = static_cast<float>(rock.position.x) - boltWorld4.x();
+                    const float dy = static_cast<float>(rock.position.y) - boltWorld4.y();
+                    const float dz = static_cast<float>(rock.position.z) - boltWorld4.z();
                     const float radius = rock.scale * 0.866f + 2.0f;
                     if (dx * dx + dy * dy + dz * dz > radius * radius) continue;
                     starforge::game::RawVec3d impact{};
                     float rockScale = 0.0f;
                     const bool destroyed = world.damageAsteroid(
-                        rock.seed, 8.0f, &impact, &rockScale);
+                        rock.seed, 12.0f, &impact, &rockScale);
                     fragments.push_back({
                         {static_cast<float>(impact.x), static_cast<float>(impact.y),
                          static_cast<float>(impact.z)},
@@ -1507,7 +1533,7 @@ int main()
             right = starforge::math::length(right) > 1e-4f
                 ? starforge::math::normalize(right) : starforge::math::Vec3f{1.0f, 0.0f, 0.0f};
             const auto correctedUp = starforge::math::cross(right, toward);
-            constexpr float kNpcScale = 2.5f; // make small craft readable at range
+            constexpr float kNpcScale = 6.0f; // make small craft readable at range
             starforge::math::Mat4f hm(1.0f);
             hm.columns[0] = {right.x() * kNpcScale, right.y() * kNpcScale,
                              right.z() * kNpcScale, 0.0f};
@@ -2109,11 +2135,13 @@ int main()
                     : starforge::math::Vec4f{tc.x(), tc.y(), tc.z(), 0.5f};
 
                 const starforge::math::Vec4f clip =
-                    // NPC positions are ship-relative: apply the ship model
-                    // matrix so the box sits where the lasers actually fly.
-                    viewProj * model * starforge::math::Vec4f{trackedNpc->position.x,
-                                                              trackedNpc->position.y,
-                                                              trackedNpc->position.z, 1.0f};
+                    // NPC positions are camera-relative WORLD offsets (ship at
+                    // origin, world axes) - the same frame the NPC mesh and
+                    // radar use. Applying `model` here double-rotates the box
+                    // away from the ship.
+                    viewProj * starforge::math::Vec4f{trackedNpc->position.x,
+                                                      trackedNpc->position.y,
+                                                      trackedNpc->position.z, 1.0f};
                 const float tw = static_cast<float>(size.width);
                 const float th = static_cast<float>(size.height);
                 bool onScreen = false;
@@ -2138,18 +2166,59 @@ int main()
                 }
                 const float aimX = tx - cx, aimY = ty - cy;
                 const float aimLen = std::sqrt(aimX * aimX + aimY * aimY);
-                if (aimLen > 30.0f)
+                if (!onScreen || aimLen > 120.0f)
                 {
-                    const float ux = aimX / aimLen, uy = aimY / aimLen;
-                    const float px = cx + ux * 70.0f, py = cy + uy * 70.0f;
-                    uiCanvas->addRect({.x = px - 6.0f, .y = py - 6.0f, .w = 12.0f, .h = 3.0f, .color = tc});
-                    uiCanvas->addRect({.x = px - 6.0f, .y = py + 3.0f, .w = 12.0f, .h = 3.0f, .color = tc});
-                    uiCanvas->addRect({.x = px - 6.0f, .y = py - 6.0f, .w = 3.0f, .h = 12.0f, .color = tc});
-                    uiCanvas->addRect({.x = px + 3.0f, .y = py - 6.0f, .w = 3.0f, .h = 12.0f, .color = tc});
+                    // Prominent arrow near the screen edge pointing at the
+                    // target, so a locked ship behind you can still be found.
+                    const float ux = aimLen > 1e-3f ? aimX / aimLen : 0.0f;
+                    const float uy = aimLen > 1e-3f ? aimY / aimLen : -1.0f;
+                    const float edge = std::min(tw, th) * 0.36f;
+                    const float px = cx + ux * edge, py = cy + uy * edge;
+                    const starforge::math::Vec4f arrow{1.0f, 0.55f, 0.15f, 1.0f};
+                    uiCanvas->addRect({.x = px - 12.0f, .y = py - 4.0f, .w = 24.0f, .h = 8.0f, .color = arrow});
+                    uiCanvas->addRect({.x = px - 8.0f, .y = py - 8.0f, .w = 16.0f, .h = 16.0f, .color = arrow});
+                    char offText[64];
+                    const float range = std::sqrt(
+                        trackedNpc->position.x * trackedNpc->position.x +
+                        trackedNpc->position.y * trackedNpc->position.y +
+                        trackedNpc->position.z * trackedNpc->position.z);
+                    std::snprintf(offText, sizeof(offText), "TARGET %.0fm - TURN", range);
+                    uiCanvas->addText({.x = px - 44.0f, .y = py + 14.0f, .scale = 1.0f,
+                                       .color = arrow, .text = offText});
                 }
                 if (lockedTarget && targeting.lockProgress() > 0.0f)
                     uiCanvas->addBar({.x = cx - 40.0f, .y = cy + 44.0f, .w = 80.0f, .h = 6.0f,
                                       .value = targeting.lockProgress(), .fillColor = tc});
+            }
+
+            // Contact markers: every live NPC gets a small diamond + range so
+            // fast-moving ships are always findable, not just the locked one.
+            const float markerW = static_cast<float>(size.width);
+            const float markerH = static_cast<float>(size.height);
+            for (const auto& npc : simulation.npcs())
+            {
+                if (!npc.alive) continue;
+                const auto clip = viewProj * starforge::math::Vec4f{
+                    npc.position.x, npc.position.y, npc.position.z, 1.0f};
+                if (clip.w() <= 1e-3f) continue;
+                const float mx = (clip.x() / clip.w() * 0.5f + 0.5f) * markerW;
+                const float my = (0.5f - clip.y() / clip.w() * 0.5f) * markerH;
+                if (mx < 8.0f || mx > markerW - 8.0f || my < 8.0f || my > markerH - 8.0f) continue;
+                const bool selected = targeting.selected() &&
+                                      targeting.selected()->id == npc.id;
+                if (selected) continue; // the big target box already covers it
+                const auto mc = npc.hostile
+                    ? starforge::math::Vec4f{1.0f, 0.35f, 0.2f, 0.9f}
+                    : starforge::math::Vec4f{0.3f, 1.0f, 0.85f, 0.9f};
+                uiCanvas->addRect({.x = mx - 3.0f, .y = my - 1.0f, .w = 6.0f, .h = 2.0f, .color = mc});
+                uiCanvas->addRect({.x = mx - 1.0f, .y = my - 3.0f, .w = 2.0f, .h = 6.0f, .color = mc});
+                char contactLabel[32];
+                const float range = std::sqrt(npc.position.x * npc.position.x +
+                                              npc.position.y * npc.position.y +
+                                              npc.position.z * npc.position.z);
+                std::snprintf(contactLabel, sizeof(contactLabel), "%.0fm", range);
+                uiCanvas->addText({.x = mx + 6.0f, .y = my - 4.0f, .scale = 1.0f,
+                                   .color = mc, .text = contactLabel});
             }
             // Proximity station prompt: appears within 1 km, above Comms.
             if (!flight.paused && !chatActive && !stationOpen &&
@@ -2420,12 +2489,31 @@ int main()
                                     .accentColor = {0.95f, 0.7f, 0.2f, 1.0f}});
                 uiCanvas->addText({.x = panel.x + 14.0f, .y = panel.y + 16.0f, .scale = 2.0f,
                                    .color = {0.9f, 0.95f, 1.0f, 1.0f}, .text = "STATION A"});
-                uiCanvas->addText({.x = panel.x + 18.0f, .y = panel.y + 58.0f, .scale = 1.0f,
-                                   .color = {0.5f, 0.9f, 1.0f, 1.0f}, .text = "TRADE"});
-                uiCanvas->addText({.x = panel.x + 18.0f, .y = panel.y + 150.0f, .scale = 1.0f,
-                                   .color = {1.0f, 0.85f, 0.4f, 1.0f}, .text = "MISSIONS"});
-                uiCanvas->addText({.x = panel.x + 18.0f, .y = panel.y + 248.0f, .scale = 1.0f,
-                                   .color = {0.6f, 0.8f, 1.0f, 1.0f}, .text = "NAVIGATION"});
+                // Two tabs: Trading and Missions.
+                for (const auto& tab : {
+                         std::tuple<StationTab, float, const char*, bool>{
+                             StationTab::Trade, panel.x + 18.0f, "TRADING",
+                             stationTab == StationTab::Trade},
+                         std::tuple<StationTab, float, const char*, bool>{
+                             StationTab::Missions, panel.x + 176.0f, "MISSIONS",
+                             stationTab == StationTab::Missions}})
+                {
+                    const auto tabX = std::get<1>(tab);
+                    const bool active = std::get<3>(tab);
+                    uiCanvas->addPanel({.x = tabX, .y = panel.y + 50.0f,
+                                        .w = 150.0f, .h = 28.0f, .outlineWidth = 1.0f,
+                                        .fillColor = active
+                                            ? starforge::math::Vec4f{0.18f, 0.38f, 0.42f, 1.0f}
+                                            : starforge::math::Vec4f{0.08f, 0.15f, 0.24f, 1.0f},
+                                        .accentColor = active
+                                            ? starforge::math::Vec4f{0.4f, 1.0f, 0.8f, 1.0f}
+                                            : starforge::math::Vec4f{0.3f, 0.5f, 0.7f, 1.0f}});
+                    uiCanvas->addText({.x = tabX + 14.0f, .y = panel.y + 57.0f, .scale = 2.0f,
+                                       .color = active
+                                           ? starforge::math::Vec4f{0.9f, 1.0f, 0.95f, 1.0f}
+                                           : starforge::math::Vec4f{0.5f, 0.7f, 0.85f, 1.0f},
+                                       .text = std::get<2>(tab)});
+                }
                 char status[96];
                 std::snprintf(status, sizeof(status), "CR %.0f  ORE %d  %s",
                               static_cast<float>(simulation.credits()),
@@ -2445,6 +2533,11 @@ int main()
                                    .color = {1.0f, 0.85f, 0.45f, 1.0f}, .text = quest});
                 for (const auto& button : starforge::game::stationButtons())
                 {
+                    const bool onTrade = button.id == "buy-5" || button.id == "sell-5" ||
+                                         button.id == "dock" || button.id == "undock";
+                    const bool always = button.id == "close";
+                    if (!always && (stationTab == StationTab::Trade ? !onTrade : onTrade))
+                        continue;
                     const bool hot = uiState.hovered(button.id);
                     uiCanvas->addPanel({.x = panel.x + button.x, .y = panel.y + button.y,
                                         .w = button.w, .h = button.h, .outlineWidth = 1.5f,

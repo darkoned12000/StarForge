@@ -1460,6 +1460,17 @@ a fixed ship-local key light and the station uses the world sun rotated into
 view space, so neither shifts colour with flight direction. Verification:
 Debug + Release CTest 12/12, zero validation errors.
 
+**Combat usability pass (2026-11-20, priority feedback):** fixed the target-box
+frame (NPC positions are camera-relative world offsets, so the extra ship-model
+rotation was pushing the box off the ship); added per-contact diamonds with
+range and a large off-screen "TARGET - TURN" arrow; hostiles now steer toward a
+standoff point in the player's forward arc and move slower so they can be
+tracked. Lasers fire down the crosshair with 600 m/s / 720 m range and hit
+asteroids (three demo rocks sit ahead of spawn so this is testable), dealing
+12 damage per hit with fragment sparks. NPC fire tuned to 8 damage / 1.5 s with
+2/s shield regen for survivable combat. Station UI split into Trading and
+Missions tabs. Verification: Debug + Release CTest 12/12, zero validation errors.
+
 ### M18 – Persistence
 
 - **Goal:** Save/load player deltas keyed by cell and object ID. Fast

@@ -86,7 +86,7 @@ struct GameWorld::Impl
             // Keep a 150 m clear sphere around spawn so the opening
             // sightline isn't inside a rock.
             const double dx = x - 1047000.0;
-            if (dx * dx + y * y + z * z < 150.0 * 150.0)
+            if (dx * dx + y * y + z * z < 80.0 * 80.0)
             {
                 continue;
             }
@@ -117,6 +117,21 @@ struct GameWorld::Impl
                                        (static_cast<float>(hash01(8000 + i)) - 0.5f) * 0.16f,
                                        (static_cast<float>(hash01(9000 + i)) - 0.5f) * 0.16f};
             entity.set<ecs::Velocity>(spin);
+            authored.push_back(entity);
+        }
+
+        // A small demo cluster directly ahead of the spawn so the player has
+        // something to shoot at while learning the weapons (the random field
+        // leaves a clear sphere and offers no guaranteed forward target).
+        for (const auto& offset : {std::array<double, 3>{0.0, 0.0, -300.0},
+                                   std::array<double, 3>{-45.0, 25.0, -420.0},
+                                   std::array<double, 3>{55.0, -30.0, -520.0}})
+        {
+            auto pos = spatial::WorldPosition::fromMeters(
+                kSpawnX + offset[0], offset[1], offset[2]);
+            if (!pos.has_value()) continue;
+            auto entity = ecs.createAsteroid(*pos, {});
+            entity.get_mut<ecs::Transform>().scale = 13.0f;
             authored.push_back(entity);
         }
     }

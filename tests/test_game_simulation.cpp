@@ -69,7 +69,7 @@ TEST_CASE("M15.1: player damage wrecks and repair restores")
     GameSimulation sim;
     // The hostile eventually depletes shields and hull if left unchecked.
     sim.spawnHostile();
-    for (int i = 0; i < 3000 && !sim.playerWrecked(); ++i)
+    for (int i = 0; i < 12000 && !sim.playerWrecked(); ++i)
         (void)sim.step(kStep, kForward, false, false);
     CHECK(sim.playerWrecked());
     CHECK(sim.playerHull() == 0.0f);
