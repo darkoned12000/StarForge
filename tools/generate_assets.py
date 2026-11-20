@@ -779,11 +779,12 @@ def build_station() -> bytes:
     glb.mesh("station-trim", trim, gold_mat)
 
     beacons = Mesh()
-    beacons.box((0.0, 0.0, 3.88), (0.12, 0.12, 0.12))
-    beacons.box((0.0, 0.0, -3.14), (0.10, 0.10, 0.10))
+    # Larger navigation lamps so the slow red blink is visible at range.
+    beacons.box((0.0, 0.0, 3.88), (0.28, 0.28, 0.28))
+    beacons.box((0.0, 0.0, -3.14), (0.24, 0.24, 0.24))
     for i in range(6):
         ang = i * (math.pi / 3.0)
-        beacons.box((3.98 * math.cos(ang), 3.98 * math.sin(ang), 0.0), (0.08, 0.14, 0.14))
+        beacons.box((4.02 * math.cos(ang), 4.02 * math.sin(ang), 0.0), (0.22, 0.22, 0.22))
     glb.mesh("station-beacons", beacons, beacon_mat)
 
     return glb.build()

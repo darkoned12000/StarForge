@@ -1450,6 +1450,16 @@ sits where aimed lasers actually travel. Laser bolts collide with asteroids,
 damage them, and spawn fragment sparks on destruction. Verification: Debug +
 Release CTest 12/12, zero validation errors.
 
+**Gameplay/visual pass 4 (2026-11-20, user feedback):** restored Space as the
+cursor-free UI mode needed to click the proximity dock/chat prompt; station
+tip beacons are now large, clearly blinking **red** navigation lights. NPC
+fighters are scaled up and brightly coloured so they can be seen, with a
+ship-local key light. Weapons now always fire down the main crosshair while
+the T-selected target square acts as a steering/lead guide. Ship shading uses
+a fixed ship-local key light and the station uses the world sun rotated into
+view space, so neither shifts colour with flight direction. Verification:
+Debug + Release CTest 12/12, zero validation errors.
+
 ### M18 – Persistence
 
 - **Goal:** Save/load player deltas keyed by cell and object ID. Fast

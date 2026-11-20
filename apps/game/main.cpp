@@ -843,9 +843,16 @@ int main()
                 }
                 inputTracker.prevLock = lockKey;
             }
-            // Space no longer toggles the trade screen. Station interaction
-            // is proximity-based via the dock/chat prompt above Comms.
-            pending.spacePressed = false;
+            // Space frees the cursor so UI buttons (including the proximity
+            // dock/chat prompt) can be clicked. It does not open the station
+            // panel directly - that still requires the <DOCK> prompt.
+            if (!flight.paused && pending.spacePressed)
+            {
+                flight.mode = flight.mode == starforge::game::FlightMode::Flight
+                                  ? starforge::game::FlightMode::Ui
+                                  : starforge::game::FlightMode::Flight;
+                pending.spacePressed = false;
+            }
             if (flight.paused)
             {
                 // While paused only the unpause edge is live: discard
@@ -1116,24 +1123,12 @@ int main()
             if (flight.firePrimary && boltCooldown <= 0.0f)
             {
                 boltCooldown = 0.12f;
-                starforge::math::Vec3f aim{};
-                bool haveAim = false;
-                if (const auto* contact = targeting.selected())
-                    for (const auto& npc : simulation.npcs())
-                        if (npc.alive && npc.id == contact->id)
-                        {
-                            aim = {npc.position.x, npc.position.y, npc.position.z};
-                            haveAim = true;
-                            break;
-                        }
+                // Weapons always fire down the ship's nose (the main
+                // crosshair). The target square is a steering guide: line the
+                // crosshair up with it to land shots on a moving target.
                 for (const float bx : {-0.72f, 0.72f})
-                {
-                    const starforge::math::Vec3f start{bx, 0.0f, -1.2f};
-                    const auto direction = haveAim
-                        ? starforge::math::normalize(aim - start)
-                        : starforge::math::Vec3f{0.0f, 0.0f, -1.0f};
-                    laserBolts.push_back({start, direction, 0.9f});
-                }
+                    laserBolts.push_back({
+                        {bx, 0.0f, -1.2f}, {0.0f, 0.0f, -1.0f}, 0.9f});
             }
             // Test each tracer against nearby asteroids; shots no longer pass
             // straight through rocks, and destroyed rocks shed fragments.
@@ -1477,17 +1472,13 @@ int main()
         starforge::Toon::Context toonContext;
         toonContext.viewProj = proj * view * model;
         toonContext.modelView = view * model;
-        // The toon shader lights in VIEW space, so the sun direction must be
-        // rotated by `view` too. A camera-fixed vector made world-anchored
-        // objects (the station) change colour as the ship turned.
-        const starforge::math::Vec3f sunWorldDir = starforge::math::normalize(
-            starforge::math::Vec3f{kSunWorld.x - ship.position.x,
-                                   kSunWorld.y - ship.position.y,
-                                   kSunWorld.z - ship.position.z});
-        const auto sunView4 = view * starforge::math::Vec4f{
-            sunWorldDir.x(), sunWorldDir.y(), sunWorldDir.z(), 0.0f};
+        // Ship uses a fixed SHIP-LOCAL key light transformed by its full
+        // modelView, so its cel shading does not slide as the ship turns.
+        // (World-anchored objects like the station use the real sun instead.)
+        const auto shipLight4 = (view * model) * starforge::math::Vec4f{
+            0.4f, 0.5f, 0.75f, 0.0f};
         toonContext.lightDirectionView = starforge::math::normalize(
-            starforge::math::Vec3f{sunView4.x(), sunView4.y(), sunView4.z()});
+            starforge::math::Vec3f{shipLight4.x(), shipLight4.y(), shipLight4.z()});
 
         starforge::Toon::Params toonParams;
         toonParams.baseColor = {0.85f, 0.25f, 0.2f, 1.0f};
@@ -1516,26 +1507,34 @@ int main()
             right = starforge::math::length(right) > 1e-4f
                 ? starforge::math::normalize(right) : starforge::math::Vec3f{1.0f, 0.0f, 0.0f};
             const auto correctedUp = starforge::math::cross(right, toward);
+            constexpr float kNpcScale = 2.5f; // make small craft readable at range
             starforge::math::Mat4f hm(1.0f);
-            hm.columns[0] = {right.x(), right.y(), right.z(), 0.0f};
-            hm.columns[1] = {correctedUp.x(), correctedUp.y(), correctedUp.z(), 0.0f};
-            hm.columns[2] = {-toward.x(), -toward.y(), -toward.z(), 0.0f};
+            hm.columns[0] = {right.x() * kNpcScale, right.y() * kNpcScale,
+                             right.z() * kNpcScale, 0.0f};
+            hm.columns[1] = {correctedUp.x() * kNpcScale, correctedUp.y() * kNpcScale,
+                             correctedUp.z() * kNpcScale, 0.0f};
+            hm.columns[2] = {-toward.x() * kNpcScale, -toward.y() * kNpcScale,
+                             -toward.z() * kNpcScale, 0.0f};
             hm.columns[3] = {npc.position.x, npc.position.y, npc.position.z, 1.0f};
             NpcRender r;
             r.context.viewProj = viewProj * hm;
             r.context.modelView = view * hm;
-            r.context.lightDirectionView = toonContext.lightDirectionView;
+            // Ship-local key light keeps NPC colours stable as they manoeuvre.
+            const auto npcLight4 = (view * hm) * starforge::math::Vec4f{
+                0.4f, 0.5f, 0.75f, 0.0f};
+            r.context.lightDirectionView = starforge::math::normalize(
+                starforge::math::Vec3f{npcLight4.x(), npcLight4.y(), npcLight4.z()});
             r.context.resolution = {static_cast<float>(size.width), static_cast<float>(size.height)};
             if (npc.hostile)
             {
-                r.params.baseColor = {0.58f, 0.42f, 0.24f, 1.0f}; // brown NPC hull
-                r.params.shadowColor = {0.22f, 0.14f, 0.07f, 1.0f};
+                r.params.baseColor = {1.0f, 0.38f, 0.20f, 1.0f}; // bright hostile hull
+                r.params.shadowColor = {0.35f, 0.10f, 0.05f, 1.0f};
                 r.params.emissiveColor = {0.2f, 0.05f, 0.5f, 0.6f};
             }
             else
             {
-                r.params.baseColor = {0.22f, 0.55f, 0.62f, 1.0f}; // cyan neutral hull
-                r.params.shadowColor = {0.08f, 0.2f, 0.26f, 1.0f};
+                r.params.baseColor = {0.30f, 0.95f, 1.0f, 1.0f}; // bright neutral hull
+                r.params.shadowColor = {0.06f, 0.25f, 0.30f, 1.0f};
                 r.params.emissiveColor = {0.05f, 0.2f, 0.28f, 0.4f};
             }
             r.params.bandCount = 3.0f;
@@ -1844,7 +1843,16 @@ int main()
                 starforge::Toon::Context stationContext;
                 stationContext.viewProj = viewProj * stationModel4;
                 stationContext.modelView = view * stationModel4;
-                stationContext.lightDirectionView = toonContext.lightDirectionView;
+                // World sun rotated into view space: stable for a world-anchored
+                // object regardless of which way the ship is pointing.
+                const starforge::math::Vec3f stationSunWorld = starforge::math::normalize(
+                    starforge::math::Vec3f{kSunWorld.x - ship.position.x,
+                                           kSunWorld.y - ship.position.y,
+                                           kSunWorld.z - ship.position.z});
+                const auto stationSun4 = view * starforge::math::Vec4f{
+                    stationSunWorld.x(), stationSunWorld.y(), stationSunWorld.z(), 0.0f};
+                stationContext.lightDirectionView = starforge::math::normalize(
+                    starforge::math::Vec3f{stationSun4.x(), stationSun4.y(), stationSun4.z()});
                 stationContext.resolution = toonContext.resolution;
                 for (const auto& part : stationModel.parts)
                 {
@@ -1853,11 +1861,12 @@ int main()
                                                  starforge::MaterialVariant::Default);
                     if (part.material.name == "station-beacons")
                     {
-                        // Slow synced blink, kept opaque (no additive pass).
-                        const float blink = 0.25f + 0.75f *
-                            (0.5f + 0.5f * std::sin(time * 2.0f));
-                        params.baseColor = {0.55f * blink, 1.0f * blink,
-                                            0.30f * blink, 1.0f};
+                        // Slow red navigation beacons at the station tips.
+                        // Kept opaque (no additive pass) with a strong on/off
+                        // cycle so the blink reads clearly at range.
+                        const float blink = std::sin(time * 2.0f) > 0.0f ? 1.0f : 0.08f;
+                        params.baseColor = {1.0f * blink, 0.12f * blink,
+                                            0.08f * blink, 1.0f};
                     }
                     toon->recordMesh(fc, stationContext, params, mesh);
                 }
