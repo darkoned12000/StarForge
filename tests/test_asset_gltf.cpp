@@ -344,7 +344,7 @@ TEST_CASE("M17 proof: authored hero ship renders with mapped toon materials at 6
     file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size));
     auto asset = loadGlb(bytes.data(), bytes.size());
     REQUIRE(asset.has_value());
-    REQUIRE(asset->meshes.size() == 3);
+    REQUIRE(asset->meshes.size() == 6); // hull/wings/canopy/housings/cores/nav
 
     ContextCreateInfo contextInfo;
     contextInfo.enableValidation = true;
@@ -387,9 +387,14 @@ TEST_CASE("M17 proof: authored hero ship renders with mapped toon materials at 6
                 math::Vec3f{v.normal[0], v.normal[1], v.normal[2]},
                 math::Vec2f{v.uv[0], v.uv[1]},
                 math::Vec4f{v.tangent[0], v.tangent[1], v.tangent[2], v.tangent[3]}});
-        auto gpu = toon->createTexturedMesh(vertices, mesh.material.baseColorTexture.rgba.data(),
-                                            mesh.material.baseColorTexture.width,
-                                            mesh.material.baseColorTexture.height);
+        // Some parts (nav beacons) are flat emissive with no albedo texture.
+        static constexpr std::uint8_t kWhite[4] = {255, 255, 255, 255};
+        const bool hasTexture = mesh.material.hasBaseColorTexture &&
+                                !mesh.material.baseColorTexture.rgba.empty();
+        const auto* pixels = hasTexture ? mesh.material.baseColorTexture.rgba.data() : kWhite;
+        const auto texWidth = hasTexture ? mesh.material.baseColorTexture.width : 1u;
+        const auto texHeight = hasTexture ? mesh.material.baseColorTexture.height : 1u;
+        auto gpu = toon->createTexturedMesh(vertices, pixels, texWidth, texHeight);
         REQUIRE(gpu.has_value());
         meshes.push_back(std::make_unique<ToonMesh>(std::move(*gpu)));
     }
@@ -440,9 +445,16 @@ TEST_CASE("M17 proof: authored hero ship renders with mapped toon materials at 6
     {
         ToonParams params{};
         params.capabilities = 32u; // textured base colour
-        params.baseColor = math::Vec4f{asset->meshes[i].material.baseColorFactor[0],
-                                       asset->meshes[i].material.baseColorFactor[1],
-                                       asset->meshes[i].material.baseColorFactor[2], 1.0f};
+        const auto& mat = asset->meshes[i].material;
+        params.baseColor = math::Vec4f{mat.baseColorFactor[0], mat.baseColorFactor[1],
+                                       mat.baseColorFactor[2], 1.0f};
+        if (mat.emissiveFactor[0] > 0.0f || mat.emissiveFactor[1] > 0.0f ||
+            mat.emissiveFactor[2] > 0.0f)
+        {
+            params.capabilities |= 1u;
+            params.emissiveColor = math::Vec4f{mat.emissiveFactor[0], mat.emissiveFactor[1],
+                                               mat.emissiveFactor[2], 1.0f};
+        }
         params.outlineWidth = 0.0f;
         toon->renderMesh(cmd, ctx, params, *meshes[i]);
     }

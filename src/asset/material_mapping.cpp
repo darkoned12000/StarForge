@@ -49,7 +49,9 @@ ToonMaterialDesc mapMaterial(const MaterialData& material)
                    : material.roughnessFactor <= 0.35f ? 4.0f
                                                         : 3.0f;
     desc.rimStrength = material.metallicFactor >= 0.5f ? 0.9f : 0.6f;
-    desc.outlineWidth = material.doubleSided ? 1.5f : 2.0f;
+    // Interior panel seams are painted into the albedo, so the outer hull
+    // outline stays thin to match the inked line weight.
+    desc.outlineWidth = material.doubleSided ? 1.2f : 1.5f;
     return desc;
 }
 

@@ -73,13 +73,13 @@ struct ToonMaterialDesc
 {
     std::uint32_t capabilities = 0;
     math::Vec4f baseColor{1.0f, 1.0f, 1.0f, 1.0f};
-    math::Vec4f shadowColor{0.2f, 0.1f, 0.15f, 1.0f};
+    math::Vec4f shadowColor{0.10f, 0.14f, 0.24f, 1.0f};
     math::Vec4f midColor{0.6f, 0.4f, 0.4f, 1.0f};
     math::Vec4f emissiveColor{0.0f, 0.0f, 0.0f, 1.0f};
     math::Vec4f fresnelColor{0.3f, 0.7f, 1.0f, 1.0f};
     float bandCount = 3.0f;
     float rimStrength = 0.6f;
-    float outlineWidth = 2.0f;
+    float outlineWidth = 1.5f;
     float fresnelPower = 3.0f;
     bool doubleSided = false;
     std::string name;

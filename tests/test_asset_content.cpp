@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #ifndef STARFORGE_ASSET_DIR
 #define STARFORGE_ASSET_DIR "assets/models"
@@ -19,53 +20,62 @@ std::filesystem::path assetPath(const std::string& name)
 {
     return std::filesystem::path(STARFORGE_ASSET_DIR) / name;
 }
+
+GltfAsset loadAsset(const std::string& name)
+{
+    const auto path = assetPath(name);
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    REQUIRE_MESSAGE(file.good(), "Missing authored asset %s", path.c_str());
+    const auto size = static_cast<std::size_t>(file.tellg());
+    file.seekg(0);
+    std::vector<std::uint8_t> bytes(size);
+    file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size));
+    auto asset = loadGlb(bytes.data(), bytes.size());
+    REQUIRE(asset.has_value());
+    return std::move(*asset);
+}
 } // namespace
 
-TEST_CASE("M17.7: hero ship has textured hull, wings and emissive engines")
+TEST_CASE("M17.7: hero ship has inked multi-part armour and separate glowing cores")
 {
-    const auto path = assetPath("hero_ship.glb");
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    REQUIRE_MESSAGE(file.good(), "Missing authored asset %s", path.c_str());
-    const auto size = static_cast<std::size_t>(file.tellg());
-    file.seekg(0);
-    std::vector<std::uint8_t> bytes(size);
-    file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size));
+    const auto asset = loadAsset("hero_ship.glb");
+    REQUIRE(asset.meshes.size() == 6);
+    CHECK(asset.meshes[0].name == "hero-hull");
+    CHECK(asset.meshes[1].name == "hero-wings");
+    CHECK(asset.meshes[2].name == "hero-canopy");
+    CHECK(asset.meshes[3].name == "hero-engine-housings");
+    CHECK(asset.meshes[4].name == "hero-engine-cores");
+    CHECK(asset.meshes[5].name == "hero-nav-lights");
 
-    auto asset = loadGlb(bytes.data(), bytes.size());
-    REQUIRE(asset.has_value());
-    REQUIRE(asset->meshes.size() == 3);
-    CHECK(asset->meshes[0].name == "hero-hull");
-    CHECK(asset->meshes[1].name == "hero-wings");
-    CHECK(asset->meshes[2].name == "hero-engines");
-
-    for (const auto& mesh : asset->meshes)
+    for (std::size_t i = 0; i < asset.meshes.size(); ++i)
     {
+        const auto& mesh = asset.meshes[i];
         CHECK_FALSE(mesh.vertices.empty());
         CHECK(mesh.indices.size() % 3 == 0);
-        CHECK(mesh.material.hasBaseColorTexture);
-        CHECK(mesh.material.baseColorTexture.width == 8);
-        CHECK(mesh.material.baseColorTexture.rgba.size() == 8u * 8u * 4u);
         for (const auto& vertex : mesh.vertices)
             CHECK(vertex.uv[0] >= 0.0f);
+        if (i == 5) continue; // nav lights are a flat emissive colour
+        CHECK(mesh.material.hasBaseColorTexture);
+        CHECK(mesh.material.baseColorTexture.width >= 128); // 256/128 inked textures
+        CHECK(mesh.material.baseColorTexture.rgba.size() ==
+              static_cast<std::size_t>(mesh.material.baseColorTexture.width) *
+              mesh.material.baseColorTexture.height * 4u);
     }
-    CHECK(asset->meshes[2].material.emissiveFactor[2] > 0.5f); // cyan engines
+
+    // Armour is opaque; only the recessed cores and nav beacons glow.
+    CHECK(asset.meshes[3].material.emissiveFactor[0] == 0.0f);
+    CHECK(asset.meshes[4].material.emissiveFactor[2] > 0.5f); // cyan plasma cores
+    CHECK(asset.meshes[2].material.roughnessFactor < 0.25f);  // glossy canopy
 }
 
-TEST_CASE("M17.7: station has a hub, ring and arms with material variants")
+TEST_CASE("M17.7: station has a spire, lit habitat rings, trim and beacons")
 {
-    const auto path = assetPath("station.glb");
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    REQUIRE_MESSAGE(file.good(), "Missing authored asset %s", path.c_str());
-    const auto size = static_cast<std::size_t>(file.tellg());
-    file.seekg(0);
-    std::vector<std::uint8_t> bytes(size);
-    file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size));
-
-    auto asset = loadGlb(bytes.data(), bytes.size());
-    REQUIRE(asset.has_value());
-    REQUIRE(asset->meshes.size() == 3);
-    CHECK(asset->meshes[0].name == "station-hub");
-    CHECK(asset->meshes[1].name == "station-ring");
-    CHECK(asset->meshes[2].name == "station-arms");
-    CHECK(asset->meshes[1].material.metallicFactor > 0.5f);
+    const auto asset = loadAsset("station.glb");
+    REQUIRE(asset.meshes.size() == 4);
+    CHECK(asset.meshes[0].name == "station-hub");
+    CHECK(asset.meshes[1].name == "station-rings");
+    CHECK(asset.meshes[2].name == "station-trim");
+    CHECK(asset.meshes[3].name == "station-beacons");
+    CHECK(asset.meshes[2].material.metallicFactor > 0.5f);    // gold trim
+    CHECK(asset.meshes[1].material.emissiveFactor[0] > 0.0f); // window bands glow
 }

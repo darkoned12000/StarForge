@@ -184,11 +184,14 @@ makeToonParams(const starforge::ToonMaterialDesc& desc, starforge::MaterialVaria
                 part.texture = std::move(*texture);
             }
         }
+        // Flat emissive parts (nav lights / beacons) have no albedo texture;
+        // feed the mip overload a 1x1 white pixel so it still uploads.
+        static constexpr std::uint8_t kWhitePixel[4] = {255, 255, 255, 255};
         for (const auto& level : *levels)
         {
             const auto pixels = part.texture.mipCount() > 0
                 ? part.texture.data(part.activeMip)
-                : std::span<const std::uint8_t>{};
+                : std::span<const std::uint8_t>(kWhitePixel, 4u);
             const auto width = part.texture.mipCount() > 0
                 ? part.texture.width(part.activeMip) : 1u;
             const auto height = part.texture.mipCount() > 0
@@ -966,8 +969,8 @@ int main()
             if (flight.firePrimary && boltCooldown <= 0.0f)
             {
                 boltCooldown = 0.12f;
-                laserBolts.push_back({-0.62f, 0.0f, -2.6f, 0.9f});
-                laserBolts.push_back({0.62f, 0.0f, -2.6f, 0.9f});
+                laserBolts.push_back({-0.72f, 0.0f, -1.2f, 0.9f});
+                laserBolts.push_back({0.72f, 0.0f, -1.2f, 0.9f});
             }
             for (auto& bolt : laserBolts)
             {
@@ -1647,10 +1650,10 @@ int main()
                 // plume scale grows with throttle: short at 25%, long at 100%.
                 const float plumeLength = 0.35f + power * 2.2f;
                 const float plumeBrightness = 0.35f + power * 0.75f;
-                for (const float ex : {-0.62f, 0.62f})
+                for (const float ex : {-0.42f, 0.42f})
                 {
                     const float flicker = 0.92f + 0.08f * std::sin(time * 27.0f);
-                    drawGlow(ex, 0.0f, 2.58f, 0.42f, 0.42f, 0.26f,
+                    drawGlow(ex, 0.02f, 2.12f, 0.38f, 0.38f, 0.24f,
                               0.03f, 0.32f, 1.0f, plumeBrightness * flicker);
                     constexpr int kSegments = 10;
                     for (int segment = 0; segment < kSegments; ++segment)
@@ -1658,9 +1661,9 @@ int main()
                         const float t = static_cast<float>(segment) / (kSegments - 1);
                         const float width = (0.38f * (1.0f - t) + 0.05f) * (0.6f + 0.4f * power);
                         const float length = plumeLength / kSegments + 0.08f;
-                        const float z = 2.72f + static_cast<float>(segment) * (plumeLength / kSegments);
+                        const float z = 2.20f + static_cast<float>(segment) * (plumeLength / kSegments);
                         const float intensity = (0.55f * (1.0f - t) + 0.02f) * plumeBrightness * flicker;
-                        drawGlow(ex, 0.0f, z, width, width, length,
+                        drawGlow(ex, 0.02f, z, width, width, length,
                                   0.02f + 0.03f * t, 0.22f + 0.10f * t, 1.0f, intensity);
                     }
                 }

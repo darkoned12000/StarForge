@@ -1,32 +1,19 @@
-// Toon (cel-shaded) cube: quantized diffuse bands, specular, and rim light.
-// The same shader drives the inverted-hull outline pass (mode = 1): the
-// vertex stage expands positions along view-space normals by a CPU-computed
-// view-space width (constant screen-pixel thickness) and the fragment stage
-// outputs a flat dark color. Geometry is a static cube (36 vertices,
-// per-face normals) until real mesh assets land (M17).
-//
-// Push constants carry the clip matrix plus a BDA pointer to the
-// per-draw block (modelView, light, and the color-ramp data below). This
-// keeps the push-constant range at 96 bytes, below Vulkan's guaranteed
-// 128-byte minimum.
+// Toon (cel-shaded) shader with bilinear BDA texture sampling, ink-masked
+// comic specular/rim highlights, and an inverted-hull outline pass (mode = 1).
+// Geometry is a static cube (36 vertices) until a caller supplies mesh data
+// via pc.vertexAddress. DrawData / PushConstants layouts are unchanged.
 
 static const float3 kCubePositions[36] = {
-    // Front face (z = +0.5)
     float3(-0.5,-0.5, 0.5), float3(0.5,-0.5,0.5), float3(0.5,0.5,0.5),
     float3(0.5,0.5,0.5), float3(-0.5,0.5,0.5), float3(-0.5,-0.5,0.5),
-    // Back face (z = -0.5)
     float3(0.5,-0.5,-0.5), float3(-0.5,-0.5,-0.5), float3(-0.5,0.5,-0.5),
     float3(-0.5,0.5,-0.5), float3(0.5,0.5,-0.5), float3(0.5,-0.5,-0.5),
-    // Left face (x = -0.5)
     float3(-0.5,-0.5,-0.5), float3(-0.5,-0.5,0.5), float3(-0.5,0.5,0.5),
     float3(-0.5,0.5,0.5), float3(-0.5,0.5,-0.5), float3(-0.5,-0.5,-0.5),
-    // Right face (x = +0.5)
     float3(0.5,-0.5,0.5), float3(0.5,-0.5,-0.5), float3(0.5,0.5,-0.5),
     float3(0.5,0.5,-0.5), float3(0.5,0.5,0.5), float3(0.5,-0.5,0.5),
-    // Top face (y = +0.5)
     float3(-0.5,0.5,0.5), float3(0.5,0.5,0.5), float3(0.5,0.5,-0.5),
-    float3(0.5,0.5,-0.5), float3(-0.5,0.5,-0.5), float3(-0.5,0.5,0.5),
-    // Bottom face (y = -0.5)
+    float3(0.5,0.5,-0.5), float3(-0.5,0.5,-0.5), float3(-0.5,-0.5,0.5),
     float3(-0.5,-0.5,-0.5), float3(0.5,-0.5,-0.5), float3(0.5,-0.5,0.5),
     float3(0.5,-0.5,0.5), float3(-0.5,-0.5,0.5), float3(-0.5,-0.5,-0.5),
 };
@@ -40,51 +27,34 @@ static const float3 kCubeNormals[36] = {
     float3(0,-1,0),float3(0,-1,0),float3(0,-1,0),float3(0,-1,0),float3(0,-1,0),float3(0,-1,0),
 };
 
-// Smoothed (corner-averaged) normals for the inverted hull. Flat per-face
-// normals split hard corners into disconnected plates; averaging the
-// adjacent face normals per corner keeps the expanded hull closed. Real
-// meshes need baked smooth normals or a screen-space edge pass (M17).
 static const float3 kCubeOutlineNormals[36] = {
-    // Front face corners: normalize(+-x, +-y, +z)
     float3(-0.577,-0.577, 0.577), float3(0.577,-0.577,0.577), float3(0.577,0.577,0.577),
     float3(0.577,0.577,0.577), float3(-0.577,0.577,0.577), float3(-0.577,-0.577,0.577),
-    // Back face corners
     float3(0.577,-0.577,-0.577), float3(-0.577,-0.577,-0.577), float3(-0.577,0.577,-0.577),
     float3(-0.577,0.577,-0.577), float3(0.577,0.577,-0.577), float3(0.577,-0.577,-0.577),
-    // Left face corners
     float3(-0.577,-0.577,-0.577), float3(-0.577,-0.577,0.577), float3(-0.577,0.577,0.577),
     float3(-0.577,0.577,0.577), float3(-0.577,0.577,-0.577), float3(-0.577,-0.577,-0.577),
-    // Right face corners
     float3(0.577,-0.577,0.577), float3(0.577,-0.577,-0.577), float3(0.577,0.577,-0.577),
     float3(0.577,0.577,-0.577), float3(0.577,0.577,0.577), float3(0.577,-0.577,0.577),
-    // Top face corners
     float3(-0.577,0.577,0.577), float3(0.577,0.577,0.577), float3(0.577,0.577,-0.577),
-    float3(0.577,0.577,-0.577), float3(-0.577,0.577,-0.577), float3(-0.577,0.577,0.577),
-    // Bottom face corners
+    float3(0.577,0.577,-0.577), float3(-0.577,0.577,-0.577), float3(-0.577,-0.577,0.577),
     float3(-0.577,-0.577,-0.577), float3(0.577,-0.577,-0.577), float3(0.577,-0.577,0.577),
     float3(0.577,-0.577,0.577), float3(-0.577,-0.577,0.577), float3(-0.577,-0.577,-0.577),
 };
 
-// Per-draw data accessed via buffer device address. Normals are transformed
-// by modelView; exact for uniform-scale transforms (inverse-transpose
-// differs only by a factor that normalize removes). Non-uniform scale
-// needs a proper normal matrix (M17).
 struct DrawData
 {
     float4x4 modelView;
     float4 lightDirView;
     float4 baseColor;
     float4 shadowColor;
-    // Optional middle color of the diffuse ramp. Alpha == 0 means the
-    // midpoint of shadowColor and baseColor.
     float4 midColor;
-    float4 params; // x: bandCount, y: rimStrength, z: outline width in view units, w: capability bits
-    // Reusable material capabilities (combined, not seven separate shaders):
-    float4 emissive;  // rgb + intensity (engine cores, weapon fire)
-    float4 fresnel;   // rgb + strength (shield rim, atmosphere gradient)
-    float4 material;  // x: facet, y: shadow strength, z: attenuation, w: detail
-    float4 highlight; // rgb: fourth ramp stop, a: banded threshold (0 = unused)
-    uint64_t textureAddress; // BDA to RGBA8 texels (capability 32)
+    float4 params; // x: bandCount, y: rimStrength, z: outline width, w: capability bits
+    float4 emissive;
+    float4 fresnel;
+    float4 material;
+    float4 highlight;
+    uint64_t textureAddress;
     uint     textureWidth;
     uint     textureHeight;
     uint     pad0;
@@ -97,8 +67,8 @@ struct PushConstants
 {
     float4x4 mvp;
     uint64_t drawDataAddress;
-    uint64_t vertexAddress; // 0 = built-in cube; otherwise float4 pos/normal/outline per vertex
-    uint mode; // 0 = toon, 1 = outline
+    uint64_t vertexAddress;
+    uint mode;
     uint vertexCount;
     uint pad0;
     uint pad1;
@@ -116,11 +86,41 @@ struct VSOutput
     float2 uv : TEXCOORD0;
 };
 
-// Anti-aliased step: softens band/specular/rim edges to avoid pixel crawl.
 float aastep(float threshold, float value)
 {
     float afwidth = fwidth(value) * 0.7071;
     return smoothstep(threshold - afwidth, threshold + afwidth, value);
+}
+
+float4 sampleTexelWrapped(uint64_t addr, uint w, uint h, int x, int y)
+{
+    int iw = int(w);
+    int ih = int(h);
+    uint wx = uint(((x % iw) + iw) % iw);
+    uint wy = uint(((y % ih) + ih) % ih);
+    typedef vk::BufferPointer<uint> PixelPtr;
+    PixelPtr pixel = { addr + uint64_t(wy * w + wx) * 4u };
+    uint packed = pixel.Get();
+    return float4(
+        float(packed & 255u),
+        float((packed >> 8u) & 255u),
+        float((packed >> 16u) & 255u),
+        float((packed >> 24u) & 255u)
+    ) / 255.0f;
+}
+
+float4 sampleTextureBilinear(uint64_t addr, uint w, uint h, float2 uv)
+{
+    float2 texelPos = uv * float2(float(w), float(h)) - 0.5f;
+    int2 base = int2(floor(texelPos));
+    float2 f = frac(texelPos);
+
+    float4 c00 = sampleTexelWrapped(addr, w, h, base.x,     base.y);
+    float4 c10 = sampleTexelWrapped(addr, w, h, base.x + 1, base.y);
+    float4 c01 = sampleTexelWrapped(addr, w, h, base.x,     base.y + 1);
+    float4 c11 = sampleTexelWrapped(addr, w, h, base.x + 1, base.y + 1);
+
+    return lerp(lerp(c00, c10, f.x), lerp(c01, c11, f.x), f.y);
 }
 
 [shader("vertex")]
@@ -136,14 +136,12 @@ VSOutput vertexMain(uint vertexIndex : SV_VertexID)
     float3 outlineNormal = kCubeOutlineNormals[idx];
     float2 texcoord = float2(0.0, 0.0);
 
-    // Optional caller-owned mesh. Zero address keeps the built-in cube.
     if (pc.vertexAddress != 0u && vertexIndex < pc.vertexCount)
     {
         typedef vk::BufferPointer<float4> Float4Ptr;
         uint64_t base = pc.vertexAddress;
         if ((caps & 32u) != 0u)
         {
-            // Textured layout: five float4 (pos, normal, outline, uv, tangent).
             base += uint64_t(vertexIndex) * 80u;
             Float4Ptr pp = { base };
             Float4Ptr np = { base + 16u };
@@ -156,7 +154,6 @@ VSOutput vertexMain(uint vertexIndex : SV_VertexID)
         }
         else
         {
-            // Plain layout: three float4 (pos, normal, outline).
             base += uint64_t(vertexIndex) * 48u;
             Float4Ptr pp = { base };
             Float4Ptr np = { base + 16u };
@@ -169,13 +166,6 @@ VSOutput vertexMain(uint vertexIndex : SV_VertexID)
 
     if (pc.mode > 0)
     {
-        // Object-space extrusion along smoothed outline normals. draw.params.z
-        // is the CPU-computed object-space width derived from the desired
-        // screen-pixel thickness (exact for rigid/uniform transforms). This
-        // pushes the hull away from the camera in depth so the base pass's
-        // depth buffer rejects it except at the silhouette — a screen-space
-        // xy-only offset leaves depth unchanged, letting back faces pass the
-        // depth test on oblique faces and painting large dark regions.
         objectPos += outlineNormal * draw.params.z;
     }
 
@@ -197,17 +187,31 @@ float4 fragmentMain(VSOutput input) : SV_Target
 
     if (pc.mode > 0)
     {
-        return float4(0.03, 0.03, 0.05, 1.0);
+        return float4(0.03, 0.03, 0.04, 1.0);
     }
 
     float3 normal = normalize(input.normalView);
     float3 lightDir = normalize(draw.lightDirView.xyz);
     float3 viewDir = normalize(-input.positionView);
+    uint caps = uint(draw.params.w + 0.5);
+
+    // Sample baseColorTexture with bilinear filtering when present.
+    float4 sampled = float4(1.0, 1.0, 1.0, 1.0);
+    bool hasTex = ((caps & 32u) != 0u && draw.textureAddress != 0u &&
+                   draw.textureWidth > 0u && draw.textureHeight > 0u);
+    if (hasTex)
+    {
+        sampled = sampleTextureBilinear(draw.textureAddress, draw.textureWidth,
+                                        draw.textureHeight, input.uv);
+    }
+
+    // Dark painted ink lines mask specular/rim so panel seams stay crisp.
+    float texLuma = dot(sampled.rgb, float3(0.299, 0.587, 0.114));
+    float inkMask = hasTex ? smoothstep(0.10, 0.28, texLuma) : 1.0;
 
     float ndotl = max(dot(normal, lightDir), 0.0);
 
-    // Anti-aliased cel bands. Differentiate the continuous band coordinate
-    // (not frac()) so the AA window stays monotonic at band boundaries.
+    // Anti-aliased cel bands.
     float bandCount = max(draw.params.x, 2.0);
     float rawBand = ndotl * bandCount;
     float bandWidth = fwidth(rawBand) * 0.7071;
@@ -215,9 +219,7 @@ float4 fragmentMain(VSOutput input) : SV_Target
     float steppedBand = nearestBand - 1.0 + smoothstep(-bandWidth, bandWidth, rawBand - nearestBand);
     float banded = clamp(steppedBand / max(bandCount - 1.0, 1.0), 0.0, 1.0);
 
-    // Three-stop diffuse ramp (shadow -> mid -> lit). A zero alpha on the
-    // middle color means "use the midpoint of shadow and lit colors", so
-    // existing two-color callers keep their current look.
+    // Three-stop diffuse ramp (shadow -> mid -> lit).
     float3 mid = draw.midColor.rgb;
     if (draw.midColor.w == 0.0)
     {
@@ -226,44 +228,31 @@ float4 fragmentMain(VSOutput input) : SV_Target
     float3 diffuse = banded < 0.5
         ? lerp(draw.shadowColor.rgb, mid, banded * 2.0)
         : lerp(mid, draw.baseColor.rgb, (banded - 0.5) * 2.0);
+    diffuse *= sampled.rgb;
 
-    // Stepped specular, masked so highlights never appear in shadow.
+    // Crisp comic specular, masked out inside painted ink lines.
     float3 halfVec = normalize(lightDir + viewDir);
     float ndoth = max(dot(normal, halfVec), 0.0);
-    float spec = aastep(0.65, pow(ndoth, 32.0)) * 0.7 * aastep(0.05, ndotl);
+    float spec = aastep(0.65, pow(ndoth, 32.0)) * 0.7 * aastep(0.05, ndotl) * inkMask;
 
-    // Rim light: brightens silhouettes facing away from the camera.
-    float rim = aastep(0.6, pow(1.0 - max(dot(normal, viewDir), 0.0), 3.0)) * draw.params.y;
+    // Cool rim highlight along silhouettes.
+    float facing = 1.0 - max(dot(normal, viewDir), 0.0);
+    float rim = aastep(0.6, pow(facing, 3.0)) * draw.params.y * inkMask;
 
     float3 color = diffuse + (spec + rim) * draw.baseColor.rgb;
 
-    // Fourth ramp stop (authored palettes; placeholders can use it too).
+    // Fourth highlight ramp stop.
     if (draw.highlight.w > 0.0)
     {
-        color = lerp(color, draw.highlight.rgb,
+        color = lerp(color, draw.highlight.rgb * sampled.rgb,
                      smoothstep(draw.highlight.w - 0.15, draw.highlight.w + 0.15, banded));
     }
 
-    uint caps = uint(draw.params.w + 0.5);
-    float facing = 1.0 - max(dot(normal, viewDir), 0.0);
-
-    // Base-colour texture (glTF baseColorTexture, RGBA8 in a BDA texel buffer).
-    if ((caps & 32u) != 0u && draw.textureAddress != 0u && draw.textureWidth > 0u)
-    {
-        uint tx = clamp(uint(input.uv.x * float(draw.textureWidth)), 0u, draw.textureWidth - 1u);
-        uint ty = clamp(uint(input.uv.y * float(draw.textureHeight)), 0u, draw.textureHeight - 1u);
-        typedef vk::BufferPointer<uint> PixelPtr; // one packed RGBA8 per texel
-        PixelPtr pixel = { draw.textureAddress + uint64_t(ty * draw.textureWidth + tx) * 4u };
-        uint packed = pixel.Get();
-        float4 sampled = float4(float(packed & 255u), float((packed >> 8u) & 255u),
-                                float((packed >> 16u) & 255u), float((packed >> 24u) & 255u)) / 255.0f;
-        color *= sampled.rgb;
-    }
-
-    // Emissive tint: engine exhaust, glowing cores, weapon fire/impact.
+    // Emissive glow (modulated by the texture so cores have hot centres).
     if ((caps & 1u) != 0u)
     {
-        color += draw.emissive.rgb * draw.emissive.w;
+        float3 emTex = hasTex ? sampled.rgb : float3(1.0, 1.0, 1.0);
+        color += draw.emissive.rgb * draw.emissive.w * emTex;
     }
 
     // Fresnel shield rim / atmospheric scattering gradient.
@@ -293,11 +282,11 @@ float4 fragmentMain(VSOutput input) : SV_Target
     {
         float attenuation = 1.0 / (1.0 + draw.material.z * dot(input.positionView, input.positionView));
         color *= lerp(1.0, attenuation, step(0.001, draw.material.z));
-        color = lerp(color, draw.shadowColor.rgb,
+        color = lerp(color, draw.shadowColor.rgb * sampled.rgb,
                      draw.material.y * (1.0 - aastep(0.25, ndotl)));
         color *= lerp(1.0, 0.85 + 0.15 * sin(input.positionView.x * draw.material.w * 10.0),
                       step(0.001, draw.material.w));
     }
 
-    return float4(color, draw.baseColor.a);
+    return float4(color, draw.baseColor.a * sampled.a);
 }

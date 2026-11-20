@@ -36,13 +36,13 @@ struct ToonMaterialDesc
 {
     std::uint32_t capabilities = 0;
     std::array<float, 4> baseColor{1.0f, 1.0f, 1.0f, 1.0f};
-    std::array<float, 4> shadowColor{0.2f, 0.1f, 0.15f, 1.0f};
+    std::array<float, 4> shadowColor{0.10f, 0.14f, 0.24f, 1.0f};
     std::array<float, 4> midColor{0.6f, 0.4f, 0.4f, 1.0f};
     std::array<float, 4> emissiveColor{0.0f, 0.0f, 0.0f, 1.0f};
     std::array<float, 4> fresnelColor{0.3f, 0.7f, 1.0f, 1.0f};
     float bandCount = 3.0f;
     float rimStrength = 0.6f;
-    float outlineWidth = 2.0f;
+    float outlineWidth = 1.5f;
     float fresnelPower = 3.0f;
     bool doubleSided = false;
     std::string name;

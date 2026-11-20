@@ -1403,8 +1403,20 @@ replaced by tinygltf v3 (a C library with no CMake target that would duplicate
 the GPU-proven decoder); textures stay in the toon BDA packed-RGBA8 path, so
 streaming means mip generation/residency and on-demand GPU upload, not a new
 sampler pipeline. All asset internals are CPU-only and the game consumes them
-through the public `starforge::Asset` facade. Verification: CTest 12/12,
-399 CPU cases, zero validation errors.
+through the public `starforge::Asset` facade.
+
+**Comic-ink art pass (2026-11-20, external review feedback):** the authored
+assets are now multi-part starfighter / station models (chamfered lofted
+fuselage, swept bevel wings with crimson stripes, tinted canopy, armoured
+engine housings with recessed glowing plasma cores; station spire, dual
+habitat rings, trusses and window bands) with 128–256 px procedurally inked
+panel/AO textures. `toon.slang` gained bilinear BDA texture sampling with
+wrapping, ink-masked specular/rim highlights and texture-modulated emissive
+cores; the proven specular/rim intensities were retained so cel bands stay
+crisp and HDR tonemapping does not flatten (the HDR golden was refreshed for
+the small resulting difference). Screen-space Sobel inking, HDR bloom and
+billboard/ribbon particles remain deferred. Verification: Debug + Release
+CTest 12/12, 399 CPU cases, zero validation errors.
 
 ### M18 – Persistence
 
