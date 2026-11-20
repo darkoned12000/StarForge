@@ -360,10 +360,14 @@ ToonMaterialDesc applyAssetMaterialVariant(const ToonMaterialDesc& base, Materia
     const auto mapped = toPublic(internal);
     result.capabilities = mapped.capabilities;
     result.baseColor = mapped.baseColor;
+    result.shadowColor = mapped.shadowColor;
+    result.midColor = mapped.midColor;
     result.emissiveColor = mapped.emissiveColor;
     result.fresnelColor = mapped.fresnelColor;
-    result.fresnelPower = mapped.fresnelPower;
+    result.bandCount = mapped.bandCount;
     result.rimStrength = mapped.rimStrength;
+    result.outlineWidth = mapped.outlineWidth;
+    result.fresnelPower = mapped.fresnelPower;
     result.name = mapped.name;
     return result;
 }

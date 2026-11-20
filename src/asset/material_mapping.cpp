@@ -83,10 +83,12 @@ ToonMaterialDesc applyMaterialVariant(const ToonMaterialDesc& base, MaterialVari
     switch (variant)
     {
     case MaterialVariant::Damaged:
+        // Stay on the opaque toon pipeline: capability 1 switches to the
+        // additive glow pass (no depth write), which would make the hull look
+        // transparent. Tint via opaque colours instead.
         scale(result.baseColor, 0.55f);
         result.baseColor[0] = std::clamp(result.baseColor[0] + 0.25f, 0.0f, 1.0f);
-        result.emissiveColor = {0.6f, 0.12f, 0.03f, 1.0f};
-        result.capabilities |= static_cast<std::uint32_t>(ToonCapabilityBit::Emissive);
+        result.shadowColor = {0.25f, 0.06f, 0.04f, 1.0f};
         result.name += " (Damaged)";
         break;
     case MaterialVariant::Shielded:
@@ -96,9 +98,14 @@ ToonMaterialDesc applyMaterialVariant(const ToonMaterialDesc& base, MaterialVari
         result.name += " (Shielded)";
         break;
     case MaterialVariant::Highlighted:
-        result.emissiveColor = {0.9f, 0.75f, 0.15f, 1.0f};
-        result.capabilities |= static_cast<std::uint32_t>(ToonCapabilityBit::Emissive);
+        // Brighten the opaque surface + rim; do NOT enable additive emissive
+        // (that pipeline skips depth writes and exposes geometry behind the
+        // ship). The emissive bit is reserved for genuinely glowing parts.
+        result.baseColor[0] = std::clamp(result.baseColor[0] + 0.15f, 0.0f, 1.0f);
+        result.baseColor[1] = std::clamp(result.baseColor[1] + 0.12f, 0.0f, 1.0f);
+        result.midColor = {0.9f, 0.8f, 0.35f, 1.0f};
         result.rimStrength = 1.0f;
+        result.bandCount = 4.0f;
         result.name += " (Highlighted)";
         break;
     case MaterialVariant::Default:

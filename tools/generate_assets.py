@@ -188,16 +188,21 @@ class GlbBuilder:
 
 
 def hull_texture(x, y):
-    band = 90 if (x // 2 + y // 2) % 2 == 0 else 130
-    return (band, band + 10, band + 20, 255)
+    # Dark gunmetal with a subtle checker; reads as a piloted fighter hull
+    # rather than a brightbread-and-butter block.
+    band = 46 if (x // 2 + y // 2) % 2 == 0 else 78
+    return (band, band + 6, band + 14, 255)
 
 
 def wing_texture(x, y):
-    return (60 + x * 18, 80 + y * 16, 110, 255)
+    # Brushed steel wings with a red accent stripe near the tips.
+    stripe = 60 if y in (1, 6) else 0
+    return (min(255, 70 + x * 8 + stripe), 90 + y * 6, 110 + y * 6, 255)
 
 
 def engine_texture(x, y):
-    return (255, 180 + x * 6, 60 + y * 12, 255)
+    # Bright cyan engine cores (concept art direction).
+    return (40 + x * 8, 190 + y * 8, 255, 255)
 
 
 def station_texture(x, y):
@@ -211,10 +216,10 @@ def build_ship() -> bytes:
     wing_img = glb.image(make_png(8, 8, wing_texture))
     engine_img = glb.image(make_png(8, 8, engine_texture))
 
-    hull_mat = glb.material("hull", [0.85, 0.88, 0.95, 1.0], 0.7, 0.35, image=hull_img)
-    wing_mat = glb.material("wings", [0.35, 0.55, 0.85, 1.0], 0.2, 0.6, image=wing_img)
-    engine_mat = glb.material("engines", [1.0, 0.8, 0.4, 1.0], 0.0, 0.9,
-                              emissive=[0.9, 0.45, 0.1], image=engine_img)
+    hull_mat = glb.material("hull", [0.38, 0.44, 0.54, 1.0], 0.7, 0.35, image=hull_img)
+    wing_mat = glb.material("wings", [0.42, 0.5, 0.62, 1.0], 0.2, 0.6, image=wing_img)
+    engine_mat = glb.material("engines", [0.4, 0.85, 1.0, 1.0], 0.0, 0.9,
+                              emissive=[0.25, 0.75, 1.0], image=engine_img)
 
     hull = Mesh()
     hull.wedge(4.0, 1.6, 0.8)
@@ -226,8 +231,9 @@ def build_ship() -> bytes:
     glb.mesh("hero-wings", wings, wing_mat)
 
     engines = Mesh()
-    engines.box((-0.55, 0.0, 2.1), (0.45, 0.45, 0.5))
-    engines.box((0.55, 0.0, 2.1), (0.45, 0.45, 0.5))
+    # Twin oversized cylinders-ish engine nacelles at the rear (nose is -Z).
+    engines.box((-0.62, 0.0, 2.15), (0.62, 0.62, 0.85))
+    engines.box((0.62, 0.0, 2.15), (0.62, 0.62, 0.85))
     glb.mesh("hero-engines", engines, engine_mat)
     return glb.build()
 

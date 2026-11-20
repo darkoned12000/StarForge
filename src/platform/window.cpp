@@ -53,6 +53,12 @@ std::expected<Window, std::string> Window::create(const WindowDesc& desc)
     const char* videoDriver = SDL_GetCurrentVideoDriver();
     core::logInfo("PLATFORM", "SDL video driver: {}", videoDriver ? videoDriver : "unknown");
 
+    // SDL3 does not deliver SDL_EVENT_TEXT_INPUT unless text input is
+    // explicitly started. The comms chat composer relies on it; the game
+    // drains the accumulated characters every frame even when not chatting.
+    if (!SDL_StartTextInput(window))
+        core::logWarning("PLATFORM", "SDL_StartTextInput failed: {}", SDL_GetError());
+
     return Window(window);
 }
 

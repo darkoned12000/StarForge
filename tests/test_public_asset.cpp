@@ -19,7 +19,7 @@ TEST_CASE("Public Asset: material mapping and variants are exposed")
     CHECK((desc.capabilities & static_cast<std::uint32_t>(AssetToonCapability::Faceted)) != 0);
 
     const auto damaged = applyAssetMaterialVariant(desc, MaterialVariant::Damaged);
-    CHECK((damaged.capabilities & static_cast<std::uint32_t>(AssetToonCapability::Emissive)) != 0);
+    CHECK(damaged.baseColor.x() < desc.baseColor.x());
     CHECK(materialVariantName(MaterialVariant::Shielded) == "Shielded");
 
     static_assert(std::is_move_constructible_v<Asset>);

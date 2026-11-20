@@ -58,18 +58,21 @@ TEST_CASE("M17.3: variants layer capabilities without mutating the base")
     const auto base = mapMaterial(material);
 
     const auto damaged = applyMaterialVariant(base, MaterialVariant::Damaged);
-    CHECK((damaged.capabilities & bit(ToonCapabilityBit::Emissive)) != 0);
-    CHECK(damaged.emissiveColor[0] > 0.0f);
+    // Variants must never turn on additive emissive for whole hulls: that
+    // pipeline skips depth writes and makes the ship look transparent.
+    CHECK((damaged.capabilities & bit(ToonCapabilityBit::Emissive)) == 0);
+    CHECK(damaged.shadowColor[0] > base.shadowColor[0]);
     const bool darkened = damaged.baseColor[0] < base.baseColor[0] ||
                           damaged.baseColor[1] < base.baseColor[1];
     CHECK(darkened);
-    CHECK((base.capabilities & bit(ToonCapabilityBit::Emissive)) == 0); // base unchanged
 
     const auto shielded = applyMaterialVariant(base, MaterialVariant::Shielded);
     CHECK((shielded.capabilities & bit(ToonCapabilityBit::Fresnel)) != 0);
 
     const auto highlighted = applyMaterialVariant(base, MaterialVariant::Highlighted);
-    CHECK(highlighted.emissiveColor[0] > highlighted.emissiveColor[2]);
+    CHECK((highlighted.capabilities & bit(ToonCapabilityBit::Emissive)) == 0);
+    CHECK(highlighted.rimStrength > base.rimStrength);
+    CHECK(highlighted.bandCount > base.bandCount);
 
     CHECK(materialVariantNames().size() == 4);
     CHECK(materialVariant(99) == MaterialVariant::Default);

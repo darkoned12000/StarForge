@@ -48,7 +48,7 @@ TEST_CASE("M17.7: hero ship has textured hull, wings and emissive engines")
         for (const auto& vertex : mesh.vertices)
             CHECK(vertex.uv[0] >= 0.0f);
     }
-    CHECK(asset->meshes[2].material.emissiveFactor[0] > 0.5f);
+    CHECK(asset->meshes[2].material.emissiveFactor[2] > 0.5f); // cyan engines
 }
 
 TEST_CASE("M17.7: station has a hub, ring and arms with material variants")

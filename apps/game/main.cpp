@@ -549,6 +549,18 @@ int main()
     starforge::game::RawVec3f explosionPos{};
     float cameraFov = kPi / 3.0f; // vertical FOV radians (wheel zoom)
 
+    // M17 polish: short-lived visual laser bolts (ship-local space). Gameplay
+    // damage is resolved by GameSimulation; these are purely cosmetic tracers.
+    struct LaserBolt
+    {
+        float x = 0.0f;
+        float y = 0.0f;
+        float z = -2.6f;
+        float life = 0.0f;
+    };
+    std::vector<LaserBolt> laserBolts;
+    float boltCooldown = 0.0f;
+
     while (!app->shouldClose() && !quitRequested)
     {
         app->pollEvents();
@@ -937,9 +949,30 @@ int main()
                 logError(("[ASSET] reload failed: " + reloadError).c_str());
         }
 
+        // M17 polish: spawn/advance cosmetic laser bolts when firing.
+        if (!flight.paused)
+        {
+            boltCooldown = std::max(0.0f, boltCooldown - frameDt);
+            if (flight.firePrimary && boltCooldown <= 0.0f)
+            {
+                boltCooldown = 0.12f;
+                laserBolts.push_back({-0.62f, 0.0f, -2.6f, 0.9f});
+                laserBolts.push_back({0.62f, 0.0f, -2.6f, 0.9f});
+            }
+            for (auto& bolt : laserBolts)
+            {
+                bolt.z -= 220.0f * frameDt; // ~220 m/s travel in ship-local space
+                bolt.life -= frameDt;
+            }
+            laserBolts.erase(
+                std::remove_if(laserBolts.begin(), laserBolts.end(),
+                               [](const LaserBolt& b) { return b.life <= 0.0f; }),
+                laserBolts.end());
+        }
+
         // M17: pick the station LOD from its range (rigid demo placement).
         if (stationModel.loaded)
-            stationModel.activeLod = stationModel.selector.update(1200.0f, 40.0f);
+            stationModel.activeLod = stationModel.selector.update(260.0f, 40.0f);
 
         // M17: streamed mip follows the camera zoom (FOV). Rebuild GPU
         // meshes only when the chosen mip actually changes.
@@ -1542,7 +1575,13 @@ int main()
             if (stationModel.loaded)
             {
                 starforge::math::Mat4f stationModel4(1.0f);
-                stationModel4.columns[3] = {400.0f, 0.0f, -1200.0f, 1.0f};
+                // Bring the outpost into view: scaled up and ahead of the
+                // ship instead of a speck 1.2 km off to the side.
+                constexpr float kStationScale = 12.0f;
+                stationModel4.columns[0][0] = kStationScale;
+                stationModel4.columns[1][1] = kStationScale;
+                stationModel4.columns[2][2] = kStationScale;
+                stationModel4.columns[3] = {45.0f, 14.0f, -260.0f, 1.0f};
                 starforge::Toon::Context stationContext;
                 stationContext.viewProj = viewProj * stationModel4;
                 stationContext.modelView = view * stationModel4;
@@ -1555,6 +1594,73 @@ int main()
                                      makeToonParams(part.material, starforge::MaterialVariant::Default),
                                      mesh);
                 }
+            }
+            // M17 polish: thrusters only burn while W/S is held. Each engine
+            // is a bright circular core plus a tapered, fading segment plume
+            // (not a single flat rectangle) like the concept art.
+            const bool thrustersEngaged = !flight.paused &&
+                (app->isKeyDown(starforge::Key::W) || app->isKeyDown(starforge::Key::S));
+            if (thrustersEngaged)
+            {
+                auto drawGlow = [&](float px, float py, float pz,
+                                    float sx, float sy, float sz,
+                                    float r, float g, float b, float intensity) {
+                    auto transform = starforge::math::Mat4f(1.0f);
+                    transform.columns[0][0] = sx;
+                    transform.columns[1][1] = sy;
+                    transform.columns[2][2] = sz;
+                    transform.columns[3] = {px, py, pz, 1.0f};
+                    starforge::Toon::Context glowContext;
+                    glowContext.viewProj = viewProj * model * transform;
+                    glowContext.modelView = view * model * transform;
+                    glowContext.lightDirectionView = toonContext.lightDirectionView;
+                    glowContext.resolution = toonContext.resolution;
+                    starforge::Toon::Params glowParams;
+                    glowParams.capabilities = 1u; // additive glow
+                    glowParams.baseColor = {0.02f, 0.05f, 0.10f, 1.0f};
+                    glowParams.emissiveColor = {r, g, b, intensity};
+                    glowParams.outlineWidth = 0.0f;
+                    toon->record(fc, glowContext, glowParams);
+                };
+
+                for (const float ex : {-0.62f, 0.62f})
+                {
+                    const float flicker = 0.92f + 0.08f * std::sin(time * 27.0f);
+                    // Bright engine core.
+                    drawGlow(ex, 0.0f, 2.58f, 0.44f, 0.44f, 0.28f,
+                             0.03f, 0.32f, 1.0f, 0.85f * flicker);
+                    // Tapered exhaust: six shrinking, fading additive segments.
+                    for (int segment = 0; segment < 6; ++segment)
+                    {
+                        const float t = static_cast<float>(segment) / 5.0f;
+                        const float width = 0.40f * (1.0f - t) + 0.06f;
+                        const float length = 0.42f;
+                        const float z = 2.78f + static_cast<float>(segment) * length;
+                        const float intensity = (0.62f * (1.0f - t) + 0.03f) * flicker;
+                        drawGlow(ex, 0.0f, z, width, width, length,
+                                 0.02f + 0.03f * t, 0.22f + 0.10f * t, 1.0f, intensity);
+                    }
+                }
+            }
+            // M17 polish: cyan laser tracers in front of the ship.
+            for (const auto& bolt : laserBolts)
+            {
+                auto boltMatrix = starforge::math::Mat4f(1.0f);
+                boltMatrix.columns[0][0] = 0.22f;
+                boltMatrix.columns[1][1] = 0.22f;
+                boltMatrix.columns[2][2] = 2.0f;
+                boltMatrix.columns[3] = {bolt.x, bolt.y, bolt.z, 1.0f};
+                starforge::Toon::Context boltContext;
+                boltContext.viewProj = viewProj * model * boltMatrix;
+                boltContext.modelView = view * model * boltMatrix;
+                boltContext.lightDirectionView = toonContext.lightDirectionView;
+                boltContext.resolution = toonContext.resolution;
+                starforge::Toon::Params boltParams;
+                boltParams.capabilities = 1u;
+                boltParams.baseColor = {0.03f, 0.06f, 0.12f, 1.0f};
+                boltParams.emissiveColor = {0.12f, 0.6f, 1.0f, 0.55f};
+                boltParams.outlineWidth = 0.0f;
+                toon->record(fc, boltContext, boltParams);
             }
             for (const auto& r : npcRenders) toon->record(fc, r.context, r.params);
             if (flight.firePrimary) toon->record(fc, muzzleContext, muzzleParams);
