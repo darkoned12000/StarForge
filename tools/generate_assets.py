@@ -399,7 +399,7 @@ def make_inked_hull_png(size: int = 256) -> bytes:
                 # Subtle panel-to-panel tonal variation + subtle weathering
                 panel_tone = ((bx * 7 + by * 13) % 5) * 4
                 ao = min(22, dist_edge * 2)
-                base = 196 + panel_tone + (ao - 14)
+                base = 158 + panel_tone + (ao - 14)
                 # Corner rivets
                 if (sx in (5, 58)) and (gy in (5, 58)):
                     base -= 55
@@ -442,7 +442,7 @@ def make_inked_wing_png(size: int = 256) -> bytes:
                 elif is_red_stripe:
                     r, g, b = 205, 48, 44
                 else:
-                    tone = 188 + (((x // 64) + (y // 64)) % 3) * 6
+                    tone = 154 + (((x // 64) + (y // 64)) % 3) * 6
                     r, g, b = tone - 4, tone, tone + 10
 
             idx = x * 4
@@ -585,10 +585,10 @@ def build_ship() -> bytes:
     canopy_img = glb.image(make_canopy_png(128))
     core_img = glb.image(make_thruster_core_png(128))
 
-    hull_mat = glb.material("hull-armor", [0.88, 0.91, 0.96, 1.0], 0.55, 0.35, image=hull_img)
-    wing_mat = glb.material("wing-trim", [0.85, 0.88, 0.94, 1.0], 0.45, 0.42, image=wing_img)
+    hull_mat = glb.material("hull-armor", [0.58, 0.63, 0.72, 1.0], 0.55, 0.35, image=hull_img)
+    wing_mat = glb.material("wing-trim", [0.55, 0.60, 0.70, 1.0], 0.45, 0.42, image=wing_img)
     canopy_mat = glb.material("canopy-glass", [0.22, 0.55, 0.85, 1.0], 0.15, 0.18, image=canopy_img)
-    housing_mat = glb.material("engine-housing", [0.30, 0.34, 0.42, 1.0], 0.75, 0.38, image=hull_img)
+    housing_mat = glb.material("engine-housing", [0.26, 0.29, 0.36, 1.0], 0.75, 0.38, image=hull_img)
     core_mat = glb.material(
         "engine-core", [0.45, 0.92, 1.0, 1.0], 0.0, 0.9,
         emissive=[0.35, 0.88, 1.0], image=core_img
@@ -702,8 +702,8 @@ def build_station() -> bytes:
     hull_img = glb.image(make_inked_hull_png(256))
     win_img = glb.image(make_station_windows_png(256))
 
-    hull_mat = glb.material("station-hull", [0.80, 0.84, 0.92, 1.0], 0.60, 0.42, image=hull_img)
-    gold_mat = glb.material("station-trim", [0.92, 0.74, 0.34, 1.0], 0.78, 0.28, image=hull_img)
+    hull_mat = glb.material("station-hull", [0.55, 0.60, 0.70, 1.0], 0.60, 0.42, image=hull_img)
+    gold_mat = glb.material("station-trim", [0.72, 0.58, 0.28, 1.0], 0.78, 0.28, image=hull_img)
     win_mat = glb.material(
         "station-windows", [0.95, 0.88, 0.72, 1.0], 0.2, 0.5,
         emissive=[0.55, 0.45, 0.28], image=win_img

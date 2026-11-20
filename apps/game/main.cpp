@@ -66,7 +66,8 @@ constexpr float kSimStep = 1.0f / 60.0f; // fixed 60 Hz simulation
 constexpr starforge::game::RawVec3d kSunWorld{1047000.0 - 21000.0, 12000.0, -18000.0};
 // M17: station is anchored in world space, so flying changes your range to it
 // instead of dragging it along in front of the ship.
-constexpr starforge::game::RawVec3d kStationWorld{120.0, 30.0, -700.0};
+// Ship spawns at kSpawnX (1047000 m); the outpost sits just ahead of it.
+constexpr starforge::game::RawVec3d kStationWorld{1047040.0, 20.0, -450.0};
 constexpr double kSunRadius = 4000.0;
 constexpr double kSunCoronaMultiplier = 3.0;
 
@@ -425,9 +426,9 @@ int main()
     std::string assetError;
     const std::string shipPath = std::string(STARFORGE_ASSET_DIR) + "/hero_ship.glb";
     const std::string stationPath = std::string(STARFORGE_ASSET_DIR) + "/station.glb";
-    if (!loadAuthoredModel(*toon, shipPath, 512.0f, shipModel, assetError))
+    if (!loadAuthoredModel(*toon, shipPath, 1024.0f, shipModel, assetError))
         logError(("[ASSET] hero ship: " + assetError).c_str());
-    if (!loadAuthoredModel(*toon, stationPath, 128.0f, stationModel, assetError))
+    if (!loadAuthoredModel(*toon, stationPath, 512.0f, stationModel, assetError))
         logError(("[ASSET] station: " + assetError).c_str());
     if (shipModel.loaded) assetWatcher.watch(shipPath);
     if (stationModel.loaded) assetWatcher.watch(stationPath);
@@ -951,7 +952,7 @@ int main()
             std::string reloadError;
             const bool isShip = changed == shipPath;
             auto& target = isShip ? shipModel : stationModel;
-            if (loadAuthoredModel(*toon, changed, isShip ? 512.0f : 128.0f,
+            if (loadAuthoredModel(*toon, changed, isShip ? 1024.0f : 512.0f,
                                   target, reloadError))
             {
                 comms.push(starforge::game::CommsChannel::System, "assets",
@@ -1001,13 +1002,15 @@ int main()
             if (!model->loaded) continue;
             const auto* firstPart = &model->parts.front();
             if (firstPart->texture.mipCount() == 0) continue;
+            // Close-up ships should use the full-resolution ink texture;
+            // a 512 px footprint estimate keeps 256 px textures on mip 0.
             const auto wanted = firstPart->texture.selectMip(
-                static_cast<std::uint32_t>(256.0f / std::max(0.4f, cameraFov)));
+                static_cast<std::uint32_t>(512.0f / std::max(0.4f, cameraFov)));
             if (wanted == firstPart->activeMip) continue;
             for (auto& part : model->parts)
                 if (part.texture.mipCount() > 0) (void)part.texture.request(wanted);
             if (loadAuthoredModel(*toon, model->path,
-                                  256.0f / std::max(0.4f, cameraFov), *model, assetError))
+                                  512.0f / std::max(0.4f, cameraFov), *model, assetError))
                 firstPart = &model->parts.front();
             else
                 logError(("[ASSET] mip stream failed: " + assetError).c_str());
@@ -1601,7 +1604,7 @@ int main()
                 starforge::math::Mat4f stationModel4(1.0f);
                 // Bring the outpost into view: scaled up and ahead of the
                 // ship instead of a speck 1.2 km off to the side.
-                constexpr float kStationScale = 8.0f;
+                constexpr float kStationScale = 10.0f;
                 stationModel4.columns[0][0] = kStationScale;
                 stationModel4.columns[1][1] = kStationScale;
                 stationModel4.columns[2][2] = kStationScale;
@@ -1864,7 +1867,9 @@ int main()
                     const auto& msg = messages[i];
                     if (msg.channel == starforge::game::CommsChannel::Combat) continue;
                     std::string text = msg.sender + ": " + msg.text;
-                    if (text.size() > 48) text.resize(48);
+                    // Panel is 420 px wide with a 10 px inset; at scale 2 a
+                    // glyph cell is 12 px, so 32 chars is the safe maximum.
+                    if (text.size() > 32) text.resize(32);
                     const float ly = commsY + 32.0f + static_cast<float>(row++) * 19.0f;
                     const auto lc = msg.channel == starforge::game::CommsChannel::Trade
                         ? starforge::math::Vec4f{0.3f, 1.0f, 0.6f, 1.0f}
@@ -1885,6 +1890,7 @@ int main()
                     ? (textEntry.prompt() + textEntry.text())
                     : std::string("> press ENTER to chat");
                 if (chatActive && static_cast<int>(time * 2.0f) % 2 == 0) entry += "_";
+                if (entry.size() > 32) entry = entry.substr(entry.size() - 32);
                 uiCanvas->addText({.x = commsX + 14.0f, .y = inputY + 6.0f, .scale = 2.0f,
                                    .color = chatActive
                                        ? starforge::math::Vec4f{0.6f, 1.0f, 0.8f, 1.0f}

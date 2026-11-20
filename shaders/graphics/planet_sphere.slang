@@ -76,13 +76,32 @@ float4 fragmentMain(VSOutput input, out float depth : SV_Depth) : SV_Target
     float cs = cos(spin);
     float sn = sin(spin);
     float3 local = float3(cs * N.x - sn * N.z, N.y, sn * N.x + cs * N.z);
-    float land = smoothstep(-0.15, 0.3, surfacePattern(local));
+    float pattern = surfacePattern(local);
 
-    // Toon diffuse: three stepped bands.
+    // Comic-ink coastline: crisp anti-aliased continent edge with a dark
+    // painted seam, instead of a soft PBR gradient.
+    float coastWidth = fwidth(pattern) * 0.7071;
+    float land = smoothstep(-0.06 - coastWidth, -0.06 + coastWidth, pattern);
+    float coast = 1.0 - smoothstep(0.0, 0.07 + coastWidth, abs(pattern + 0.06));
+
+    // Toon diffuse: three anti-aliased stepped bands.
     float ndl = max(dot(N, L), 0.0);
-    float lit = ndl > 0.45 ? 1.0 : (ndl > 0.15 ? 0.65 : 0.18);
-    float3 color = lerp(pc.shadowColor.rgb, pc.baseColor.rgb, lit);
-    color *= lerp(0.55, 1.12, land); // oceans vs land, rotating with the body
+    float bandCoord = ndl * 3.0;
+    float bandWidth = fwidth(bandCoord) * 0.7071;
+    float nearestBand = round(bandCoord);
+    float stepped = nearestBand - 1.0 + smoothstep(-bandWidth, bandWidth, bandCoord - nearestBand);
+    float banded = clamp(stepped / 2.0, 0.0, 1.0);
+    float3 color = lerp(pc.shadowColor.rgb, pc.baseColor.rgb, banded);
+
+    // Oceans vs land, with a second tonal step inside the continents.
+    color *= lerp(0.55, 1.10, land);
+    color *= lerp(0.88, 1.06, smoothstep(0.08, 0.42, pattern));
+
+    // Ink the coastline and the terminator so the night side keeps its shape.
+    color = lerp(color, float3(0.025, 0.045, 0.085), coast * 0.75);
+    float termWidth = fwidth(ndl) * 0.7071;
+    float terminator = 1.0 - smoothstep(0.0, 0.05 + termWidth, abs(ndl - 0.15));
+    color *= 1.0 - terminator * 0.35;
 
     // Fresnel rim: 1 - (n·v)^p, warm rim tint.
     float fresnel = pow(1.0 - max(dot(N, V), 0.0), pc.params.x) * pc.params.y;

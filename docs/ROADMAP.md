@@ -1414,9 +1414,17 @@ panel/AO textures. `toon.slang` gained bilinear BDA texture sampling with
 wrapping, ink-masked specular/rim highlights and texture-modulated emissive
 cores; the proven specular/rim intensities were retained so cel bands stay
 crisp and HDR tonemapping does not flatten (the HDR golden was refreshed for
-the small resulting difference). Screen-space Sobel inking, HDR bloom and
-billboard/ribbon particles remain deferred. Verification: Debug + Release
-CTest 12/12, 399 CPU cases, zero validation errors.
+the small resulting difference).
+
+**Visual follow-up (2026-11-20):** the station is now anchored at the ship's
+spawn X (~1047 km) instead of the world origin, so it is actually visible
+ahead of the ship; the planet shader gained comic-ink coastlines, stepped
+bands and an inked terminator (golden refreshed); armour albedo is darker so
+ink seams read instead of washing out, close meshes stay on mip 0, and
+specular/rim are damped on bright textured armour. Comms lines and the chat
+input are clamped to 32 characters so text cannot escape the panel.
+Screen-space Sobel inking, HDR bloom and billboard/ribbon particles remain
+deferred. Verification: Debug + Release CTest 12/12, zero validation errors.
 
 ### M18 – Persistence
 

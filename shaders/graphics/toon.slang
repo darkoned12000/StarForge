@@ -234,10 +234,16 @@ float4 fragmentMain(VSOutput input) : SV_Target
     float3 halfVec = normalize(lightDir + viewDir);
     float ndoth = max(dot(normal, halfVec), 0.0);
     float spec = aastep(0.65, pow(ndoth, 32.0)) * 0.7 * aastep(0.05, ndotl) * inkMask;
+    // Broad bright armour panels should not blow out to white; keep the
+    // comic highlight strongest on darker panels. Untextured draws are
+    // unaffected, so existing golden proofs keep their look.
+    if (hasTex)
+        spec *= lerp(0.10, 0.4, 1.0 - texLuma);
 
     // Cool rim highlight along silhouettes.
     float facing = 1.0 - max(dot(normal, viewDir), 0.0);
     float rim = aastep(0.6, pow(facing, 3.0)) * draw.params.y * inkMask;
+    if (hasTex) rim *= 0.5;
 
     float3 color = diffuse + (spec + rim) * draw.baseColor.rgb;
 
