@@ -64,7 +64,7 @@ TEST_CASE("M17.7: hero ship has inked multi-part armour and separate glowing cor
 
     // Armour is opaque; only the recessed cores and nav beacons glow.
     CHECK(asset.meshes[3].material.emissiveFactor[0] == 0.0f);
-    CHECK(asset.meshes[4].material.emissiveFactor[2] > 0.5f); // cyan plasma cores
+    CHECK(asset.meshes[4].material.baseColorFactor[2] < 0.1f); // dark nozzle interiors
     CHECK(asset.meshes[2].material.roughnessFactor < 0.25f);  // glossy canopy
 }
 

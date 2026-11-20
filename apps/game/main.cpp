@@ -42,6 +42,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #ifndef STARFORGE_ASSET_DIR
@@ -592,6 +593,10 @@ int main()
     starforge::game::CommsLog toasts{true};
     starforge::game::TextEntry textEntry;
     bool chatActive = false;
+    // Station interaction is opt-in via the proximity prompt; the old Space
+    // toggle no longer opens the trade screen.
+    bool stationOpen = false;
+    double stationRangeMetres = 1.0e9;
     starforge::game::UiState uiState;
     // M16 polish: spawn a set of travelling NPCs (hostiles + neutrals) so
     // targeting can be exercised against several moving contacts.
@@ -651,6 +656,13 @@ int main()
         float life = 0.0f;
     };
     std::vector<IncomingShot> incomingShots;
+    struct Fragment
+    {
+        starforge::math::Vec3f position{};
+        float scale = 1.0f;
+        float life = 0.0f;
+    };
+    std::vector<Fragment> fragments;
 
     while (!app->shouldClose() && !quitRequested)
     {
@@ -739,6 +751,15 @@ int main()
             explosionTimer = std::max(0.0f, explosionTimer - frameDt);
         }
 
+        // Station range for the proximity prompt (world-anchored outpost).
+        {
+            const auto shipPos = world.shipTransform().position;
+            stationRangeMetres = std::sqrt(
+                (kStationWorld.x - shipPos.x) * (kStationWorld.x - shipPos.x) +
+                (kStationWorld.y - shipPos.y) * (kStationWorld.y - shipPos.y) +
+                (kStationWorld.z - shipPos.z) * (kStationWorld.z - shipPos.z));
+        }
+
         // Merge this frame's input into `pending` first...
         {
             const auto edge = readInput(*app, inputTracker);
@@ -822,13 +843,9 @@ int main()
                 }
                 inputTracker.prevLock = lockKey;
             }
-            if (!flight.paused && pending.spacePressed)
-            {
-                flight.mode = flight.mode == starforge::game::FlightMode::Flight
-                                  ? starforge::game::FlightMode::Ui
-                                  : starforge::game::FlightMode::Flight;
-                pending.spacePressed = false;
-            }
+            // Space no longer toggles the trade screen. Station interaction
+            // is proximity-based via the dock/chat prompt above Comms.
+            pending.spacePressed = false;
             if (flight.paused)
             {
                 // While paused only the unpause edge is live: discard
@@ -857,6 +874,32 @@ int main()
             uiState.beginFrame(cursor.x, cursor.y,
                                app->mouseButtonPressed(starforge::MouseButton::Left));
         }
+
+        // Proximity station prompt: register its two buttons before any other
+        // UI so the prompt is clickable while flying (no Space toggle).
+        if (!flight.paused && !chatActive && !stationOpen &&
+            stationRangeMetres < 1000.0)
+        {
+            const auto fb = app->framebufferSize();
+            const auto prompt = starforge::game::stationPromptRect(
+                static_cast<float>(fb.width), static_cast<float>(fb.height));
+            uiState.addWidget("prompt:dock", prompt.dock);
+            uiState.addWidget("prompt:chat", prompt.chat);
+            if (uiState.clicked("prompt:dock"))
+            {
+                stationOpen = true;
+                flight.mode = starforge::game::FlightMode::Ui;
+                comms.push(starforge::game::CommsChannel::System, "station-a",
+                           "Docking session opened");
+            }
+            if (uiState.clicked("prompt:chat"))
+            {
+                chatActive = true;
+                textEntry.begin(">");
+            }
+        }
+        if (stationOpen && !flight.paused)
+            flight.mode = starforge::game::FlightMode::Ui;
 
         // Pause menu: clickable Resume / Map / Quit buttons.
         if (flight.paused && !chatActive)
@@ -932,10 +975,18 @@ int main()
                     textEntry.begin(">");
                 }
             }
-            if (escape && !inputTracker.prevEscape && chatActive)
+            if (escape && !inputTracker.prevEscape)
             {
-                chatActive = false;
-                textEntry.end();
+                if (chatActive)
+                {
+                    chatActive = false;
+                    textEntry.end();
+                }
+                else if (stationOpen)
+                {
+                    stationOpen = false;
+                    flight.mode = starforge::game::FlightMode::Flight;
+                }
             }
             if (chatActive)
             {
@@ -965,8 +1016,9 @@ int main()
             pending.mouseDy = 0.0f;
         }
 
-        // UI-mode trading / mission / jump actions.
-        if (flight.mode == starforge::game::FlightMode::Ui && !flight.paused && !chatActive)
+        // Station trading / mission actions (only while docked at the prompt).
+        if (stationOpen && flight.mode == starforge::game::FlightMode::Ui &&
+            !flight.paused && !chatActive)
         {
             const auto stationShip = world.shipTransform().position;
             const double stationRange = std::sqrt(
@@ -984,9 +1036,19 @@ int main()
                                       starforge::game::UiRect{panel.x + button.x, panel.y + button.y,
                                                               button.w, button.h});
                 for (const auto& button : starforge::game::stationButtons())
-                    if (uiState.clicked(button.id))
-                        starforge::game::applyStationAction(button.id, simulation, comms,
-                                                            stationRange);
+                {
+                    if (!uiState.clicked(button.id)) continue;
+                    if (button.id == "close" || button.id == "undock")
+                    {
+                        stationOpen = false;
+                        flight.mode = starforge::game::FlightMode::Flight;
+                        comms.push(starforge::game::CommsChannel::Trade, "station-a",
+                                   "Undocked - safe travels");
+                        continue;
+                    }
+                    starforge::game::applyStationAction(button.id, simulation, comms,
+                                                        stationRange);
+                }
             }
             handleUiActions(*app, uiTracker, simulation, comms, stationRange);
         }
@@ -1073,15 +1135,41 @@ int main()
                     laserBolts.push_back({start, direction, 0.9f});
                 }
             }
+            // Test each tracer against nearby asteroids; shots no longer pass
+            // straight through rocks, and destroyed rocks shed fragments.
+            const auto rocksInRange = world.visibleAsteroids(600.0);
             for (auto& bolt : laserBolts)
             {
                 bolt.position = bolt.position + bolt.direction * (220.0f * frameDt);
                 bolt.life -= frameDt;
+                for (const auto& rock : rocksInRange)
+                {
+                    const float dx = static_cast<float>(rock.position.x) - bolt.position.x();
+                    const float dy = static_cast<float>(rock.position.y) - bolt.position.y();
+                    const float dz = static_cast<float>(rock.position.z) - bolt.position.z();
+                    const float radius = rock.scale * 0.866f + 2.0f;
+                    if (dx * dx + dy * dy + dz * dz > radius * radius) continue;
+                    starforge::game::RawVec3d impact{};
+                    float rockScale = 0.0f;
+                    const bool destroyed = world.damageAsteroid(
+                        rock.seed, 8.0f, &impact, &rockScale);
+                    fragments.push_back({
+                        {static_cast<float>(impact.x), static_cast<float>(impact.y),
+                         static_cast<float>(impact.z)},
+                        destroyed ? rockScale * 0.4f : 0.5f, 0.45f});
+                    bolt.life = 0.0f;
+                    break;
+                }
             }
             laserBolts.erase(
                 std::remove_if(laserBolts.begin(), laserBolts.end(),
                                [](const LaserBolt& b) { return b.life <= 0.0f; }),
                 laserBolts.end());
+            for (auto& fragment : fragments) fragment.life -= frameDt;
+            fragments.erase(
+                std::remove_if(fragments.begin(), fragments.end(),
+                               [](const Fragment& f) { return f.life <= 0.0f; }),
+                fragments.end());
             for (auto& shot : incomingShots) shot.life -= frameDt;
             incomingShots.erase(
                 std::remove_if(incomingShots.begin(), incomingShots.end(),
@@ -1389,8 +1477,17 @@ int main()
         starforge::Toon::Context toonContext;
         toonContext.viewProj = proj * view * model;
         toonContext.modelView = view * model;
-        toonContext.lightDirectionView =
-            starforge::math::normalize(starforge::math::Vec3f{0.4f, 0.5f, 0.75f});
+        // The toon shader lights in VIEW space, so the sun direction must be
+        // rotated by `view` too. A camera-fixed vector made world-anchored
+        // objects (the station) change colour as the ship turned.
+        const starforge::math::Vec3f sunWorldDir = starforge::math::normalize(
+            starforge::math::Vec3f{kSunWorld.x - ship.position.x,
+                                   kSunWorld.y - ship.position.y,
+                                   kSunWorld.z - ship.position.z});
+        const auto sunView4 = view * starforge::math::Vec4f{
+            sunWorldDir.x(), sunWorldDir.y(), sunWorldDir.z(), 0.0f};
+        toonContext.lightDirectionView = starforge::math::normalize(
+            starforge::math::Vec3f{sunView4.x(), sunView4.y(), sunView4.z()});
 
         starforge::Toon::Params toonParams;
         toonParams.baseColor = {0.85f, 0.25f, 0.2f, 1.0f};
@@ -1752,9 +1849,17 @@ int main()
                 for (const auto& part : stationModel.parts)
                 {
                     const auto& mesh = part.lods[stationModel.activeLod];
-                    toon->recordMesh(fc, stationContext,
-                                     makeToonParams(part.material, starforge::MaterialVariant::Default),
-                                     mesh);
+                    auto params = makeToonParams(part.material,
+                                                 starforge::MaterialVariant::Default);
+                    if (part.material.name == "station-beacons")
+                    {
+                        // Slow synced blink, kept opaque (no additive pass).
+                        const float blink = 0.25f + 0.75f *
+                            (0.5f + 0.5f * std::sin(time * 2.0f));
+                        params.baseColor = {0.55f * blink, 1.0f * blink,
+                                            0.30f * blink, 1.0f};
+                    }
+                    toon->recordMesh(fc, stationContext, params, mesh);
                 }
             }
             // M17 polish: thrusters follow throttle level. One press of W/S
@@ -1837,6 +1942,29 @@ int main()
                 boltParams.emissiveColor = {0.12f, 0.6f, 1.0f, 0.55f};
                 boltParams.outlineWidth = 0.0f;
                 toon->record(fc, boltContext, boltParams);
+            }
+            // Asteroid impact / fragmentation sparks.
+            for (const auto& fragment : fragments)
+            {
+                const float shrink = std::clamp(fragment.life / 0.45f, 0.0f, 1.0f);
+                auto fm = starforge::math::Mat4f(1.0f);
+                const float size = fragment.scale * shrink;
+                fm.columns[0][0] = size;
+                fm.columns[1][1] = size;
+                fm.columns[2][2] = size;
+                fm.columns[3] = {fragment.position.x(), fragment.position.y(),
+                                 fragment.position.z(), 1.0f};
+                starforge::Toon::Context fctx;
+                fctx.viewProj = viewProj * fm;
+                fctx.modelView = view * fm;
+                fctx.lightDirectionView = toonContext.lightDirectionView;
+                fctx.resolution = toonContext.resolution;
+                starforge::Toon::Params fp;
+                fp.capabilities = 1u;
+                fp.baseColor = {0.12f, 0.08f, 0.04f, 1.0f};
+                fp.emissiveColor = {1.0f, 0.55f, 0.18f, shrink * 0.8f};
+                fp.outlineWidth = 0.0f;
+                toon->record(fc, fctx, fp);
             }
             // Enemy fire: red tracers from the attacker toward the player.
             for (const auto& shot : incomingShots)
@@ -1972,9 +2100,11 @@ int main()
                     : starforge::math::Vec4f{tc.x(), tc.y(), tc.z(), 0.5f};
 
                 const starforge::math::Vec4f clip =
-                    viewProj * starforge::math::Vec4f{trackedNpc->position.x,
-                                                      trackedNpc->position.y,
-                                                      trackedNpc->position.z, 1.0f};
+                    // NPC positions are ship-relative: apply the ship model
+                    // matrix so the box sits where the lasers actually fly.
+                    viewProj * model * starforge::math::Vec4f{trackedNpc->position.x,
+                                                              trackedNpc->position.y,
+                                                              trackedNpc->position.z, 1.0f};
                 const float tw = static_cast<float>(size.width);
                 const float th = static_cast<float>(size.height);
                 bool onScreen = false;
@@ -2012,6 +2142,40 @@ int main()
                     uiCanvas->addBar({.x = cx - 40.0f, .y = cy + 44.0f, .w = 80.0f, .h = 6.0f,
                                       .value = targeting.lockProgress(), .fillColor = tc});
             }
+            // Proximity station prompt: appears within 1 km, above Comms.
+            if (!flight.paused && !chatActive && !stationOpen &&
+                stationRangeMetres < 1000.0)
+            {
+                const auto prompt = starforge::game::stationPromptRect(
+                    static_cast<float>(size.width), static_cast<float>(size.height));
+                uiCanvas->addPanel({.x = prompt.panel.x, .y = prompt.panel.y,
+                                    .w = prompt.panel.w, .h = prompt.panel.h,
+                                    .outlineWidth = 1.5f,
+                                    .fillColor = {0.06f, 0.12f, 0.16f, 0.92f},
+                                    .accentColor = {0.95f, 0.75f, 0.25f, 1.0f}});
+                char promptText[96];
+                std::snprintf(promptText, sizeof(promptText),
+                              "STATION A  %.0f m  -  SELECT ACTION", stationRangeMetres);
+                uiCanvas->addText({.x = prompt.panel.x + 10.0f, .y = prompt.panel.y + 6.0f,
+                                   .scale = 1.0f, .color = {1.0f, 0.9f, 0.5f, 1.0f},
+                                   .text = promptText});
+                for (const auto& [id, label, hot] : {
+                         std::tuple<const char*, const char*, bool>{
+                             "prompt:dock", "<DOCK>", uiState.hovered("prompt:dock")},
+                         std::tuple<const char*, const char*, bool>{
+                             "prompt:chat", "<CHAT>", uiState.hovered("prompt:chat")}})
+                {
+                    const auto& rect = std::string(id) == "prompt:dock" ? prompt.dock : prompt.chat;
+                    uiCanvas->addPanel({.x = rect.x, .y = rect.y, .w = rect.w, .h = rect.h,
+                                        .outlineWidth = 1.0f,
+                                        .fillColor = hot
+                                            ? starforge::math::Vec4f{0.25f, 0.45f, 0.3f, 1.0f}
+                                            : starforge::math::Vec4f{0.10f, 0.2f, 0.28f, 1.0f}});
+                    uiCanvas->addText({.x = rect.x + 42.0f, .y = rect.y + 7.0f, .scale = 2.0f,
+                                       .color = {0.95f, 0.98f, 1.0f, 1.0f}, .text = label});
+                }
+            }
+
             // M16.7: comms panel is ALWAYS visible bottom-left with a full
             // scrollable history and an always-present chat input box. Combat
             // alerts go to toasts only (top-centre), so they are not doubled.
@@ -2236,8 +2400,8 @@ int main()
                                        .text = "NO TARGET - press T to lock"});
                 }
             }
-            // M16.8: clickable station / inventory screen.
-            if (flight.mode == starforge::game::FlightMode::Ui)
+            // Station trade / mission interface (opened via dock prompt only).
+            if (stationOpen && flight.mode == starforge::game::FlightMode::Ui)
             {
                 const auto panel = starforge::game::stationPanelRect(
                     static_cast<float>(size.width), static_cast<float>(size.height));
@@ -2246,13 +2410,19 @@ int main()
                                     .fillColor = {0.06f, 0.11f, 0.2f, 0.92f},
                                     .accentColor = {0.95f, 0.7f, 0.2f, 1.0f}});
                 uiCanvas->addText({.x = panel.x + 14.0f, .y = panel.y + 16.0f, .scale = 2.0f,
-                                   .color = {0.9f, 0.95f, 1.0f, 1.0f}, .text = "STATION A / CARGO"});
+                                   .color = {0.9f, 0.95f, 1.0f, 1.0f}, .text = "STATION A"});
+                uiCanvas->addText({.x = panel.x + 18.0f, .y = panel.y + 58.0f, .scale = 1.0f,
+                                   .color = {0.5f, 0.9f, 1.0f, 1.0f}, .text = "TRADE"});
+                uiCanvas->addText({.x = panel.x + 18.0f, .y = panel.y + 150.0f, .scale = 1.0f,
+                                   .color = {1.0f, 0.85f, 0.4f, 1.0f}, .text = "MISSIONS"});
+                uiCanvas->addText({.x = panel.x + 18.0f, .y = panel.y + 248.0f, .scale = 1.0f,
+                                   .color = {0.6f, 0.8f, 1.0f, 1.0f}, .text = "NAVIGATION"});
                 char status[96];
                 std::snprintf(status, sizeof(status), "CR %.0f  ORE %d  %s",
                               static_cast<float>(simulation.credits()),
                               simulation.cargoCount("ore"),
                               simulation.isDocked() ? "DOCKED" : "APPROACH");
-                uiCanvas->addText({.x = panel.x + 14.0f, .y = panel.y + 46.0f, .scale = 2.0f,
+                uiCanvas->addText({.x = panel.x + 14.0f, .y = panel.y + 40.0f, .scale = 1.0f,
                                    .color = {0.6f, 0.9f, 0.7f, 1.0f}, .text = status});
                 // Quest status so the haul mission is discoverable/completable.
                 std::string quest;

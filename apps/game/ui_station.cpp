@@ -11,16 +11,31 @@ UiRect stationPanelRect(float windowWidth, float windowHeight)
     return UiRect{windowWidth * 0.5f - w * 0.5f, windowHeight * 0.5f - h * 0.5f, w, h};
 }
 
+StationPrompt stationPromptRect(float windowWidth, float windowHeight)
+{
+    (void)windowWidth;
+    // Comms panel sits at y = H-232 with height 216; keep the prompt directly
+    // above it with a small gap.
+    const float py = windowHeight - 232.0f - 64.0f;
+    StationPrompt prompt;
+    prompt.panel = UiRect{16.0f, py, 420.0f, 58.0f};
+    prompt.dock = UiRect{26.0f, py + 24.0f, 190.0f, 28.0f};
+    prompt.chat = UiRect{236.0f, py + 24.0f, 190.0f, 28.0f};
+    return prompt;
+}
+
 std::vector<StationButton> stationButtons()
 {
-    // Two-column rows with generous vertical spacing; no text overlap.
-    return {{"dock", "DOCK", 18.0f, 86.0f, 155.0f, 38.0f},
-            {"undock", "UNDOCK", 187.0f, 86.0f, 155.0f, 38.0f},
-            {"buy-5", "BUY 5 ORE", 18.0f, 140.0f, 155.0f, 38.0f},
-            {"sell-5", "SELL 5 ORE", 187.0f, 140.0f, 155.0f, 38.0f},
-            {"accept", "ACCEPT HAUL", 18.0f, 202.0f, 324.0f, 38.0f},
-            {"complete", "COMPLETE HAUL", 18.0f, 258.0f, 324.0f, 38.0f},
-            {"jump", "JUMP", 18.0f, 314.0f, 324.0f, 38.0f}};
+    // Trade / mission station interface, reached through the proximity dock
+    // prompt rather than the old Space toggle.
+    return {{"close", "CLOSE", 224.0f, 10.0f, 118.0f, 30.0f},
+            {"buy-5", "BUY 5 ORE", 18.0f, 70.0f, 155.0f, 38.0f},
+            {"sell-5", "SELL 5 ORE", 187.0f, 70.0f, 155.0f, 38.0f},
+            {"dock", "DOCK", 18.0f, 116.0f, 155.0f, 38.0f},
+            {"accept", "ACCEPT HAUL", 18.0f, 164.0f, 324.0f, 38.0f},
+            {"complete", "COMPLETE HAUL", 18.0f, 208.0f, 324.0f, 38.0f},
+            {"jump", "JUMP TO ALPHA-C", 18.0f, 264.0f, 324.0f, 38.0f},
+            {"undock", "UNDOCK", 18.0f, 324.0f, 324.0f, 38.0f}};
 }
 
 bool applyStationAction(std::string_view id, GameSimulation& simulation, CommsLog& comms,

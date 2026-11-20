@@ -1438,6 +1438,18 @@ flash is a faint additive spherical shell instead of an opaque blue cube
 (golden refreshed for the new planet terrain). Verification: Debug + Release
 CTest 12/12, zero validation errors.
 
+**Gameplay/visual pass 3 (2026-11-20, user feedback):** Space no longer opens
+the trade screen; approaching the station within 1 km shows a clickable
+`<DOCK>` / `<CHAT>` prompt above Comms, and docking opens a reworked station
+panel with Trade / Missions / Navigation sections (Esc or Close exits).
+Engine nozzles are near-black recessed circles; the toon sun direction is now
+rotated into view space so world-anchored station lighting no longer shifts
+with the camera; station windows are brighter yellow/green with slowly
+blinking tip beacons. The target box now applies the ship model matrix so it
+sits where aimed lasers actually travel. Laser bolts collide with asteroids,
+damage them, and spawn fragment sparks on destruction. Verification: Debug +
+Release CTest 12/12, zero validation errors.
+
 ### M18 – Persistence
 
 - **Goal:** Save/load player deltas keyed by cell and object ID. Fast

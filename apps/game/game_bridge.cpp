@@ -69,6 +69,8 @@ struct GameWorld::Impl
     // chunks are the foundation; this cluster is the demo's authored
     // foreground until at-scale streaming detail lands.
     std::vector<flecs::entity> authored;
+    // Remaining hull per asteroid seed (laser damage; M16 refinement).
+    std::map<std::uint32_t, float> asteroidHealth;
 
     Impl()
         : start(spatial::WorldPosition::fromMeters(kSpawnX, 0.0, 0.0).value()),
@@ -247,6 +249,44 @@ bool GameWorld::collideShip()
         }
     }
     return hit;
+}
+
+bool GameWorld::damageAsteroid(std::uint32_t seed, float damage,
+                               RawVec3d* outPosition, float* outScale)
+{
+    if (!impl_) return false;
+    flecs::entity target;
+    auto scan = [&](flecs::entity entity) {
+        if (target.is_alive() || !entity.is_alive() || !entity.has<ecs::Transform>()) return;
+        if (static_cast<std::uint32_t>(entity.raw_id()) == seed) target = entity;
+    };
+    for (const auto entity : impl_->authored) scan(entity);
+    for (const auto& [key, mounted] : impl_->mounted)
+    {
+        (void)key;
+        for (const auto entity : mounted.entities) scan(entity);
+    }
+    if (!target.is_alive()) return false;
+
+    auto& health = impl_->asteroidHealth[seed];
+    if (health <= 0.0f) health = 30.0f + (seed % 7) * 6.0f; // seed-scaled toughness
+    health -= damage;
+    if (health > 0.0f) return false;
+
+    const auto& t = target.get<ecs::Transform>();
+    if (outPosition)
+    {
+        const auto rel = spatial::toCameraRelative(t.position,
+            impl_->ship.get<ecs::Transform>().position);
+        *outPosition = RawVec3d{rel.x, rel.y, rel.z};
+    }
+    if (outScale) *outScale = t.scale;
+    impl_->asteroidHealth.erase(seed);
+    impl_->authored.erase(
+        std::remove(impl_->authored.begin(), impl_->authored.end(), target),
+        impl_->authored.end());
+    target.destruct();
+    return true;
 }
 
 int GameWorld::updateStreaming()

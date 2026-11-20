@@ -25,6 +25,15 @@ struct StationButton
 // Station panel position/size derived from window dimensions.
 [[nodiscard]] UiRect stationPanelRect(float windowWidth, float windowHeight);
 
+// Proximity dock/chat prompt, rendered just above the comms panel.
+struct StationPrompt
+{
+    UiRect panel{};
+    UiRect dock{};
+    UiRect chat{};
+};
+[[nodiscard]] StationPrompt stationPromptRect(float windowWidth, float windowHeight);
+
 // Button geometry relative to the station panel origin.
 [[nodiscard]] std::vector<StationButton> stationButtons();
 

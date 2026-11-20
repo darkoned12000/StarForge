@@ -63,6 +63,12 @@ public:
     // to the surface and log it. Returns true on contact.
     [[nodiscard]] bool collideShip();
 
+    // Weapon damage to an asteroid identified by its stable seed. Returns
+    // true when the rock is destroyed; `outPosition`/`outScale` receive its
+    // last ship-relative transform so callers can spawn fragment VFX.
+    bool damageAsteroid(std::uint32_t seed, float damage,
+                        RawVec3d* outPosition = nullptr, float* outScale = nullptr);
+
     // Procedural streaming (M15.0.3): advance the cell traversal from
     // the ship position, instantiate newly loaded chunks into ECS and
     // unmount evicted ones, respecting the per-frame upload budget.

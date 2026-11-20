@@ -535,11 +535,11 @@ def make_station_windows_png(size: int = 256) -> bytes:
             if gy in (0, 63) or gx == 0:
                 r, g, b = 16, 20, 28
             elif (18 <= gy <= 24 or 40 <= gy <= 46) and (4 <= gx <= 26) and (gx % 6 != 0):
-                # Warm amber/gold & cyan habitat windows
+                # Brighter yellow and green interior lighting
                 if ((x // 32) + (y // 64)) % 4 == 0:
-                    r, g, b = 120, 225, 255
+                    r, g, b = 165, 255, 130
                 else:
-                    r, g, b = 255, 195, 85
+                    r, g, b = 255, 232, 70
             else:
                 r, g, b = 42, 48, 58
             idx = x * 4
@@ -610,9 +610,10 @@ def build_ship() -> bytes:
     wing_mat = glb.material("wing-trim", [0.55, 0.60, 0.70, 1.0], 0.45, 0.42, image=wing_img)
     canopy_mat = glb.material("canopy-glass", [0.22, 0.55, 0.85, 1.0], 0.15, 0.18, image=canopy_img)
     housing_mat = glb.material("engine-housing", [0.26, 0.29, 0.36, 1.0], 0.75, 0.38, image=hull_img)
+    # Recessed nozzle interior: near-black so it reads as a dark circle;
+    # the blue glow comes from the throttle-driven plume VFX, not the mesh.
     core_mat = glb.material(
-        "engine-core", [0.35, 0.75, 1.0, 1.0], 0.0, 0.9,
-        emissive=[0.18, 0.55, 0.85], image=core_img
+        "engine-core", [0.03, 0.035, 0.045, 1.0], 0.0, 0.9, image=core_img
     )
     nav_mat = glb.material(
         "nav-lights", [0.8, 0.2, 0.12, 1.0], 0.0, 0.8,
@@ -728,7 +729,7 @@ def build_station() -> bytes:
     # Windows use a bright albedo texture (cyan/amber bands) rather than the
     # additive emissive pass: that pass skips depth writes and double-draws
     # back faces, which produced blue/white artifacts over the hull.
-    win_mat = glb.material("station-windows", [0.95, 0.88, 0.72, 1.0], 0.2, 0.5, image=win_img)
+    win_mat = glb.material("station-windows", [1.0, 1.0, 0.92, 1.0], 0.2, 0.5, image=win_img)
     beacon_mat = glb.material("station-beacons", [0.35, 0.75, 0.95, 1.0], 0.0, 0.5, image=win_img)
 
     hub = Mesh()
