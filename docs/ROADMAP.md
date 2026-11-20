@@ -1426,6 +1426,18 @@ input are clamped to 32 characters so text cannot escape the panel.
 Screen-space Sobel inking, HDR bloom and billboard/ribbon particles remain
 deferred. Verification: Debug + Release CTest 12/12, zero validation errors.
 
+**Visual refinement pass 2 (2026-11-20, user feedback):** the ship's white
+nose/canopy fans now sample inked albedo instead of bright plate centres and
+the canopy glint is dimmer; the planet uses layered value-noise fbm with
+ridged mountain chains and inked rock seams; the station's emissive window /
+beacon materials are opaque (no additive no-depth artifacts) and its six
+radial trusses are continuous beams that connect hub, rings and docking pods.
+NPCs are low-poly oriented fighters instead of cubes; player tracers are aimed
+at the selected target, enemy fire spawns red incoming tracers, and the shield
+flash is a faint additive spherical shell instead of an opaque blue cube
+(golden refreshed for the new planet terrain). Verification: Debug + Release
+CTest 12/12, zero validation errors.
+
 ### M18 – Persistence
 
 - **Goal:** Save/load player deltas keyed by cell and object ID. Fast

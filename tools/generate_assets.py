@@ -125,6 +125,23 @@ class Mesh:
                 outward_hint=normal,
             )
 
+    def box_rotated(self, center, size, angle):
+        """Axis-aligned box rotated about Z by `angle`, keeping outward winding."""
+        temp = Mesh()
+        temp.box((0.0, 0.0, 0.0), size)
+        base = len(self.positions) // 3
+        c, sn = math.cos(angle), math.sin(angle)
+        for i in range(len(temp.positions) // 3):
+            x, y, z = temp.positions[i * 3:i * 3 + 3]
+            nx, ny, nz = temp.normals[i * 3:i * 3 + 3]
+            self.vertex(
+                (center[0] + x * c - y * sn, center[1] + x * sn + y * c, center[2] + z),
+                (nx * c - ny * sn, nx * sn + ny * c, nz),
+                (temp.uvs[i * 2], temp.uvs[i * 2 + 1]),
+            )
+        for idx in temp.indices:
+            self.indices.append(base + idx)
+
     def loft(self, rings, uv_u_scale=1.0, uv_v_scale=1.0, cap_start=True, cap_end=True):
         """Lofts a sequence of closed 3D polygon rings along Z with outward normals."""
         ring_count = len(rings)
@@ -173,9 +190,11 @@ class Mesh:
                 sn = (s + 1) % seg_count
                 n = v_norm(v_cross(v_sub(r0[s], center), v_sub(r0[sn], center)))
                 a, b = (r0[s], r0[sn]) if v_dot(n, out_dir) >= 0.0 else (r0[sn], r0[s])
-                ic = self.vertex(center, out_dir, (0.5, 0.5))
-                ia = self.vertex(a, out_dir, (0.5 + 0.45 * math.cos(s), 0.5 + 0.45 * math.sin(s)))
-                ib = self.vertex(b, out_dir, (0.5 + 0.45 * math.cos(sn), 0.5 + 0.45 * math.sin(sn)))
+                # Sample the inked corner (0,0) so end caps read as dark
+                # armoured plates instead of bright white triangle fans.
+                ic = self.vertex(center, out_dir, (0.0, 0.0))
+                ia = self.vertex(a, out_dir, (0.0, 0.0))
+                ib = self.vertex(b, out_dir, (0.0, 0.0))
                 self.triangle(ic, ia, ib)
 
         if cap_end:
@@ -196,9 +215,11 @@ class Mesh:
                 sn = (s + 1) % seg_count
                 n = v_norm(v_cross(v_sub(r_last[s], center), v_sub(r_last[sn], center)))
                 a, b = (r_last[s], r_last[sn]) if v_dot(n, out_dir) >= 0.0 else (r_last[sn], r_last[s])
-                ic = self.vertex(center, out_dir, (0.5, 0.5))
-                ia = self.vertex(a, out_dir, (0.5 + 0.45 * math.cos(s), 0.5 + 0.45 * math.sin(s)))
-                ib = self.vertex(b, out_dir, (0.5 + 0.45 * math.cos(sn), 0.5 + 0.45 * math.sin(sn)))
+                # Sample the inked corner (0,0) so end caps read as dark
+                # armoured plates instead of bright white triangle fans.
+                ic = self.vertex(center, out_dir, (0.0, 0.0))
+                ia = self.vertex(a, out_dir, (0.0, 0.0))
+                ib = self.vertex(b, out_dir, (0.0, 0.0))
                 self.triangle(ic, ia, ib)
 
     def cylinder_z(self, cx, cy, z0, z1, r0, r1, segments=16, cap_start=True, cap_end=True, uv_u=2.0, uv_v=1.0):
@@ -467,10 +488,10 @@ def make_canopy_png(size: int = 128) -> bytes:
                 r, g, b = 20, 26, 36
             else:
                 diag = abs((u * 0.8 + v * 0.6) - 0.55)
-                glint = 75 if diag < 0.045 else (32 if diag < 0.11 else 0)
+                glint = 42 if diag < 0.045 else (18 if diag < 0.11 else 0)
                 r = clamp_byte(24 + glint * 0.6)
                 g = clamp_byte(75 + glint * 0.9)
-                b = clamp_byte(130 + glint)
+                b = clamp_byte(95 + glint)
             idx = x * 4
             row[idx] = r
             row[idx + 1] = g
@@ -491,8 +512,8 @@ def make_thruster_core_png(size: int = 128) -> bytes:
             dx = (x - half) / half
             dist = min(1.0, math.sqrt(dx * dx + dy * dy))
             core = (1.0 - dist) ** 1.6
-            r = clamp_byte(30 + 225 * (core ** 2.2))
-            g = clamp_byte(140 + 115 * core)
+            r = clamp_byte(25 + 175 * (core ** 2.2))
+            g = clamp_byte(110 + 110 * core)
             b = 255
             idx = x * 4
             row[idx] = r
@@ -590,12 +611,12 @@ def build_ship() -> bytes:
     canopy_mat = glb.material("canopy-glass", [0.22, 0.55, 0.85, 1.0], 0.15, 0.18, image=canopy_img)
     housing_mat = glb.material("engine-housing", [0.26, 0.29, 0.36, 1.0], 0.75, 0.38, image=hull_img)
     core_mat = glb.material(
-        "engine-core", [0.45, 0.92, 1.0, 1.0], 0.0, 0.9,
-        emissive=[0.35, 0.88, 1.0], image=core_img
+        "engine-core", [0.35, 0.75, 1.0, 1.0], 0.0, 0.9,
+        emissive=[0.18, 0.55, 0.85], image=core_img
     )
     nav_mat = glb.material(
-        "nav-lights", [1.0, 0.25, 0.15, 1.0], 0.0, 0.8,
-        emissive=[1.0, 0.22, 0.10]
+        "nav-lights", [0.8, 0.2, 0.12, 1.0], 0.0, 0.8,
+        emissive=[0.6, 0.12, 0.06], image=hull_img
     )
 
     hull = Mesh()
@@ -704,14 +725,11 @@ def build_station() -> bytes:
 
     hull_mat = glb.material("station-hull", [0.55, 0.60, 0.70, 1.0], 0.60, 0.42, image=hull_img)
     gold_mat = glb.material("station-trim", [0.72, 0.58, 0.28, 1.0], 0.78, 0.28, image=hull_img)
-    win_mat = glb.material(
-        "station-windows", [0.95, 0.88, 0.72, 1.0], 0.2, 0.5,
-        emissive=[0.55, 0.45, 0.28], image=win_img
-    )
-    beacon_mat = glb.material(
-        "station-beacons", [0.35, 0.88, 1.0, 1.0], 0.0, 0.9,
-        emissive=[0.30, 0.82, 1.0]
-    )
+    # Windows use a bright albedo texture (cyan/amber bands) rather than the
+    # additive emissive pass: that pass skips depth writes and double-draws
+    # back faces, which produced blue/white artifacts over the hull.
+    win_mat = glb.material("station-windows", [0.95, 0.88, 0.72, 1.0], 0.2, 0.5, image=win_img)
+    beacon_mat = glb.material("station-beacons", [0.35, 0.75, 0.95, 1.0], 0.0, 0.5, image=win_img)
 
     hub = Mesh()
     hub.cylinder_z(0.0, 0.0, -1.10, 1.10, 0.95, 0.95, segments=12, uv_u=3.0, uv_v=2.0)
@@ -721,23 +739,27 @@ def build_station() -> bytes:
     hub.cylinder_z(0.0, 0.0, -1.85, -1.10, 0.68, 0.78, segments=12, uv_u=2.0, uv_v=1.0)
     hub.cylinder_z(0.0, 0.0, -3.10, -1.85, 0.05, 0.14, segments=8,  uv_u=1.0, uv_v=1.0)
 
+    # Six radial trusses physically bridge the hub, both habitat rings and
+    # the outer docking pods. Everything overlaps at a joint so no piece
+    # floats free (the earlier axis-aligned bars looked disconnected).
     for i in range(6):
         ang = i * (math.pi / 3.0)
         ca, sa = math.cos(ang), math.sin(ang)
-        for step_r in (1.45, 2.35, 3.10):
-            hub.box((step_r * ca, step_r * sa, 0.0), (0.85, 0.24, 0.24), uv_scale=(1.0, 0.4))
-        perp_x, perp_y = -sa * 0.14, ca * 0.14
-        for offset in (-1.0, 1.0):
-            hub.box(
-                (2.15 * ca + perp_x * offset, 2.15 * sa + perp_y * offset, 0.14),
-                (2.35, 0.08, 0.08),
-            )
-            hub.box(
-                (2.15 * ca + perp_x * offset, 2.15 * sa + perp_y * offset, -0.14),
-                (2.35, 0.08, 0.08),
-            )
-        pod_r = 3.68
-        hub.box((pod_r * ca, pod_r * sa, 0.0), (0.58, 0.52, 0.62), uv_scale=(1.0, 1.0))
+
+        def at(radius, perp=0.0, z=0.0):
+            return (radius * ca - perp * sa, radius * sa + perp * ca, z)
+
+        # Continuous main spar: hub (r=0.9) -> inner ring (2.55) -> outer ring
+        # (3.35) -> pod (3.75). One beam, so it can never read as floating.
+        hub.box_rotated(at(2.30), (2.90, 0.20, 0.22), ang)
+        # Twin parallel transverse rails above/below the spar.
+        for z in (-0.14, 0.14):
+            hub.box_rotated(at(2.30, z=z), (2.70, 0.07, 0.07), ang)
+        # Cross-brace tying the rails into a rigid truss at mid-span.
+        hub.box_rotated(at(1.75), (0.10, 0.46, 0.08), ang)
+        hub.box_rotated(at(2.95), (0.10, 0.46, 0.08), ang)
+        # Docking pod at the end, overlapping the outer ring and the spar.
+        hub.box_rotated(at(3.72), (0.62, 0.54, 0.62), ang)
 
     glb.mesh("station-hub", hub, hull_mat)
 
@@ -750,8 +772,8 @@ def build_station() -> bytes:
     for i in range(6):
         ang = i * (math.pi / 3.0) + (math.pi / 6.0)
         ca, sa = math.cos(ang), math.sin(ang)
-        trim.box((2.55 * ca, 2.55 * sa, 0.36), (0.42, 0.42, 0.28), uv_scale=(0.8, 0.5))
-        trim.box((2.55 * ca, 2.55 * sa, -0.36), (0.42, 0.42, 0.28), uv_scale=(0.8, 0.5))
+        trim.box((2.55 * ca, 2.55 * sa, 0.30), (0.42, 0.42, 0.20), uv_scale=(0.8, 0.5))
+        trim.box((2.55 * ca, 2.55 * sa, -0.30), (0.42, 0.42, 0.20), uv_scale=(0.8, 0.5))
     trim.torus_ring_xy(major_r=0.72, tube_rx=0.07, tube_rz=0.07, major_segs=24, tube_sides=6, uv_u=6.0)
     glb.mesh("station-trim", trim, gold_mat)
 

@@ -37,13 +37,52 @@ float3 rayDirection(float2 uv)
     return normalize(farP.xyz / farP.w - nearP.xyz / nearP.w);
 }
 
-// Cheap deterministic surface pattern in the planet's rotating frame.
+// Deterministic hash / value noise used to sculpt continents and ridges.
+float hash13(float3 p)
+{
+    p = frac(p * 0.1031);
+    p += dot(p, p.yzx + 33.33);
+    return frac((p.x + p.y) * p.z);
+}
+
+float valueNoise(float3 p)
+{
+    float3 i = floor(p);
+    float3 f = frac(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float n000 = hash13(i + float3(0, 0, 0));
+    float n100 = hash13(i + float3(1, 0, 0));
+    float n010 = hash13(i + float3(0, 1, 0));
+    float n110 = hash13(i + float3(1, 1, 0));
+    float n001 = hash13(i + float3(0, 0, 1));
+    float n101 = hash13(i + float3(1, 0, 1));
+    float n011 = hash13(i + float3(0, 1, 1));
+    float n111 = hash13(i + float3(1, 1, 1));
+    return lerp(lerp(lerp(n000, n100, f.x), lerp(n010, n110, f.x), f.y),
+                lerp(lerp(n001, n101, f.x), lerp(n011, n111, f.x), f.y), f.z);
+}
+
+float fbm(float3 p)
+{
+    float v = 0.0;
+    float amplitude = 0.5;
+    for (int i = 0; i < 5; ++i)
+    {
+        v += amplitude * valueNoise(p);
+        p = p * 2.03 + float3(11.3, 7.1, 3.7);
+        amplitude *= 0.5;
+    }
+    return v;
+}
+
+// Continents (large fbm), ridged mountain chains and fine rock detail in the
+// planet's rotating frame. The range stays near [-1, 1] for the ink thresholds.
 float surfacePattern(float3 p)
 {
-    float v = 0.5 * sin(p.x * 5.0 + sin(p.z * 3.0) * 2.0);
-    v += 0.3 * sin(p.y * 7.0 + p.z * 4.0);
-    v += 0.2 * sin(p.x * 11.0 - p.y * 9.0);
-    return v;
+    float continents = (fbm(p * 1.7) - 0.5) * 2.1;
+    float ridge = 1.0 - abs(fbm(p * 4.3 + float3(5.2, 1.3, 9.7)) * 2.0 - 1.0);
+    float detail = (fbm(p * 10.0 + float3(3.1, 8.7, 2.2)) - 0.5) * 0.28;
+    return continents + (ridge - 0.5) * 0.45 + detail;
 }
 
 [shader("fragment")]
@@ -96,6 +135,11 @@ float4 fragmentMain(VSOutput input, out float depth : SV_Depth) : SV_Target
     // Oceans vs land, with a second tonal step inside the continents.
     color *= lerp(0.55, 1.10, land);
     color *= lerp(0.88, 1.06, smoothstep(0.08, 0.42, pattern));
+
+    // Inked ridge lines inside landmasses read as mountain/rock formations.
+    float rock = 1.0 - abs(surfacePattern(local * 2.4 + float3(4.0, 0.0, 0.0)) * 1.6);
+    float rockInk = 1.0 - smoothstep(0.0, 0.05 + fwidth(rock), abs(rock));
+    color = lerp(color, color * 0.55, rockInk * land * 0.55);
 
     // Ink the coastline and the terminator so the night side keeps its shape.
     color = lerp(color, float3(0.025, 0.045, 0.085), coast * 0.75);

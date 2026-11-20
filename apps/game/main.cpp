@@ -114,6 +114,77 @@ starforge::math::Vec3d upFromQuat(starforge::math::Vec4f q)
                                    static_cast<float>(v.z())};
 }
 
+// Compact low-poly fighter used for sector NPCs (nose = -Z). Built once into
+// a renderer-owned Toon mesh; hostile/neutral colour is a per-draw param.
+[[nodiscard]] std::expected<starforge::Toon::ToonMesh, std::string>
+makeNpcFighterMesh(starforge::Toon& toon)
+{
+    using starforge::math::Vec3f;
+    std::vector<starforge::Toon::MeshVertex> vertices;
+    auto triangle = [&](Vec3f a, Vec3f b, Vec3f c) {
+        const Vec3f ab{b.x() - a.x(), b.y() - a.y(), b.z() - a.z()};
+        const Vec3f ac{c.x() - a.x(), c.y() - a.y(), c.z() - a.z()};
+        Vec3f n{ab.y() * ac.z() - ab.z() * ac.y(),
+                ab.z() * ac.x() - ab.x() * ac.z(),
+                ab.x() * ac.y() - ab.y() * ac.x()};
+        n = starforge::math::normalize(n);
+        for (const auto& p : {a, b, c})
+            vertices.push_back({p, n, n});
+    };
+
+    const Vec3f nose{0.0f, 0.0f, -1.5f}, tail{0.0f, 0.0f, 0.95f};
+    const Vec3f top{0.0f, 0.34f, 0.15f}, bottom{0.0f, -0.24f, 0.15f};
+    const Vec3f left{-0.52f, 0.0f, 0.25f}, right{0.52f, 0.0f, 0.25f};
+    const Vec3f tipL{-1.55f, -0.04f, 0.70f}, tipR{1.55f, -0.04f, 0.70f};
+    // Tapered fuselage.
+    triangle(nose, top, left);
+    triangle(nose, right, top);
+    triangle(nose, left, bottom);
+    triangle(nose, bottom, right);
+    triangle(tail, left, top);
+    triangle(tail, top, right);
+    triangle(tail, bottom, left);
+    triangle(tail, right, bottom);
+    // Swept delta wings with a slight dihedral.
+    triangle(left, tipL, tail);
+    triangle(right, tail, tipR);
+    triangle(left, tail, tipL);
+    triangle(right, tipR, tail);
+    return toon.createMesh(vertices);
+}
+
+// Low-poly sphere used as the shield-hit bubble (the built-in cube read as a
+// solid blue block). Rendered through the additive glow pass.
+[[nodiscard]] std::expected<starforge::Toon::ToonMesh, std::string>
+makeShieldMesh(starforge::Toon& toon)
+{
+    using starforge::math::Vec3f;
+    std::vector<starforge::Toon::MeshVertex> vertices;
+    constexpr int kRings = 8, kSegments = 16;
+    auto point = [](int ring, int segment) {
+        const float phi = static_cast<float>(ring) / kRings * 3.14159265f;
+        const float theta = static_cast<float>(segment) / kSegments * 6.2831853f;
+        const Vec3f n{std::sin(phi) * std::cos(theta), std::cos(phi),
+                      std::sin(phi) * std::sin(theta)};
+        return std::pair{n, n};
+    };
+    auto push = [&](int ring, int segment) {
+        const auto [n, o] = point(ring, segment);
+        vertices.push_back({n, n, o});
+    };
+    for (int r = 0; r < kRings; ++r)
+        for (int s = 0; s < kSegments; ++s)
+        {
+            push(r, s);
+            push(r + 1, s);
+            push(r + 1, s + 1);
+            push(r, s);
+            push(r + 1, s + 1);
+            push(r, s + 1);
+        }
+    return toon.createMesh(vertices);
+}
+
 // M17: authored glTF model with per-part LODs, streamed mips and toon
 // material mapping. Everything here uses the public API only.
 struct AuthoredPart
@@ -435,6 +506,12 @@ int main()
     logInfo(("[ASSET] loaded " + std::to_string(shipModel.parts.size()) +
              " ship parts, " + std::to_string(stationModel.parts.size()) +
              " station parts").c_str());
+    auto npcFighter = makeNpcFighterMesh(*toon);
+    if (!npcFighter)
+        logError(("[ASSET] NPC fighter mesh: " + npcFighter.error()).c_str());
+    auto shieldMesh = makeShieldMesh(*toon);
+    if (!shieldMesh)
+        logError(("[ASSET] shield mesh: " + shieldMesh.error()).c_str());
 
     auto nebula = starforge::Nebula::create(*renderer, {});
     if (!nebula)
@@ -561,13 +638,19 @@ int main()
     // damage is resolved by GameSimulation; these are purely cosmetic tracers.
     struct LaserBolt
     {
-        float x = 0.0f;
-        float y = 0.0f;
-        float z = -2.6f;
+        starforge::math::Vec3f position{};
+        starforge::math::Vec3f direction{0.0f, 0.0f, -1.0f};
         float life = 0.0f;
     };
     std::vector<LaserBolt> laserBolts;
     float boltCooldown = 0.0f;
+    // Incoming enemy fire tracers (ship-local space, attacker -> player).
+    struct IncomingShot
+    {
+        starforge::math::Vec3f from{};
+        float life = 0.0f;
+    };
+    std::vector<IncomingShot> incomingShots;
 
     while (!app->shouldClose() && !quitRequested)
     {
@@ -963,25 +1046,47 @@ int main()
                 logError(("[ASSET] reload failed: " + reloadError).c_str());
         }
 
-        // M17 polish: spawn/advance cosmetic laser bolts when firing.
+        // M17 polish: spawn tracers aimed at the actual selected target so
+        // the visual beam agrees with the damage resolution in GameSimulation.
         if (!flight.paused)
         {
             boltCooldown = std::max(0.0f, boltCooldown - frameDt);
             if (flight.firePrimary && boltCooldown <= 0.0f)
             {
                 boltCooldown = 0.12f;
-                laserBolts.push_back({-0.72f, 0.0f, -1.2f, 0.9f});
-                laserBolts.push_back({0.72f, 0.0f, -1.2f, 0.9f});
+                starforge::math::Vec3f aim{};
+                bool haveAim = false;
+                if (const auto* contact = targeting.selected())
+                    for (const auto& npc : simulation.npcs())
+                        if (npc.alive && npc.id == contact->id)
+                        {
+                            aim = {npc.position.x, npc.position.y, npc.position.z};
+                            haveAim = true;
+                            break;
+                        }
+                for (const float bx : {-0.72f, 0.72f})
+                {
+                    const starforge::math::Vec3f start{bx, 0.0f, -1.2f};
+                    const auto direction = haveAim
+                        ? starforge::math::normalize(aim - start)
+                        : starforge::math::Vec3f{0.0f, 0.0f, -1.0f};
+                    laserBolts.push_back({start, direction, 0.9f});
+                }
             }
             for (auto& bolt : laserBolts)
             {
-                bolt.z -= 220.0f * frameDt; // ~220 m/s travel in ship-local space
+                bolt.position = bolt.position + bolt.direction * (220.0f * frameDt);
                 bolt.life -= frameDt;
             }
             laserBolts.erase(
                 std::remove_if(laserBolts.begin(), laserBolts.end(),
                                [](const LaserBolt& b) { return b.life <= 0.0f; }),
                 laserBolts.end());
+            for (auto& shot : incomingShots) shot.life -= frameDt;
+            incomingShots.erase(
+                std::remove_if(incomingShots.begin(), incomingShots.end(),
+                               [](const IncomingShot& s) { return s.life <= 0.0f; }),
+                incomingShots.end());
         }
 
         // M17: pick the station LOD from the real ship-to-station range.
@@ -1062,6 +1167,15 @@ int main()
                 case starforge::game::GameEvent::Type::PlayerHullHit:
                     shieldFlash = 0.35f;
                     toasts.push(starforge::game::CommsChannel::Combat, "", "SHIELD HIT", 2.0f);
+                    // Show the incoming tracer from the NPC that fired.
+                    for (const auto& attacker : simulation.npcs())
+                        if (attacker.alive && attacker.id == event.sourceId)
+                        {
+                            incomingShots.push_back({
+                                {attacker.position.x, attacker.position.y, attacker.position.z},
+                                0.45f});
+                            break;
+                        }
                     if (hitVoice.has_value()) audio->play(*hitVoice, true);
                     break;
                 case starforge::game::GameEvent::Type::HostileDestroyed:
@@ -1296,7 +1410,19 @@ int main()
         for (const auto& npc : simulation.npcs())
         {
             if (!npc.alive) continue;
+            // Orient the fighter toward the player so it reads as a ship,
+            // not an axis-aligned box. Nose is -Z in object space.
+            const starforge::math::Vec3f toward = starforge::math::normalize(
+                starforge::math::Vec3f{-npc.position.x, -npc.position.y, -npc.position.z});
+            const starforge::math::Vec3f worldUp{0.0f, 1.0f, 0.0f};
+            starforge::math::Vec3f right = starforge::math::cross(toward, worldUp);
+            right = starforge::math::length(right) > 1e-4f
+                ? starforge::math::normalize(right) : starforge::math::Vec3f{1.0f, 0.0f, 0.0f};
+            const auto correctedUp = starforge::math::cross(right, toward);
             starforge::math::Mat4f hm(1.0f);
+            hm.columns[0] = {right.x(), right.y(), right.z(), 0.0f};
+            hm.columns[1] = {correctedUp.x(), correctedUp.y(), correctedUp.z(), 0.0f};
+            hm.columns[2] = {-toward.x(), -toward.y(), -toward.z(), 0.0f};
             hm.columns[3] = {npc.position.x, npc.position.y, npc.position.z, 1.0f};
             NpcRender r;
             r.context.viewProj = viewProj * hm;
@@ -1317,8 +1443,9 @@ int main()
             }
             r.params.bandCount = 3.0f;
             r.params.rimStrength = 0.7f;
-            r.params.outlineWidth = 2.0f;
+            r.params.outlineWidth = 1.5f;
             r.params.capabilities = npc.shield > 0.0f ? 2u : 0u; // fresnel shield
+            r.params.fresnelColor = {0.35f, 0.8f, 1.0f, 0.45f};
             npcRenders.push_back(std::move(r));
         }
 
@@ -1347,15 +1474,23 @@ int main()
         {
             auto fm = starforge::math::Mat4f(1.0f);
             // Keep the bubble well inside the 8 m chase-camera distance.
-            const float s = 1.2f + (0.35f - shieldFlash) * 1.8f;
+            const float s = 2.1f + (0.35f - shieldFlash) * 1.2f;
             fm.columns[0][0] = fm.columns[1][1] = fm.columns[2][2] = s;
             flashContext.viewProj = viewProj * fm;
             flashContext.modelView = view * fm;
             flashContext.lightDirectionView = toonContext.lightDirectionView;
             flashContext.resolution = {static_cast<float>(size.width), static_cast<float>(size.height)};
-            flashParams.baseColor = {0.1f, 0.4f, 1.0f, 1.0f};
-            flashParams.capabilities = 2u; // fresnel shield
-            flashParams.emissiveColor = {0.2f, 0.6f, 1.0f, 0.7f};
+            // Additive glow on a spherical mesh: a soft cyan shell rather
+            // than an opaque blue cube occluding the ship.
+            const float strength = std::clamp(shieldFlash / 0.35f, 0.0f, 1.0f);
+            // Zero every diffuse term: only the faint emissive shell shows.
+            flashParams.baseColor = {0.0f, 0.0f, 0.0f, 1.0f};
+            flashParams.shadowColor = {0.0f, 0.0f, 0.0f, 1.0f};
+            flashParams.midColor = {0.0f, 0.0f, 0.0f, 0.0f};
+            flashParams.rimStrength = 0.0f;
+            flashParams.bandCount = 2.0f;
+            flashParams.capabilities = 1u; // additive glow, no depth write
+            flashParams.emissiveColor = {0.10f, 0.42f, 1.0f, 0.03f + 0.10f * strength};
             flashParams.outlineWidth = 0.0f;
         }
 
@@ -1671,14 +1806,26 @@ int main()
                     }
                 }
             }
-            // M17 polish: cyan laser tracers in front of the ship.
+            // Cyan player tracers, oriented along their actual flight vector.
+            auto orientBeam = [](starforge::math::Mat4f& matrix,
+                                 const starforge::math::Vec3f& direction,
+                                 const starforge::math::Vec3f& position,
+                                 float length) {
+                const auto fwd = starforge::math::normalize(direction);
+                auto right = starforge::math::cross(fwd, starforge::math::Vec3f{0.0f, 1.0f, 0.0f});
+                right = starforge::math::length(right) > 1e-4f
+                    ? starforge::math::normalize(right) : starforge::math::Vec3f{1.0f, 0.0f, 0.0f};
+                const auto up = starforge::math::cross(right, fwd);
+                matrix = starforge::math::Mat4f(1.0f);
+                matrix.columns[0] = {right.x() * 0.22f, right.y() * 0.22f, right.z() * 0.22f, 0.0f};
+                matrix.columns[1] = {up.x() * 0.22f, up.y() * 0.22f, up.z() * 0.22f, 0.0f};
+                matrix.columns[2] = {-fwd.x() * length, -fwd.y() * length, -fwd.z() * length, 0.0f};
+                matrix.columns[3] = {position.x(), position.y(), position.z(), 1.0f};
+            };
             for (const auto& bolt : laserBolts)
             {
-                auto boltMatrix = starforge::math::Mat4f(1.0f);
-                boltMatrix.columns[0][0] = 0.22f;
-                boltMatrix.columns[1][1] = 0.22f;
-                boltMatrix.columns[2][2] = 2.0f;
-                boltMatrix.columns[3] = {bolt.x, bolt.y, bolt.z, 1.0f};
+                starforge::math::Mat4f boltMatrix;
+                orientBeam(boltMatrix, bolt.direction, bolt.position, 2.0f);
                 starforge::Toon::Context boltContext;
                 boltContext.viewProj = viewProj * model * boltMatrix;
                 boltContext.modelView = view * model * boltMatrix;
@@ -1691,9 +1838,35 @@ int main()
                 boltParams.outlineWidth = 0.0f;
                 toon->record(fc, boltContext, boltParams);
             }
-            for (const auto& r : npcRenders) toon->record(fc, r.context, r.params);
+            // Enemy fire: red tracers from the attacker toward the player.
+            for (const auto& shot : incomingShots)
+            {
+                const auto toPlayer = starforge::math::Vec3f{
+                    -shot.from.x(), -shot.from.y(), -shot.from.z()};
+                starforge::math::Mat4f shotMatrix;
+                orientBeam(shotMatrix, toPlayer, shot.from,
+                           starforge::math::length(toPlayer));
+                starforge::Toon::Context shotContext;
+                shotContext.viewProj = viewProj * model * shotMatrix;
+                shotContext.modelView = view * model * shotMatrix;
+                shotContext.lightDirectionView = toonContext.lightDirectionView;
+                shotContext.resolution = toonContext.resolution;
+                starforge::Toon::Params shotParams;
+                shotParams.capabilities = 1u;
+                shotParams.baseColor = {0.10f, 0.02f, 0.01f, 1.0f};
+                shotParams.emissiveColor = {0.9f, 0.18f, 0.08f,
+                                            std::min(1.0f, shot.life * 4.0f)};
+                shotParams.outlineWidth = 0.0f;
+                toon->record(fc, shotContext, shotParams);
+            }
+            if (npcFighter)
+                for (const auto& r : npcRenders)
+                    toon->recordMesh(fc, r.context, r.params, *npcFighter);
+            else
+                for (const auto& r : npcRenders) toon->record(fc, r.context, r.params);
             if (flight.firePrimary) toon->record(fc, muzzleContext, muzzleParams);
-            if (shieldFlash > 0.0f) toon->record(fc, flashContext, flashParams);
+            if (shieldFlash > 0.0f && shieldMesh)
+                toon->recordMesh(fc, flashContext, flashParams, *shieldMesh);
             if (explosionTimer > 0.0f) toon->record(fc, boomContext, boomParams);
             // One instanced draw (+ outline + impostor tiers) replaces the
             // old 64 per-rock Toon draws (M15.0.9).
