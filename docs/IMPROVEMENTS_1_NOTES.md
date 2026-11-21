@@ -79,6 +79,27 @@ Goldens refreshed for the planet and rock shaders. Debug and Release: 12/12.
    primitive used on prominent armour/housing parts, and emissive mask textures
    wired through glTF `emissiveTexture` for engine cores and station windows.
 
+## Follow-up: red station lamps
+
+The lamps were invisible or rendered as a pink scribble. Two root causes:
+
+1. **Emissive pipeline**: the beacon material's `emissiveFactor` routed the
+   whole mesh through the additive glow pass (ONE/ONE, no depth write, no
+   backface culling). Overlapping lamps at each hub tip piled into a saturated
+   pink blob, and lamps behind the docking pods disappeared. The material is
+   now opaque and the flash is driven through base/shadow/mid colours, so
+   every face of every lamp is the same bright red regardless of key light.
+2. **Vertex stride mismatch** (`main.cpp:loadAuthoredModel`): `createMeshFromAsset`
+   always uploads 80-byte textured vertices (1x1 white fallback), but a
+   texture-free material has the Textured capability bit clear, making the
+   shader read the 48-byte untextured stride. Most lamps were garbage. The
+   Textured bit is now forced on for all authored meshes. Also moved the
+   pod-tip lamps on top of their docking pods (wrapping the outer face) so
+   they read from any angle.
+
+Close-up visual check confirms six clean red lamps on the spoke ends plus
+the hub-tip lamps, pulsing smoothly. Debug + Release: 12/12.
+
 ## Risk review (follow-up feedback)
 
 1. **8-bit clipping** (`shaders/graphics/output_shoulder.slang`): added a shared

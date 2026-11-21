@@ -245,6 +245,12 @@ makeToonParams(const starforge::ToonMaterialDesc& desc, starforge::MaterialVaria
 
         AuthoredPart part;
         part.material = starforge::mapAssetMaterial(mesh.material);
+        // Every authored mesh is uploaded as 80-byte textured vertices
+        // (createMeshFromAsset supplies a 1x1 white fallback for materials
+        // without a base-colour map). Keep the Textured capability bit set so
+        // toon.slang uses the matching stride - otherwise texture-free parts
+        // such as the navigation lamps read garbage vertices and vanish.
+        part.material.capabilities |= 32u;
         if (mesh.material.hasBaseColorTexture && !mesh.material.textureRGBA.empty())
         {
             auto texture = starforge::StreamingTexture::fromRGBA(
@@ -1896,13 +1902,24 @@ int main()
                                                  starforge::MaterialVariant::Default);
                     if (part.material.name == "station-beacons")
                     {
-                        // Smooth red navigation flash. The glTF material is
-                        // emissive and texture-free, so all six faces glow and
-                        // the pulse reads from any angle at 800-1200 m.
+                        // Smooth red navigation flash on the OPAQUE toon path.
+                        // The additive glow pipeline skips depth writes and
+                        // backface culling, which made overlapping lamps pile
+                        // into a pink scribble and hide behind the pods.
+                        // Modulate every ramp stop so the lamp stays red from
+                        // any angle, including its shadow side.
                         const float pulse = 0.5f + 0.5f * std::sin(time * 2.3f);
                         const float blink = 0.12f + 0.88f * pulse * pulse;
-                        params.baseColor = {1.0f, 0.10f, 0.06f, 1.0f};
-                        params.emissiveColor = {1.0f, 0.07f, 0.03f, blink * 1.8f};
+                        params.capabilities &= ~1u; // never the additive pass
+                        // Every ramp stop is the SAME red: a navigation lamp is
+                        // self-lit, so outward faces in shadow must stay just
+                        // as bright as faces pointing at the key light.
+                        const starforge::math::Vec4f lampColor{
+                            blink, 0.10f * blink, 0.05f * blink, 1.0f};
+                        params.baseColor = lampColor;
+                        params.shadowColor = lampColor;
+                        params.midColor = lampColor; // w=1 -> custom ramp stop
+                        params.emissiveColor = {0.0f, 0.0f, 0.0f, 0.0f};
                         params.outlineWidth = 0.0f;
                     }
                     toon->recordMesh(fc, stationContext, params, mesh);

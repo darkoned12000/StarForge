@@ -792,11 +792,13 @@ def build_station() -> bytes:
     # back faces, which produced blue/white artifacts over the hull.
     win_mat = glb.material("station-windows", [1.0, 1.0, 0.92, 1.0], 0.2, 0.5,
                            image=win_img)
-    # Texture-free + emissive: toon.slang modulates emissive by the albedo
-    # texture when one is present, which left the unlit faces of the old
-    # window-textured lamps dark. A plain emissive lamp glows on all 6 sides.
-    beacon_mat = glb.material("station-beacons", [1.0, 0.14, 0.08, 1.0], 0.0, 0.9,
-                              emissive=[1.0, 0.08, 0.03])
+    # Opaque, texture-free red lamps. An emissiveFactor here would route the
+    # whole mesh through the additive glow pipeline (ONE/ONE, no depth write,
+    # no backface culling): overlapping lamps at the hub tips then pile up into
+    # a saturated pink scribble, and lamps behind the docking pods vanish.
+    # Keeping the material opaque gives clean, depth-correct red on all sides;
+    # the game code drives the flash through base/shadow/mid colours.
+    beacon_mat = glb.material("station-beacons", [1.0, 0.14, 0.08, 1.0], 0.0, 0.9)
 
     hub = Mesh()
     hub.cylinder_z(0.0, 0.0, -1.10, 1.10, 0.95, 0.95, segments=12, uv_u=3.0, uv_v=2.0)
@@ -845,18 +847,20 @@ def build_station() -> bytes:
     glb.mesh("station-trim", trim, gold_mat)
 
     beacons = Mesh()
-    # Big emissive navigation lamps at both ends of the hub. Bigger and
-    # texture-free so the slow red flash reads from any angle at 800-1200 m.
-    # A centre lamp plus four around each cap means one is always visible
-    # even when the station is edge-on to the camera.
+    # Big navigation lamps at both ends of the hub, plus one on each outer
+    # docking pod. Kept OUTSIDE the pod hulls (pod centre r=3.72, half-size
+    # 0.31 -> outer face r=4.03) so no lamp is buried inside opaque geometry.
     for z in (3.88, -3.14):
         beacons.box((0.0, 0.0, z), (0.55, 0.55, 0.55))
         for ang in (0.0, math.pi / 2.0, math.pi, 3.0 * math.pi / 2.0):
-            beacons.box((0.42 * math.cos(ang), 0.42 * math.sin(ang), z),
-                        (0.24, 0.24, 0.24))
+            beacons.box((0.62 * math.cos(ang), 0.62 * math.sin(ang), z),
+                        (0.22, 0.22, 0.22))
+    # Pod-tip lamps: a slightly larger cube centred ON each docking pod so it
+    # wraps the pod's outer face. A lamp merely placed beyond the pod (r=4.25)
+    # is entirely hidden behind it when the station is viewed obliquely.
     for i in range(6):
         ang = i * (math.pi / 3.0)
-        beacons.box((4.02 * math.cos(ang), 4.02 * math.sin(ang), 0.0), (0.42, 0.42, 0.42))
+        beacons.box((3.72 * math.cos(ang), 3.72 * math.sin(ang), 0.0), (0.72, 0.72, 0.72))
     glb.mesh("station-beacons", beacons, beacon_mat)
 
     return glb.build()
