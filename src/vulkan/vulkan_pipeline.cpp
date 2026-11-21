@@ -24,12 +24,14 @@ GraphicsPipeline::create(const GraphicsPipelineConfig& config)
     vertStage.stage = VK_SHADER_STAGE_VERTEX_BIT;
     vertStage.module = config.vertexShader;
     vertStage.pName = "main";
+    vertStage.pSpecializationInfo = config.specializationInfo;
 
     VkPipelineShaderStageCreateInfo fragStage{};
     fragStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     fragStage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
     fragStage.module = config.fragmentShader;
     fragStage.pName = "main";
+    fragStage.pSpecializationInfo = config.specializationInfo;
 
     VkPipelineShaderStageCreateInfo stages[] = {vertStage, fragStage};
 

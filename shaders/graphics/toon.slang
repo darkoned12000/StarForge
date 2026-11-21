@@ -3,6 +3,8 @@
 // Geometry is a static cube (36 vertices) until a caller supplies mesh data
 // via pc.vertexAddress. DrawData / PushConstants layouts are unchanged.
 
+#include "output_shoulder.slang"
+
 static const float3 kCubePositions[36] = {
     float3(-0.5,-0.5, 0.5), float3(0.5,-0.5,0.5), float3(0.5,0.5,0.5),
     float3(0.5,0.5,0.5), float3(-0.5,0.5,0.5), float3(-0.5,-0.5,0.5),
@@ -164,15 +166,34 @@ VSOutput vertexMain(uint vertexIndex : SV_VertexID)
         }
     }
 
-    if (pc.mode > 0)
-    {
-        objectPos += outlineNormal * draw.params.z;
-    }
-
     float4 viewPos = mul(draw.modelView, float4(objectPos, 1.0));
     float3 viewNormal = normalize(mul(draw.modelView, float4(objectNormal, 0.0)).xyz);
 
-    output.position = mul(pc.mvp, float4(objectPos, 1.0));
+    float4 clipPos = mul(pc.mvp, float4(objectPos, 1.0));
+    if (pc.mode > 0)
+    {
+        // Screen-space outline: expand in clip XY by a constant pixel width
+        // so thin spokes and distant objects do not become solid ink blobs.
+        // pad0/pad1 carry the viewport size as bit-cast floats.
+        float2 screenDir = mul(pc.mvp, float4(outlineNormal, 0.0)).xy;
+        float dirLen = length(screenDir);
+        screenDir = dirLen > 1e-5f ? screenDir / dirLen : float2(0.0f, 0.0f);
+        float viewportWidth = max(asfloat(pc.pad0), 1.0f);
+        float viewportHeight = max(asfloat(pc.pad1), 1.0f);
+        float2 pxToClip = float2(2.0f / viewportWidth, 2.0f / viewportHeight);
+
+        // Cap the ink at a fraction of the object's projected radius. A tiny
+        // or distant station would otherwise be mostly outline (a 10 px disc
+        // with a 2 px rim reads as a solid black blob).
+        float4 edgeClip = mul(pc.mvp, float4(objectPos + float3(0.5f, 0.0f, 0.0f), 1.0f));
+        float2 centreNdc = clipPos.xy / max(clipPos.w, 1e-5f);
+        float2 edgeNdc = edgeClip.xy / max(edgeClip.w, 1e-5f);
+        float projectedRadiusPx = length((edgeNdc - centreNdc) / pxToClip);
+        float widthPx = min(draw.params.z, projectedRadiusPx * 0.12f);
+        clipPos.xy += screenDir * widthPx * pxToClip * clipPos.w;
+    }
+
+    output.position = clipPos;
     output.normalView = viewNormal;
     output.positionView = viewPos.xyz;
     output.uv = texcoord;
@@ -187,7 +208,9 @@ float4 fragmentMain(VSOutput input) : SV_Target
 
     if (pc.mode > 0)
     {
-        return float4(0.03, 0.03, 0.04, 1.0);
+        // Coloured ink: a dimmed version of the material's own shadow tone.
+        float3 ink = draw.shadowColor.rgb * 0.12f + float3(0.015f, 0.018f, 0.028f);
+        return float4(ink, 1.0);
     }
 
     float3 normal = normalize(input.normalView);
@@ -229,6 +252,14 @@ float4 fragmentMain(VSOutput input) : SV_Target
         ? lerp(draw.shadowColor.rgb, mid, banded * 2.0)
         : lerp(mid, draw.baseColor.rgb, (banded - 0.5) * 2.0);
     diffuse *= sampled.rgb;
+
+    // Cheap hemispheric ambient fill: shadow sides pick up a cool sky tint
+    // instead of flat shadowColor, linking hard-surface objects to the same
+    // environment as the nebula (a baked cubemap would be the full version).
+    float hemi = normal.y * 0.5f + 0.5f;
+    float3 ambient = lerp(float3(0.035f, 0.045f, 0.085f),
+                          float3(0.085f, 0.115f, 0.19f), hemi);
+    diffuse += ambient * (1.0f - banded) * 0.15f;
 
     // Crisp comic specular, masked out inside painted ink lines.
     float3 halfVec = normalize(lightDir + viewDir);
@@ -294,5 +325,5 @@ float4 fragmentMain(VSOutput input) : SV_Target
                       step(0.001, draw.material.w));
     }
 
-    return float4(color, draw.baseColor.a * sampled.a);
+    return float4(outputColor(color), draw.baseColor.a * sampled.a);
 }

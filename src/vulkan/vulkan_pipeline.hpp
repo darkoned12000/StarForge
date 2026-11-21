@@ -33,6 +33,9 @@ struct GraphicsPipelineConfig
     VkBlendFactor blendDstFactor = VK_BLEND_FACTOR_ONE;
     VkBlendFactor blendSrcAlphaFactor = VK_BLEND_FACTOR_ONE;
     VkBlendFactor blendDstAlphaFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    // Shader specialization constants (see vulkan_shader_specialization.hpp).
+    // Must outlive this call; nullptr uses the SPIR-V defaults.
+    const VkSpecializationInfo* specializationInfo = nullptr;
     float viewportWidth = 0.0f;
     float viewportHeight = 0.0f;
 };

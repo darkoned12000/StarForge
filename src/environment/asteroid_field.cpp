@@ -116,16 +116,19 @@ AsteroidMesh generateAsteroidMesh(float radius, std::uint32_t latSegments, std::
             const auto ny = static_cast<float>(-cosT);
             const auto nz = static_cast<float>(sinT * std::sin(phi));
 
-            // Deterministic displacement from the direction seed.
-            // Components are shifted positive before the unsigned cast
-            // (negative float -> uint32 conversion is undefined behavior).
-            const auto uNx = static_cast<std::uint32_t>((nx + 2.0f) * 1000.0f);
-            const auto uNy = static_cast<std::uint32_t>((ny + 2.0f) * 1000.0f);
-            const auto uNz = static_cast<std::uint32_t>((nz + 2.0f) * 1000.0f);
-            const std::uint32_t directionHash = uNx * 73856093u ^ uNy * 19349663u ^ uNz * 83492791u;
-            const std::uint32_t rockSeed = hash32(directionHash ^ hash32(seed + 0x9e3779b9u));
-            const float noise = static_cast<float>(rockSeed) / 4294967296.0f; // [0,1)
-            const float scale = radius * (1.0f + (noise - 0.5f) * 0.5f);
+            // Smooth, low-frequency lobes. The old per-direction hash jumped
+            // +/-25% between neighbouring vertices, which read as a spiky,
+            // jagged silhouette. The seed now only shifts the phase, so the
+            // surface stays coherent while each rock keeps a unique shape.
+            const float sd = static_cast<float>(hash32(seed + 0x9e3779b9u)) / 4294967296.0f;
+            const float p1 = sd * 6.2831853f;
+            const float p2 = sd * 11.1f;
+            const float p3 = sd * 3.7f;
+            const float lobe =
+                0.60f * std::sin(nx * 3.1f + p1) * std::cos(ny * 2.7f - p2) +
+                0.30f * std::sin(ny * 4.3f + nz * 2.1f + p2) +
+                0.20f * std::cos(nz * 3.7f - nx * 1.9f + p3);
+            const float scale = radius * (1.0f + lobe * 0.14f);
 
             mesh.vertices.insert(mesh.vertices.end(),
                                  {nx * scale, ny * scale, nz * scale, 1.0f, nx, ny, nz, 0.0f});

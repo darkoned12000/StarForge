@@ -130,6 +130,9 @@ public:
         VkFormat colorFormat = VK_FORMAT_UNDEFINED;
         VkFormat depthFormat = VK_FORMAT_UNDEFINED;
         std::string shaderDirectory{};
+        // Specialization constants for the toon shaders. HDR offscreen targets
+        // pass vulkan::hdrOutputSpecialization(true) to keep linear values.
+        const VkSpecializationInfo* specializationInfo = nullptr;
     };
 
     [[nodiscard]] static std::expected<ToonRenderer, std::string> create(const CreateInfo& info);

@@ -5,6 +5,7 @@
 #include "vulkan/vulkan_result.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cstddef>
 #include <cstring>
 #include <fstream>
@@ -234,6 +235,7 @@ std::expected<ToonRenderer, std::string> ToonRenderer::create(const CreateInfo& 
         .depthWrite = true,
         .depthCompare = VK_COMPARE_OP_LESS,
         .backfaceCulling = true,
+        .specializationInfo = info.specializationInfo,
         .viewportWidth = 1.0f,
         .viewportHeight = 1.0f,
     });
@@ -249,9 +251,11 @@ std::expected<ToonRenderer, std::string> ToonRenderer::create(const CreateInfo& 
         // The outline pass runs after the base pass and must not write
         // depth, so expanded back faces cannot poke through recesses.
         .depthWrite = false,
-        .depthCompare = VK_COMPARE_OP_LESS,
+        // Screen-space outline keeps the base depth, so equal depth must pass.
+        .depthCompare = VK_COMPARE_OP_LESS_OR_EQUAL,
         .backfaceCulling = false,
         .cullFrontFace = true,
+        .specializationInfo = info.specializationInfo,
         .viewportWidth = 1.0f,
         .viewportHeight = 1.0f,
     });
@@ -280,6 +284,7 @@ std::expected<ToonRenderer, std::string> ToonRenderer::create(const CreateInfo& 
         .blendEnable = true,
         .blendSrcFactor = VK_BLEND_FACTOR_ONE,
         .blendDstFactor = VK_BLEND_FACTOR_ONE,
+        .specializationInfo = info.specializationInfo,
         .viewportWidth = 1.0f,
         .viewportHeight = 1.0f,
     });
@@ -494,22 +499,10 @@ void ToonRenderer::renderMesh(VkCommandBuffer cmd, const ToonRenderContext& cont
     drawData.textureWidth = mesh.textureWidth();
     drawData.textureHeight = mesh.textureHeight();
 
-    // Pixel outline width -> object units (uniform scale assumed). The
-    // shader extrudes the hull in object space; the depth test then keeps
-    // only the silhouette rim. A screen-space xy-only offset (previous
-    // revision) left depth unchanged and let back faces paint over the
-    // base geometry on oblique faces.
-    const auto& translation = context.modelView[3];
-    const float distance = std::sqrt(translation[0] * translation[0] + translation[1] * translation[1] +
-                                     translation[2] * translation[2]);
-    const auto& basis = context.modelView[0];
-    const float scale = std::sqrt(basis[0] * basis[0] + basis[1] * basis[1] + basis[2] * basis[2]);
-    const float height = context.resolution.y > 0.0f ? context.resolution.y : 1.0f;
-    const float outlineObjectWidth =
-        scale > 0.0f ? params.outlineWidth * distance / height * 2.0f / scale : 0.0f;
-
+    // Outline width is now in screen pixels; the shader offsets clip XY by
+    // this amount using the viewport passed through push-constant padding.
     drawData.params = math::Vec4f{std::max(params.bandCount, 2.0f), params.rimStrength,
-                                  outlineObjectWidth, static_cast<float>(params.capabilities)};
+                                   params.outlineWidth, static_cast<float>(params.capabilities)};
 
     // Monotonic slot cursor over framesInFlight * kMaxDrawsPerFrame slots:
     // a slot is never rewritten while an in-flight frame can still read it.
@@ -533,8 +526,12 @@ void ToonRenderer::renderMesh(VkCommandBuffer cmd, const ToonRenderContext& cont
     push.drawDataAddress = drawDataBuffer_->deviceAddress(device_) + slotOffset;
     push.vertexAddress = mesh.deviceAddress();
     push.vertexCount = mesh.vertexCount();
-    // pad0/pad1 were only used by the reverted screen-space outline; the
-    // object-space hull needs no per-frame resolution in push constants.
+    // Screen-space outline needs the viewport size; smuggle it through the
+    // free padding as bit-cast floats (no push-constant range growth).
+    push.pad0 = std::bit_cast<std::uint32_t>(
+        context.resolution.x > 0.0f ? context.resolution.x : 1.0f);
+    push.pad1 = std::bit_cast<std::uint32_t>(
+        context.resolution.y > 0.0f ? context.resolution.y : 1.0f);
 
     const std::uint32_t vertexCount = push.vertexCount > 0 ? push.vertexCount : 36u;
     const bool emissive = (params.capabilities & 1u) != 0;

@@ -3,6 +3,8 @@
 // Push: centerSize(vec4: xy center NDC, z half-size, w aspect) | color |
 //       time, intensity, shape(uint), rotationAngle = 48B.
 
+#include "output_shoulder.slang"
+
 struct PushConstants
 {
     float4 centerSize;
@@ -81,9 +83,16 @@ float4 fragmentMain(VSOutput input) : SV_Target
     }
     else
     {
-        shapeVal = smoothstep(1.0, 0.0, r) + smoothstep(0.35, 0.0, r) * 2.0;
+        // Glow: tight exponential core + a wide, windowed 1/r² halo. A soft
+        // disc (smoothstep) has a hard finite edge and reads as a flat ball.
+        float core = exp(-r * r * 16.0f);
+        float halo = (1.0f / (1.0f + 22.0f * r * r)) * smoothstep(1.0f, 0.6f, r);
+        // Four-point diffraction cross for bright stars / engine flares.
+        float angle = atan2(luv.y, luv.x);
+        float spike = pow(saturate(cos(angle * 4.0f)), 48.0f) * exp(-r * 3.2f);
+        shapeVal = core * 2.4f + halo * 0.75f + spike * 0.9f * flicker;
     }
 
     float3 col = pc.color.rgb * shapeVal * pc.intensity;
-    return float4(col, 0.0); // Additive (ONE, ONE).
+    return float4(outputColor(col), 0.0); // Additive (ONE, ONE).
 }

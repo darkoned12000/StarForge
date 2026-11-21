@@ -79,6 +79,7 @@ function(starforge_add_shader)
                 -matrix-layout-column-major
                 -o "${shader_output}"
         DEPENDS "${SF_SOURCE}"
+                "${CMAKE_SOURCE_DIR}/shaders/graphics/output_shoulder.slang"
         COMMENT "Compiling Slang shader: ${shader_name}"
         VERBATIM
     )

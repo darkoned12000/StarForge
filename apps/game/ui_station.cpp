@@ -28,13 +28,16 @@ std::vector<StationButton> stationButtons()
 {
     // Trade / mission station interface, reached through the proximity dock
     // prompt rather than the old Space toggle.
+    // Tab row occupies y=50..78; keep the first button row clear of it.
+    // "dock" is retained for the headless UI-loop proof but intentionally
+    // hidden in-game - you must already be docked to see this panel.
     return {{"close", "CLOSE", 224.0f, 10.0f, 118.0f, 30.0f},
-            {"buy-5", "BUY 5 ORE", 18.0f, 70.0f, 155.0f, 38.0f},
-            {"sell-5", "SELL 5 ORE", 187.0f, 70.0f, 155.0f, 38.0f},
-            {"dock", "DOCK", 18.0f, 116.0f, 155.0f, 38.0f},
+            {"buy-5", "BUY 5 ORE", 18.0f, 88.0f, 155.0f, 38.0f},
+            {"sell-5", "SELL 5 ORE", 187.0f, 88.0f, 155.0f, 38.0f},
+            {"dock", "DOCK", 18.0f, 352.0f, 155.0f, 38.0f},
             {"accept", "ACCEPT HAUL", 18.0f, 164.0f, 324.0f, 38.0f},
-            {"complete", "COMPLETE HAUL", 18.0f, 208.0f, 324.0f, 38.0f},
-            {"jump", "JUMP TO ALPHA-C", 18.0f, 264.0f, 324.0f, 38.0f},
+            {"complete", "COMPLETE HAUL", 18.0f, 216.0f, 324.0f, 38.0f},
+            {"jump", "JUMP TO ALPHA-C", 18.0f, 268.0f, 324.0f, 38.0f},
             {"undock", "UNDOCK", 18.0f, 324.0f, 324.0f, 38.0f}};
 }
 

@@ -2,10 +2,11 @@
 // push constants only. Stars are pinned to world-space directions (no
 // screen-locked stickers): the fragment shader reconstructs the view
 // direction directly from the camera basis so camera translation cannot
-// shift the sky. Alpha stays opaque (1) because this is the base sky pass;
-// the pipeline created for it has blending disabled.
-// Push: camera basis (right/up/forward) + {time, intensity, aspect,
-// tanHalfFov} = 64 bytes.
+// shift the sky. Alpha stays opaque (1) because this is the base sky pass.
+// Output is linear HDR: bright stars exceed 1.0 so a bloom pass can catch
+// them. Push: camera basis + {time, intensity, aspect, tanHalfFov} = 64 B.
+
+#include "output_shoulder.slang"
 
 struct PushConstants
 {
@@ -34,101 +35,101 @@ VSOutput vertexMain(uint vertexId : SV_VertexID)
     return output;
 }
 
-// 32-bit integer hash for uniform distribution without float precision artifacts
-uint hash32(uint x)
+// PCG hash: avoids the lattice correlation of the old LCG chain.
+uint pcgHash(uint v)
 {
-    x = x * 1664525u + 1013904223u;
-    x ^= x >> 16u;
-    return x;
+    uint state = v * 747796405u + 2891336453u;
+    uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
 }
 
 float hash31(int3 p)
 {
-    uint u = hash32(uint(p.x));
-    u = hash32(u ^ uint(p.y));
-    u = hash32(u ^ uint(p.z));
+    uint u = pcgHash(uint(p.x));
+    u = pcgHash(u ^ uint(p.y) + 0x9e3779b9u);
+    u = pcgHash(u ^ uint(p.z) + 0x85ebca6bu);
     return float(u) * (1.0 / 4294967296.0);
+}
+
+// One layer of direction-cell stars. Radius is clamped to the pixel footprint
+// with energy conserved, so sub-pixel stars do not shimmer or disappear.
+float3 starLayer(float3 dir, float cells, float density, float radius,
+                 float gain, int seed, float px)
+{
+    float3 s = dir * cells;
+    int3 baseCell = int3(floor(s));
+    int3 cell = baseCell + int3(seed, seed * 7, seed * 13); // hash namespace only
+    if (hash31(cell) > density) return float3(0.0, 0.0, 0.0);
+
+    float3 jitter = float3(hash31(cell + int3(19, 19, 19)),
+                           hash31(cell + int3(7, 7, 7)),
+                           hash31(cell + int3(13, 13, 13)));
+    // Direction must come from the UNSHIFTED cell, otherwise every star is
+    // displaced by the seed offset and lands outside the camera view.
+    float3 starDir = normalize(float3(baseCell) + jitter);
+
+    float mag = pow(1.0 - hash31(cell + int3(31, 31, 31)), 6.0);
+    float r = radius * (0.7 + sqrt(mag));
+    float rEff = max(r, px * 0.75);
+    // Softer energy conservation than r²/rEff²: that made widened stars
+    // almost invisible at small test resolutions.
+    float energy = rEff > r ? sqrt(r / rEff) : 1.0f;
+    energy = max(energy, 0.45f);
+
+    float d = length(dir - starDir);
+    float sigma = max(rEff * 0.5, 1e-5f);
+    float f = exp(-d * d / (2.0f * sigma * sigma)) * energy;
+
+    // Fade near cell boundaries so a star is never cut into a wedge.
+    float3 fc = frac(s);
+    float boundary = min(min(min(fc.x, 1.0f - fc.x), min(fc.y, 1.0f - fc.y)),
+                         min(fc.z, 1.0f - fc.z));
+    f *= smoothstep(0.0f, 3.0f * rEff * cells, boundary);
+
+    // Blackbody-ish temperature: orange -> warm white -> cool blue.
+    float t = hash31(cell + int3(3, 3, 3));
+    float3 tint = t < 0.5f
+        ? lerp(float3(1.0f, 0.58f, 0.36f), float3(1.0f, 0.96f, 0.90f), t * 2.0f)
+        : lerp(float3(1.0f, 0.96f, 0.90f), float3(0.58f, 0.74f, 1.0f), (t - 0.5f) * 2.0f);
+
+    float twinkle = 1.0f;
+    float twSeed = hash31(cell + int3(47, 47, 47));
+    if (twSeed > 0.75f)
+        twinkle = 0.85f + 0.15f * sin(pc.timeIntensityAspectTan.x * (0.12f + twSeed * 0.3f) + twSeed * 40.0f);
+
+    // HDR luminosity: a few stars well above 1.0 for bloom to catch.
+    return tint * f * gain * (0.4f + mag * 10.0f) * twinkle;
 }
 
 [shader("fragment")]
 float4 fragmentMain(VSOutput input) : SV_Target
 {
-    // World-space view direction through this pixel.
     float3 dir = normalize(pc.right.xyz * input.ndc.x * pc.timeIntensityAspectTan.z * pc.timeIntensityAspectTan.w +
                            pc.up.xyz * input.ndc.y * pc.timeIntensityAspectTan.w +
                            pc.forward.xyz);
 
-    // 3D direction cells (pinned to the sky sphere; turning the camera
-    // moves stars correctly, unlike screen-space grids). Cell size trades
-    // star density against angular core size (visible at test resolution).
-    const float cellSize = 12.0;
-    const float3 scaled = dir * cellSize;
-    const int3 cell = int3(floor(scaled));
+    // Derive pixel footprint from the fullscreen NDC (exact 2/resolution),
+    // not from fwidth(dir): the latter varies with camera translation and
+    // breaks world-pinned stability at star-cell boundaries.
+    float px = pc.timeIntensityAspectTan.w * fwidth(input.ndc.y) * 2.0f;
+    float gain = pc.timeIntensityAspectTan.y;
 
-    float h = hash31(cell);
-    if (h <= 0.88)
-    {
-        return float4(float3(0.008, 0.01, 0.025), 1.0);
-    }
+    float3 stars = float3(0.0f, 0.0f, 0.0f);
+    stars += starLayer(dir, 12.0f, 0.30f, 0.0022f, 2.0f, 1, px);
+    stars += starLayer(dir, 40.0f, 0.24f, 0.0014f, 1.3f, 2, px);
+    stars += starLayer(dir, 110.0f, 0.20f, 0.0009f, 0.9f, 3, px);
+    stars += starLayer(dir, 280.0f, 0.16f, 0.0006f, 0.6f, 4, px);
 
-    // One star per direction cell, fully jittered inside the cell for a
-    // scattered layout. The pixel-boundary fade below prevents a
-    // boundary-adjacent star from being clipped into a wedge without
-    // introducing candidate duplicates from neighboring cells.
-    float3 jitter = float3(hash31(cell + int3(19, 19, 19)), hash31(cell + int3(7, 7, 7)),
-                           hash31(cell + int3(13, 13, 13)));
-    float3 starDir = normalize(float3(cell) + jitter);
-    // Power-law brightness: most faint, few bright; drives apparent size.
-    float mag = pow(1.0 - hash31(cell + int3(31, 31, 31)), 6.0);
-    float sizeFactor = 0.7 + sqrt(mag) * 1.1;
+    // A broad galactic great circle gives the sky large-scale structure.
+    float band = exp(-pow(dot(dir, normalize(float3(0.35f, 0.86f, -0.37f))) * 3.2f, 2.0f));
+    stars += starLayer(dir, 70.0f, 0.12f + 0.25f * band, 0.0011f,
+                       0.7f + 1.2f * band, 5, px);
 
-    // Chord distance from the view ray to the star direction. The
-    // radii are tuned for the 60-degree vertical FOV: a few pixels
-    // for the core and a short halo rather than a large soft disc.
-    float distance = length(dir - starDir);
-    float core = smoothstep(0.002 * sizeFactor, 0.0, distance);
-    float haloSigma = 0.004 * (0.7 + sqrt(mag));
-    float halo = 0.35 * exp(-distance * distance / (haloSigma * haloSigma));
-    // Only a subset of stars carry a visible halo; the rest are crisp points.
-    halo *= step(0.55, hash31(cell + int3(59, 59, 59)));
+    // Subtle deep-space gradient: faint blue above, warm dust below.
+    float latitude = dir.y * 0.5f + 0.5f;
+    float3 background = lerp(float3(0.010f, 0.008f, 0.014f),
+                             float3(0.006f, 0.010f, 0.022f), latitude);
+    background *= 1.0f + 0.4f * band;
 
-    // Distance to the nearest direction-cell boundary, in cell units.
-    // Fading the halo there prevents it from spilling into the next cell
-    // and being cut into a wedge.
-    float3 fracCoord = frac(scaled);
-    float boundaryDist = min(min(fracCoord.x, 1.0 - fracCoord.x),
-                             min(fracCoord.y, 1.0 - fracCoord.y));
-    boundaryDist = min(boundaryDist, min(fracCoord.z, 1.0 - fracCoord.z));
-    float haloFade = smoothstep(0.0, 0.10, boundaryDist);
-    float coreFade = smoothstep(0.0, 0.035, boundaryDist);
-    halo *= haloFade;
-    core *= coreFade;
-
-    // Slow, subtle twinkle on only a minority of stars. Most stars are
-    // steady; the twinkling ones modulate gently over tens of seconds.
-    float twinkleSeed = hash31(cell + int3(47, 47, 47));
-    float twinkle = 1.0;
-    if (twinkleSeed > 0.72)
-    {
-        float rate = 0.12 + twinkleSeed * 0.20 + mag * 0.15; // rad/s
-        twinkle = 0.86 + 0.14 * sin(pc.timeIntensityAspectTan.x * rate + twinkleSeed * 40.0);
-    }
-    // Per-star luminosity: many faint (distant) stars, a few bright ones.
-    float lumSeed = hash31(cell + int3(61, 61, 61));
-    float luminosity = 0.18 + 0.82 * lumSeed;
-    luminosity *= luminosity; // skew toward dimmer stars
-    float brightness = (core * 2.2 + halo * (0.5 + mag)) * twinkle * luminosity *
-                       pc.timeIntensityAspectTan.y;
-    float3 tint = lerp(float3(0.75, 0.85, 1.0), float3(1.0, 0.9, 0.75), hash31(cell + int3(3, 3, 3)));
-
-    // Tone-map the star so the tint survives instead of clamping to a
-    // flat white UNORM value, while keeping the core near-white.
-    float starTone = 1.0 - exp(-brightness * 0.9);
-    float3 star = tint * starTone;
-    star += (float3(1.0) - star) * clamp(brightness - 1.2, 0.0, 1.0) * core * 0.35;
-
-    // Deep-space background.
-    float3 background = float3(0.008, 0.01, 0.025);
-
-    return float4(background + star, 1.0);
+    return float4(outputColor(background + stars), 1.0f);
 }

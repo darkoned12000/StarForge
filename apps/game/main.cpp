@@ -641,8 +641,9 @@ int main()
     starforge::game::RawVec3f explosionPos{};
     float cameraFov = kPi / 3.0f; // vertical FOV radians (wheel zoom)
 
-    // M17 polish: short-lived visual laser bolts (ship-local space). Gameplay
-    // damage is resolved by GameSimulation; these are purely cosmetic tracers.
+    // M17 polish: short-lived visual laser bolts (camera-relative world space,
+    // fired along the reticle ray). Gameplay damage is resolved by
+    // GameSimulation; these are purely cosmetic tracers.
     struct LaserBolt
     {
         starforge::math::Vec3f position{};
@@ -1050,8 +1051,10 @@ int main()
                 if (uiState.clicked("tab:missions")) stationTab = StationTab::Missions;
                 for (const auto& button : starforge::game::stationButtons())
                 {
+                    // "dock" is intentionally omitted: the Trading view is
+                    // only reachable after docking, so a DOCK button is noise.
                     const bool onTrade = button.id == "buy-5" || button.id == "sell-5" ||
-                                         button.id == "dock" || button.id == "undock";
+                                         button.id == "undock";
                     const bool always = button.id == "close";
                     if (!always && (stationTab == StationTab::Trade ? !onTrade : onTrade))
                         continue;
@@ -1132,42 +1135,48 @@ int main()
                 logError(("[ASSET] reload failed: " + reloadError).c_str());
         }
 
-        // M17 polish: spawn tracers aimed at the actual selected target so
-        // the visual beam agrees with the damage resolution in GameSimulation.
+        // M17 polish: cosmetic tracers. Bolts live in camera-relative WORLD
+        // space and travel down the camera's optical axis, so the visible
+        // beam runs through the reticle instead of the ship's nose. The chase
+        // camera sits above the hull, so ship-forward rays used to appear to
+        // pass underneath a target centred in the crosshair.
         if (!flight.paused)
         {
             const auto boltShip = world.shipTransform();
             const auto boltQuat = starforge::math::Vec4f{
                 boltShip.orientation.x, boltShip.orientation.y,
                 boltShip.orientation.z, boltShip.orientation.w};
-            const auto boltModel = matFromQuat(boltQuat);
+            const auto boltFwd = toVec3f(forwardFromQuat(boltQuat));
+            const auto boltUp = toVec3f(upFromQuat(boltQuat));
+            // Match the render camera: eye behind/above the ship, looking at a
+            // point 10 m ahead at hull height. The optical axis is the reticle.
+            const auto boltEye = boltFwd * (-cameraDist) + boltUp * (0.31f * cameraDist);
+            const auto boltAim = starforge::math::normalize(
+                boltFwd * (10.0f + cameraDist) + boltUp * (-0.31f * cameraDist));
+            // Spawn on that axis near the hull: both tracers start by the ship
+            // and then travel exactly through screen centre at every range.
+            const auto boltOrigin = boltEye + boltAim * (cameraDist + 2.0f);
+            const auto boltBasis = matFromQuat(boltQuat);
+            const auto boltRight = starforge::math::Vec3f{
+                boltBasis.columns[0][0], boltBasis.columns[0][1], boltBasis.columns[0][2]};
             boltCooldown = std::max(0.0f, boltCooldown - frameDt);
             if (flight.firePrimary && boltCooldown <= 0.0f)
             {
                 boltCooldown = 0.12f;
-                // Weapons always fire down the ship's nose (the main
-                // crosshair). The target square is a steering guide: line the
-                // crosshair up with it to land shots on a moving target.
-                for (const float bx : {-0.72f, 0.72f})
-                    laserBolts.push_back({
-                        {bx, 0.0f, -1.2f}, {0.0f, 0.0f, -1.0f}, 1.2f});
+                for (const float bx : {-0.28f, 0.28f})
+                    laserBolts.push_back({boltOrigin + boltRight * bx, boltAim, 1.2f});
             }
-            // Test each tracer against nearby asteroids; shots no longer pass
-            // straight through rocks, and destroyed rocks shed fragments.
+            // Test each tracer against nearby asteroids (both in world space).
             const auto rocksInRange = world.visibleAsteroids(600.0);
             for (auto& bolt : laserBolts)
             {
                 bolt.position = bolt.position + bolt.direction * (600.0f * frameDt);
                 bolt.life -= frameDt;
-                // Bolts live in ship-local space; asteroids are camera-relative
-                // world offsets. Rotate the bolt into the world frame first.
-                const auto boltWorld4 = boltModel * starforge::math::Vec4f{
-                    bolt.position.x(), bolt.position.y(), bolt.position.z(), 1.0f};
                 for (const auto& rock : rocksInRange)
                 {
-                    const float dx = static_cast<float>(rock.position.x) - boltWorld4.x();
-                    const float dy = static_cast<float>(rock.position.y) - boltWorld4.y();
-                    const float dz = static_cast<float>(rock.position.z) - boltWorld4.z();
+                    const float dx = static_cast<float>(rock.position.x) - bolt.position.x();
+                    const float dy = static_cast<float>(rock.position.y) - bolt.position.y();
+                    const float dz = static_cast<float>(rock.position.z) - bolt.position.z();
                     const float radius = rock.scale * 0.866f + 2.0f;
                     if (dx * dx + dy * dy + dz * dz > radius * radius) continue;
                     starforge::game::RawVec3d impact{};
@@ -1887,12 +1896,14 @@ int main()
                                                  starforge::MaterialVariant::Default);
                     if (part.material.name == "station-beacons")
                     {
-                        // Slow red navigation beacons at the station tips.
-                        // Kept opaque (no additive pass) with a strong on/off
-                        // cycle so the blink reads clearly at range.
-                        const float blink = std::sin(time * 2.0f) > 0.0f ? 1.0f : 0.08f;
-                        params.baseColor = {1.0f * blink, 0.12f * blink,
-                                            0.08f * blink, 1.0f};
+                        // Smooth red navigation flash. The glTF material is
+                        // emissive and texture-free, so all six faces glow and
+                        // the pulse reads from any angle at 800-1200 m.
+                        const float pulse = 0.5f + 0.5f * std::sin(time * 2.3f);
+                        const float blink = 0.12f + 0.88f * pulse * pulse;
+                        params.baseColor = {1.0f, 0.10f, 0.06f, 1.0f};
+                        params.emissiveColor = {1.0f, 0.07f, 0.03f, blink * 1.8f};
+                        params.outlineWidth = 0.0f;
                     }
                     toon->recordMesh(fc, stationContext, params, mesh);
                 }
@@ -1967,8 +1978,10 @@ int main()
                 starforge::math::Mat4f boltMatrix;
                 orientBeam(boltMatrix, bolt.direction, bolt.position, 2.0f);
                 starforge::Toon::Context boltContext;
-                boltContext.viewProj = viewProj * model * boltMatrix;
-                boltContext.modelView = view * model * boltMatrix;
+                // Bolts are already in world space - applying `model` here
+                // double-transformed them and pushed the beam off the reticle.
+                boltContext.viewProj = viewProj * boltMatrix;
+                boltContext.modelView = view * boltMatrix;
                 boltContext.lightDirectionView = toonContext.lightDirectionView;
                 boltContext.resolution = toonContext.resolution;
                 starforge::Toon::Params boltParams;
@@ -2533,8 +2546,10 @@ int main()
                                    .color = {1.0f, 0.85f, 0.45f, 1.0f}, .text = quest});
                 for (const auto& button : starforge::game::stationButtons())
                 {
+                    // "dock" is intentionally omitted: the Trading view is
+                    // only reachable after docking, so a DOCK button is noise.
                     const bool onTrade = button.id == "buy-5" || button.id == "sell-5" ||
-                                         button.id == "dock" || button.id == "undock";
+                                         button.id == "undock";
                     const bool always = button.id == "close";
                     if (!always && (stationTab == StationTab::Trade ? !onTrade : onTrade))
                         continue;

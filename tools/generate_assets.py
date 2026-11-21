@@ -105,25 +105,86 @@ class Mesh:
         self.triangle(i0, i1, i2)
         self.triangle(i0, i2, i3)
 
-    def box(self, center, size, uv_scale=(1.0, 1.0)):
+    def box(self, center, size, tile=2.0):
+        """Box with world-scale UVs: `tile` is world units per texture repeat.
+
+        A large engine housing now repeats the inked panel map several times
+        instead of stretching one 64px cell across the whole face (the old
+        "Lego brick" look).
+        """
         cx, cy, cz = center
         sx, sy, sz = (s * 0.5 for s in size)
-        su, sv = uv_scale
+        tile = max(tile, 0.05)
         faces = [
-            ((0, 0, 1),  [(-sx, -sy, sz), (sx, -sy, sz), (sx, sy, sz), (-sx, sy, sz)]),
-            ((0, 0, -1), [(sx, -sy, -sz), (-sx, -sy, -sz), (-sx, sy, -sz), (sx, sy, -sz)]),
-            ((1, 0, 0),  [(sx, -sy, sz), (sx, -sy, -sz), (sx, sy, -sz), (sx, sy, sz)]),
-            ((-1, 0, 0), [(-sx, -sy, -sz), (-sx, -sy, sz), (-sx, sy, sz), (-sx, sy, -sz)]),
-            ((0, 1, 0),  [(-sx, sy, sz), (sx, sy, sz), (sx, sy, -sz), (-sx, sy, -sz)]),
-            ((0, -1, 0), [(-sx, -sy, -sz), (sx, -sy, -sz), (sx, -sy, sz), (-sx, -sy, sz)]),
+            ((0, 0, 1),  [(-sx, -sy, sz), (sx, -sy, sz), (sx, sy, sz), (-sx, sy, sz)], size[0], size[1]),
+            ((0, 0, -1), [(sx, -sy, -sz), (-sx, -sy, -sz), (-sx, sy, -sz), (sx, sy, -sz)], size[0], size[1]),
+            ((1, 0, 0),  [(sx, -sy, sz), (sx, -sy, -sz), (sx, sy, -sz), (sx, sy, sz)], size[2], size[1]),
+            ((-1, 0, 0), [(-sx, -sy, -sz), (-sx, -sy, sz), (-sx, sy, sz), (-sx, sy, -sz)], size[2], size[1]),
+            ((0, 1, 0),  [(-sx, sy, sz), (sx, sy, sz), (sx, sy, -sz), (-sx, sy, -sz)], size[0], size[2]),
+            ((0, -1, 0), [(-sx, -sy, -sz), (sx, -sy, -sz), (sx, -sy, sz), (-sx, -sy, sz)], size[0], size[2]),
         ]
-        for normal, corners in faces:
+        for normal, corners, faceW, faceH in faces:
             pts = [(cx + p[0], cy + p[1], cz + p[2]) for p in corners]
+            su, sv = faceW / tile, faceH / tile
             self.quad(
                 pts[0], pts[1], pts[2], pts[3],
                 (0.0, 0.0), (su, 0.0), (su, sv), (0.0, sv),
                 outward_hint=normal,
             )
+
+    def chamfered_box(self, center, size, bevel=0.08, tile=2.0):
+        """Box with chamfered edges: 6 inset faces + 12 edge strips + corners.
+
+        Cel highlights need bevels to catch the key light; razor-sharp boxes
+        never show a specular edge.
+        """
+        cx, cy, cz = center
+        sx, sy, sz = (s * 0.5 for s in size)
+        b = min(bevel, sx * 0.4, sy * 0.4, sz * 0.4)
+        # Inset face quads (y/z etc.), offset inward by b on the other axes.
+        faces = [
+            ((0, 0, 1),  [(-sx+b, -sy+b, sz), (sx-b, -sy+b, sz), (sx-b, sy-b, sz), (-sx+b, sy-b, sz)], size[0]-2*b, size[1]-2*b),
+            ((0, 0, -1), [(sx-b, -sy+b, -sz), (-sx+b, -sy+b, -sz), (-sx+b, sy-b, -sz), (sx-b, sy-b, -sz)], size[0]-2*b, size[1]-2*b),
+            ((1, 0, 0),  [(sx, -sy+b, sz-b), (sx, -sy+b, -sz+b), (sx, sy-b, -sz+b), (sx, sy-b, sz-b)], size[2]-2*b, size[1]-2*b),
+            ((-1, 0, 0), [(-sx, -sy+b, -sz+b), (-sx, -sy+b, sz-b), (-sx, sy-b, sz-b), (-sx, sy-b, -sz+b)], size[2]-2*b, size[1]-2*b),
+            ((0, 1, 0),  [(-sx+b, sy, sz-b), (sx-b, sy, sz-b), (sx-b, sy, -sz+b), (-sx+b, sy, -sz+b)], size[0]-2*b, size[2]-2*b),
+            ((0, -1, 0), [(-sx+b, -sy, -sz+b), (sx-b, -sy, -sz+b), (sx-b, -sy, sz-b), (-sx+b, -sy, sz-b)], size[0]-2*b, size[2]-2*b),
+        ]
+        for normal, corners, faceW, faceH in faces:
+            pts = [(cx + p[0], cy + p[1], cz + p[2]) for p in corners]
+            su, sv = faceW / tile, faceH / tile
+            self.quad(pts[0], pts[1], pts[2], pts[3], (0,0), (su,0), (su,sv), (0,sv), outward_hint=normal)
+
+        # 12 edge strips bridging adjacent inset faces.
+        edges = []
+        for sy_sign in (-1, 1):
+            for sz_sign in (-1, 1):
+                edges.append(([(sx-b, sy_sign*sy, sz_sign*(sz-b)), (-sx+b, sy_sign*sy, sz_sign*(sz-b)),
+                               (-sx+b, sy_sign*(sy-b), sz_sign*sz), (sx-b, sy_sign*(sy-b), sz_sign*sz)],
+                              (0, sy_sign, 0)))
+        for sx_sign in (-1, 1):
+            for sz_sign in (-1, 1):
+                edges.append(([(sx_sign*sx, sy-b, sz_sign*(sz-b)), (sx_sign*sx, -sy+b, sz_sign*(sz-b)),
+                               (sx_sign*(sx-b), -sy+b, sz_sign*sz), (sx_sign*(sx-b), sy-b, sz_sign*sz)],
+                              (sx_sign, 0, 0)))
+        for sx_sign in (-1, 1):
+            for sy_sign in (-1, 1):
+                edges.append(([(sx_sign*(sx-b), sy_sign*sy, -sz+b), (sx_sign*(sx-b), sy_sign*sy, sz-b),
+                               (sx_sign*sx, sy_sign*(sy-b), sz-b), (sx_sign*sx, sy_sign*(sy-b), -sz+b)],
+                              (0, 0, -1)))
+        for corners, hint in edges:
+            pts = [(cx + p[0], cy + p[1], cz + p[2]) for p in corners]
+            self.quad(pts[0], pts[1], pts[2], pts[3], (0,0), (1,0), (1,1), (0,1), outward_hint=hint)
+
+        # 8 corner triangles.
+        for sx_sign in (-1, 1):
+            for sy_sign in (-1, 1):
+                for sz_sign in (-1, 1):
+                    hint = (sx_sign, sy_sign, sz_sign)
+                    a = (cx + sx_sign*sx, cy + sy_sign*(sy-b), cz + sz_sign*(sz-b))
+                    bpt = (cx + sx_sign*(sx-b), cy + sy_sign*sy, cz + sz_sign*(sz-b))
+                    cpt = (cx + sx_sign*(sx-b), cy + sy_sign*(sy-b), cz + sz_sign*sz)
+                    self.triangle(*[self.vertex(p, v_norm(hint), (0.5, 0.5)) for p in (a, bpt, cpt)])
 
     def box_rotated(self, center, size, angle):
         """Axis-aligned box rotated about Z by `angle`, keeping outward winding."""
@@ -646,7 +707,7 @@ def build_ship() -> bytes:
     ]
     hull.loft(fuselage_rings, uv_u_scale=2.0, uv_v_scale=3.0)
 
-    hull.box((0.0, 0.34, 0.85), (0.24, 0.14, 1.45), uv_scale=(0.5, 1.5))
+    hull.chamfered_box((0.0, 0.34, 0.85), (0.24, 0.14, 1.45), bevel=0.03, tile=1.0)
     fin_rings = [
         [(-0.04, 0.38, 0.55), (0.04, 0.38, 0.55), (0.04, 0.44, 1.55), (-0.04, 0.44, 1.55)],
         [(-0.02, 0.86, 1.25), (0.02, 0.86, 1.25), (0.02, 0.88, 1.68), (-0.02, 0.88, 1.68)],
@@ -654,7 +715,7 @@ def build_ship() -> bytes:
     hull.loft(fin_rings, uv_u_scale=1.0, uv_v_scale=1.0)
 
     for side in (-1.0, 1.0):
-        hull.box((side * 0.66, -0.02, 0.25), (0.28, 0.26, 1.35), uv_scale=(0.5, 1.5))
+        hull.chamfered_box((side * 0.66, -0.02, 0.25), (0.28, 0.26, 1.35), bevel=0.04, tile=1.0)
         hull.cylinder_z(side * 0.72, -0.04, -1.15, -0.35, 0.035, 0.045, segments=8)
     glb.mesh("hero-hull", hull, hull_mat)
 
@@ -662,7 +723,7 @@ def build_ship() -> bytes:
     build_swept_wing(wings, -1.0)
     build_swept_wing(wings,  1.0)
     for side in (-1.0, 1.0):
-        wings.box((side * 2.56, -0.03, 1.32), (0.14, 0.14, 1.05), uv_scale=(0.3, 1.0))
+        wings.box((side * 2.56, -0.03, 1.32), (0.14, 0.14, 1.05), tile=1.0)
     glb.mesh("hero-wings", wings, wing_mat)
 
     canopy = Mesh()
@@ -680,7 +741,7 @@ def build_ship() -> bytes:
         cx = side * 0.42
         housings.cylinder_z(cx, 0.02, 1.35, 2.08, 0.34, 0.30, segments=16, cap_end=False)
         housings.cylinder_z(cx, 0.02, 1.88, 2.08, 0.23, 0.25, segments=16, cap_start=False, cap_end=False)
-        housings.box((cx, 0.02, 1.72), (0.64, 0.56, 0.55), uv_scale=(0.8, 0.8))
+        housings.chamfered_box((cx, 0.02, 1.72), (0.64, 0.56, 0.55), bevel=0.07, tile=1.0)
     glb.mesh("hero-engine-housings", housings, housing_mat)
 
     cores = Mesh()
@@ -729,8 +790,13 @@ def build_station() -> bytes:
     # Windows use a bright albedo texture (cyan/amber bands) rather than the
     # additive emissive pass: that pass skips depth writes and double-draws
     # back faces, which produced blue/white artifacts over the hull.
-    win_mat = glb.material("station-windows", [1.0, 1.0, 0.92, 1.0], 0.2, 0.5, image=win_img)
-    beacon_mat = glb.material("station-beacons", [0.35, 0.75, 0.95, 1.0], 0.0, 0.5, image=win_img)
+    win_mat = glb.material("station-windows", [1.0, 1.0, 0.92, 1.0], 0.2, 0.5,
+                           image=win_img)
+    # Texture-free + emissive: toon.slang modulates emissive by the albedo
+    # texture when one is present, which left the unlit faces of the old
+    # window-textured lamps dark. A plain emissive lamp glows on all 6 sides.
+    beacon_mat = glb.material("station-beacons", [1.0, 0.14, 0.08, 1.0], 0.0, 0.9,
+                              emissive=[1.0, 0.08, 0.03])
 
     hub = Mesh()
     hub.cylinder_z(0.0, 0.0, -1.10, 1.10, 0.95, 0.95, segments=12, uv_u=3.0, uv_v=2.0)
@@ -773,18 +839,24 @@ def build_station() -> bytes:
     for i in range(6):
         ang = i * (math.pi / 3.0) + (math.pi / 6.0)
         ca, sa = math.cos(ang), math.sin(ang)
-        trim.box((2.55 * ca, 2.55 * sa, 0.30), (0.42, 0.42, 0.20), uv_scale=(0.8, 0.5))
-        trim.box((2.55 * ca, 2.55 * sa, -0.30), (0.42, 0.42, 0.20), uv_scale=(0.8, 0.5))
+        trim.box((2.55 * ca, 2.55 * sa, 0.30), (0.42, 0.42, 0.20), tile=1.0)
+        trim.box((2.55 * ca, 2.55 * sa, -0.30), (0.42, 0.42, 0.20), tile=1.0)
     trim.torus_ring_xy(major_r=0.72, tube_rx=0.07, tube_rz=0.07, major_segs=24, tube_sides=6, uv_u=6.0)
     glb.mesh("station-trim", trim, gold_mat)
 
     beacons = Mesh()
-    # Larger navigation lamps so the slow red blink is visible at range.
-    beacons.box((0.0, 0.0, 3.88), (0.28, 0.28, 0.28))
-    beacons.box((0.0, 0.0, -3.14), (0.24, 0.24, 0.24))
+    # Big emissive navigation lamps at both ends of the hub. Bigger and
+    # texture-free so the slow red flash reads from any angle at 800-1200 m.
+    # A centre lamp plus four around each cap means one is always visible
+    # even when the station is edge-on to the camera.
+    for z in (3.88, -3.14):
+        beacons.box((0.0, 0.0, z), (0.55, 0.55, 0.55))
+        for ang in (0.0, math.pi / 2.0, math.pi, 3.0 * math.pi / 2.0):
+            beacons.box((0.42 * math.cos(ang), 0.42 * math.sin(ang), z),
+                        (0.24, 0.24, 0.24))
     for i in range(6):
         ang = i * (math.pi / 3.0)
-        beacons.box((4.02 * math.cos(ang), 4.02 * math.sin(ang), 0.0), (0.22, 0.22, 0.22))
+        beacons.box((4.02 * math.cos(ang), 4.02 * math.sin(ang), 0.0), (0.42, 0.42, 0.42))
     glb.mesh("station-beacons", beacons, beacon_mat)
 
     return glb.build()

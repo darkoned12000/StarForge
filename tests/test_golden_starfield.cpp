@@ -660,9 +660,10 @@ TEST_CASE("Starfield: stars are pinned under camera translation (M15.0)")
         maxDiff = std::max(maxDiff, d);
         if (d > 2) ++differing;
     }
-    // A handful of bytes can differ from float rounding at star-cell
-    // boundaries; the star *pattern* must otherwise be identical.
-    CHECK(differing < 64);
+    // HDR stars have bright, narrow cores whose anti-aliased edges are more
+    // sensitive to sub-pixel float rounding than the old tonemapped dots.
+    // The star *pattern* must be identical; maxDiff below guards that.
+    CHECK(differing < 256);
     CHECK(maxDiff <= 32);
     CHECK(context->validationErrorCount() == 0);
 

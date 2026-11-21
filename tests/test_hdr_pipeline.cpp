@@ -13,6 +13,7 @@
 #include "gpu_resources/image.hpp"
 #include "vulkan/vulkan_context.hpp"
 #include "vulkan/vulkan_device.hpp"
+#include "vulkan/vulkan_shader_specialization.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -88,7 +89,8 @@ TEST_CASE("M9.5 HDR: tonemap + bloom golden and budget")
         .instance = context->instance(), .device = device->device(),
         .physicalDevice = context->physicalDevice(), .queueFamily = device->graphicsQueueFamily(),
         .framesInFlight = 1, .colorFormat = kHdrFormat, .depthFormat = VK_FORMAT_UNDEFINED,
-        .shaderDirectory = STARFORGE_SHADER_DIR});
+        .shaderDirectory = STARFORGE_SHADER_DIR,
+        .specializationInfo = &hdrOutputSpecialization(true)});
     REQUIRE(toon.has_value());
 
     const std::string dir = STARFORGE_SHADER_DIR;
