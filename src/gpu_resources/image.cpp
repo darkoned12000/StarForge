@@ -142,12 +142,12 @@ Image& Image::operator=(Image&& other) noexcept
         allocator_ = std::exchange(other.allocator_, nullptr);
         image_ = std::exchange(other.image_, VK_NULL_HANDLE);
         allocation_ = std::exchange(other.allocation_, nullptr);
-        format_ = other.format_;
-        width_ = other.width_;
-        height_ = other.height_;
-        imageType_ = other.imageType_;
-        aspectMask_ = other.aspectMask_;
-        layout_ = other.layout_;
+        format_ = std::exchange(other.format_, VK_FORMAT_UNDEFINED);
+        width_ = std::exchange(other.width_, 0U);
+        height_ = std::exchange(other.height_, 0U);
+        imageType_ = std::exchange(other.imageType_, VK_IMAGE_TYPE_2D);
+        aspectMask_ = std::exchange(other.aspectMask_, VK_IMAGE_ASPECT_COLOR_BIT);
+        layout_ = std::exchange(other.layout_, VK_IMAGE_LAYOUT_UNDEFINED);
     }
     return *this;
 }

@@ -36,11 +36,12 @@ namespace bridge = public_api_bridge;
         .instance = RendererInternalAccess::instance(renderer),
         .device = RendererInternalAccess::device(renderer),
         .physicalDevice = RendererInternalAccess::physicalDevice(renderer),
-        .colorFormat = RendererInternalAccess::colorFormat(renderer),
+        .colorFormat = RendererInternalAccess::sceneColorFormat(renderer),
         .depthFormat = RendererInternalAccess::depthFormat(renderer),
         .shaderDirectory = shaderDirectory,
         .variantCount = info.variantCount,
         .capacity = info.capacity,
+        .specializationInfo = RendererInternalAccess::specializationInfo(renderer),
     };
 }
 } // namespace

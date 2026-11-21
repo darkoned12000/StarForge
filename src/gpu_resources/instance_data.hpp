@@ -2,8 +2,10 @@
 
 #include "gpu_resources/buffer.hpp"
 
-#include <vector>
 #include <cstdint>
+#include <expected>
+#include <string>
+#include <vector>
 
 namespace starforge::gpu_resources
 {
@@ -21,23 +23,26 @@ struct InstanceData
     std::uint32_t padding[3];
 };
 
-// Contiguous buffer of full transforms/material indices accessed via BDA
+// Contiguous buffer of full transforms/material indices accessed via BDA.
+// NOTE: GPU upload path is not implemented yet; update() returns an explicit
+// error so callers cannot silently assume data was uploaded.
 class InstanceBuffer
 {
 public:
     explicit InstanceBuffer(Allocator& allocator);
     
-    // Initialize with a specific number of instances
-    bool initialize(std::size_t instanceCount);
+    // Initialize with a specific number of instances.
+    [[nodiscard]] bool initialize(std::size_t instanceCount);
     
-    // Update the instance data for this frame  
-    void update(const std::vector<InstanceData>& instances);
+    // Upload instance data for this frame. Not implemented yet: returns an
+    // explicit error instead of silently dropping the update.
+    [[nodiscard]] std::expected<void, std::string> update(const std::vector<InstanceData>& instances);
     
     // Get the buffer device address for shader access
-    std::uint64_t getBufferAddress() const;
+    [[nodiscard]] std::uint64_t getBufferAddress(VkDevice device) const noexcept;
     
     // Get the number of instances in this buffer
-    std::size_t getInstanceCount() const;
+    [[nodiscard]] std::size_t getInstanceCount() const noexcept;
 
 private:
     Allocator& allocator_;

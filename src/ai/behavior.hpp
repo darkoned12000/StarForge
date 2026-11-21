@@ -27,7 +27,6 @@ struct BehaviorSensors
 {
     bool hasDestination = false;
     bool destinationArrived = false;
-    bool hasTarget = false;
     bool hasPerceivedTarget = false;
     double targetDistance = 0.0;
     bool collisionThreat = false;

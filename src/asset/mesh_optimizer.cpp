@@ -65,7 +65,12 @@ void weld(const MeshData& source, std::vector<MeshVertexData>& vertices,
     indices.reserve(source.indices.size());
     for (const auto index : source.indices)
     {
-        if (index >= source.vertices.size()) continue;
+        if (index >= source.vertices.size())
+        {
+            vertices.clear();
+            indices.clear();
+            return;
+        }
         const auto& vertex = source.vertices[index];
         const auto key = keyFor(vertex);
         const auto found = lookup.find(key);
@@ -93,7 +98,13 @@ void expand(const MeshData& source, const std::vector<MeshVertexData>& vertices,
     for (std::size_t i = 0; i < indices.size(); ++i)
     {
         const auto index = indices[i];
-        if (index < vertices.size()) output.vertices.push_back(vertices[index]);
+        if (index >= vertices.size())
+        {
+            output.vertices.clear();
+            output.indices.clear();
+            return;
+        }
+        output.vertices.push_back(vertices[index]);
         output.indices.push_back(static_cast<std::uint32_t>(i));
     }
 }

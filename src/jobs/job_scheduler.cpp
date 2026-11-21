@@ -11,7 +11,7 @@
 #include <cstdint>
 #include <deque>
 #include <format>
-#include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -59,6 +59,7 @@ struct JobScheduler::Impl
     std::deque<Task*> readyQueue;
     std::atomic<bool> shutdown{false};
     std::atomic<std::uint64_t> nextTaskId{1};
+    std::atomic<std::size_t> incompleteTasks{0};
 
     std::mutex tasksMutex;
     // Slot map: id -> task pointer for O(1) lookup
@@ -66,18 +67,8 @@ struct JobScheduler::Impl
     // Ownership
     std::vector<std::unique_ptr<Task>> ownedTasks;
 
-    // Thread-local scratch: chunked block allocation to avoid use-after-free
-    struct ScratchBlock
-    {
-        std::vector<std::byte> memory;
-        std::size_t offset = 0;
-    };
-    struct ThreadScratch
-    {
-        std::vector<ScratchBlock> blocks;
-    };
-    std::mutex scratchMutex;
-    std::unordered_map<std::thread::id, ThreadScratch> scratches;
+    // Thread-local scratch is managed via file-scope thread_local blocks in
+    // scratchAlloc()/resetScratch() to avoid pointer invalidation and locks.
 
     // Deferred deletion queue (epoch-based)
     struct RetiredItem
@@ -95,6 +86,85 @@ struct JobScheduler::Impl
         // Assumes tasksMutex is held by caller
         auto it = taskMap.find(id);
         return (it != taskMap.end()) ? it->second : nullptr;
+    }
+
+    void notifyDependentsAndEnqueue(Task* task)
+    {
+        if (!task) return;
+        std::vector<Task*> toSchedule;
+        {
+            std::lock_guard lock(tasksMutex);
+            for (std::uint64_t depId : task->dependents)
+            {
+                Task* dep = findTask(depId);
+                if (!dep) continue;
+                const std::uint32_t prev = dep->pendingDeps.fetch_sub(1, std::memory_order_acq_rel);
+                if (prev == 1)
+                {
+                    bool expected = false;
+                    if (dep->scheduled.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
+                    {
+                        toSchedule.push_back(dep);
+                    }
+                }
+            }
+            if (!toSchedule.empty())
+            {
+                std::lock_guard qlock(queueMutex);
+                for (Task* dep : toSchedule)
+                {
+                    readyQueue.push_back(dep);
+                }
+            }
+        }
+        if (!toSchedule.empty())
+        {
+            cv.notify_all();
+        }
+    }
+
+    void compactIfQuiescent(Task* keepAlive = nullptr)
+    {
+        if (incompleteTasks.load(std::memory_order_acquire) != 0) return;
+        std::lock_guard taskLock(tasksMutex);
+        std::lock_guard queueLock(queueMutex);
+        if (incompleteTasks.load(std::memory_order_acquire) != 0 || !readyQueue.empty())
+        {
+            return;
+        }
+
+        std::unique_ptr<Task> preserved;
+        if (keepAlive != nullptr)
+        {
+            for (auto& owned : ownedTasks)
+            {
+                if (owned.get() == keepAlive)
+                {
+                    preserved = std::move(owned);
+                    break;
+                }
+            }
+        }
+
+        taskMap.clear();
+        ownedTasks.clear();
+
+        if (preserved)
+        {
+            Task* raw = preserved.get();
+            taskMap[raw->id] = raw;
+            ownedTasks.push_back(std::move(preserved));
+        }
+    }
+
+    void completeTask(Task* task)
+    {
+        if (!task) return;
+        const bool wasCompleted = task->completed.exchange(true, std::memory_order_acq_rel);
+        if (wasCompleted) return;
+        incompleteTasks.fetch_sub(1, std::memory_order_acq_rel);
+        notifyDependentsAndEnqueue(task);
+        cv.notify_all();
     }
 
     void workerLoop(std::uint32_t workerIndex)
@@ -116,41 +186,10 @@ struct JobScheduler::Impl
                 }
             }
 
-            if (task)
+            if (task && !task->completed.load(std::memory_order_acquire))
             {
                 runTask(task);
-                task->completed.store(true, std::memory_order_release);
-
-                // Notify dependents
-                std::vector<Task*> toSchedule;
-                {
-                    std::lock_guard lock(tasksMutex);
-                    for (std::uint64_t depId : task->dependents)
-                    {
-                        Task* dep = findTask(depId);
-                        if (dep)
-                        {
-                            std::uint32_t prev = dep->pendingDeps.fetch_sub(1, std::memory_order_acq_rel);
-                            if (prev == 1)
-                            {
-                                bool expected = false;
-                                if (dep->scheduled.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
-                                {
-                                    toSchedule.push_back(dep);
-                                }
-                            }
-                        }
-                    }
-                }
-                if (!toSchedule.empty())
-                {
-                    std::lock_guard qlock(queueMutex);
-                    for (Task* dep : toSchedule)
-                    {
-                        readyQueue.push_back(dep);
-                    }
-                    cv.notify_all();
-                }
+                completeTask(task);
             }
         }
     }
@@ -236,6 +275,7 @@ TaskHandle JobScheduler::submit(TaskFn fn, void* userData,
         Task* rawTask = task.get();
         impl_->taskMap[task->id] = rawTask;
         impl_->ownedTasks.push_back(std::move(task)); // keep for lifetime
+        impl_->incompleteTasks.fetch_add(1, std::memory_order_relaxed);
 
         // Schedule if ready
         if (rawTask->pendingDeps.load(std::memory_order_relaxed) == 0)
@@ -257,94 +297,46 @@ void JobScheduler::wait(TaskHandle handle)
 {
     if (impl_->config.mode == SchedulerMode::SingleThreaded)
     {
-        // Recursive execution with dependency resolution
-        std::function<void(Task*)> execute = [&](Task* t) {
-            if (!t || t->completed.load()) return;
-            // Execute dependencies first
-            // Find tasks that this task depends on (reverse lookup)
-            // Simple approach: if pendingDeps > 0, we can't execute yet
-            // Instead, execute all ready tasks in topological order
-        };
+        // SingleThreaded/debug mode: execute ready tasks on the calling thread.
+        // Uses the ready queue (O(executed work)) rather than scanning all tasks.
+        while (true)
+        {
+            bool done = false;
+            {
+                std::lock_guard lock(impl_->tasksMutex);
+                Task* target = impl_->findTask(handle.id);
+                done = !target || target->completed.load(std::memory_order_acquire);
+            }
+            if (done) return;
 
-        // Simpler: drain readyQueue and execute, then retry
-        Task* target = nullptr;
+            Task* next = nullptr;
+            {
+                std::lock_guard lock(impl_->queueMutex);
+                if (!impl_->readyQueue.empty())
+                {
+                    next = impl_->readyQueue.front();
+                    impl_->readyQueue.pop_front();
+                }
+            }
+            if (!next) return;
+            if (!next->completed.load(std::memory_order_acquire))
+            {
+                runTask(next);
+                impl_->completeTask(next);
+            }
+        }
+    }
+
+    while (true)
+    {
+        bool done = false;
         {
             std::lock_guard lock(impl_->tasksMutex);
-            target = impl_->findTask(handle.id);
+            Task* target = impl_->findTask(handle.id);
+            done = !target || target->completed.load(std::memory_order_acquire);
         }
-        if (!target) return;
+        if (done) return;
 
-        bool progress = true;
-        while (progress && !target->completed.load())
-        {
-            progress = false;
-            Task* t = target;
-            if (!t || t->completed.load()) break;
-
-            if (t->pendingDeps.load() > 0)
-            {
-                // Need to execute dependencies first - find them
-                // Dependencies are tracked in reverse (dependents), so we need
-                // to find tasks that t depends on. Since we don't store
-                // dependencies list in Task, execute all uncompleted tasks
-                // with 0 pendingDeps first.
-                std::vector<Task*> ready;
-                {
-                    std::lock_guard lock(impl_->tasksMutex);
-                    for (auto& [id, task] : impl_->taskMap)
-                    {
-                        if (task && !task->completed.load() && task->pendingDeps.load() == 0 && task->id != t->id)
-                        {
-                            ready.push_back(task);
-                        }
-                    }
-                }
-                for (Task* dep : ready)
-                {
-                    runTask(dep);
-                    dep->completed.store(true, std::memory_order_release);
-                    // Notify
-                    {
-                        std::lock_guard lock(impl_->tasksMutex);
-                        for (std::uint64_t depId : dep->dependents)
-                        {
-                            Task* d = impl_->findTask(depId);
-                            if (d) d->pendingDeps.fetch_sub(1, std::memory_order_acq_rel);
-                        }
-                    }
-                    progress = true;
-                }
-                if (!ready.empty()) continue;
-            }
-
-            if (t->pendingDeps.load() == 0 && !t->completed.load())
-            {
-                runTask(t);
-                t->completed.store(true, std::memory_order_release);
-                {
-                    std::lock_guard lock(impl_->tasksMutex);
-                    for (std::uint64_t depId : t->dependents)
-                    {
-                        Task* d = impl_->findTask(depId);
-                        if (d) d->pendingDeps.fetch_sub(1, std::memory_order_acq_rel);
-                    }
-                }
-                progress = true;
-            }
-        }
-        return;
-    }
-
-    Task* t = impl_->findTask(handle.id);
-    // Need lock
-    {
-        std::lock_guard lock(impl_->tasksMutex);
-        t = impl_->findTask(handle.id);
-    }
-    if (!t) return;
-    while (!t->completed.load(std::memory_order_acquire))
-    {
-        // Work-helping: try to execute a task from the queue
         Task* toRun = nullptr;
         {
             std::unique_lock lock(impl_->queueMutex);
@@ -354,45 +346,19 @@ void JobScheduler::wait(TaskHandle handle)
                 impl_->readyQueue.pop_front();
             }
         }
-        if (toRun && !toRun->completed.load())
+        if (toRun && !toRun->completed.load(std::memory_order_acquire))
         {
             runTask(toRun);
-            toRun->completed.store(true, std::memory_order_release);
-
-            // Notify dependents
-            std::vector<Task*> toSchedule;
-            {
-                std::lock_guard lock(impl_->tasksMutex);
-                for (std::uint64_t depId : toRun->dependents)
-                {
-                    Task* dep = impl_->findTask(depId);
-                    if (dep)
-                    {
-                        std::uint32_t prev = dep->pendingDeps.fetch_sub(1, std::memory_order_acq_rel);
-                        if (prev == 1)
-                        {
-                            bool expected = false;
-                            if (dep->scheduled.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
-                            {
-                                toSchedule.push_back(dep);
-                            }
-                        }
-                    }
-                }
-            }
-            if (!toSchedule.empty())
-            {
-                std::lock_guard qlock(impl_->queueMutex);
-                for (Task* dep : toSchedule)
-                {
-                    impl_->readyQueue.push_back(dep);
-                }
-                impl_->cv.notify_all();
-            }
+            impl_->completeTask(toRun);
         }
         else
         {
-            std::this_thread::sleep_for(std::chrono::microseconds(100));
+            std::unique_lock lock(impl_->queueMutex);
+            impl_->cv.wait_for(lock, std::chrono::microseconds(100), [this] {
+                return impl_->shutdown.load(std::memory_order_acquire) ||
+                       !impl_->readyQueue.empty() ||
+                       impl_->incompleteTasks.load(std::memory_order_acquire) == 0;
+            });
         }
     }
 }
@@ -401,7 +367,8 @@ void JobScheduler::waitAll()
 {
     if (impl_->config.mode == SchedulerMode::SingleThreaded)
     {
-        // Execute all pending tasks
+        // Execute all pending tasks, propagating dependencies so newly-ready
+        // tasks are enqueued and drained in the same pass.
         bool progress = true;
         while (progress)
         {
@@ -415,87 +382,54 @@ void JobScheduler::waitAll()
                     impl_->readyQueue.pop_front();
                 }
             }
-            for (Task* t : toRun)
-            {
-                if (t && !t->completed.load())
-                {
-                    runTask(t);
-                    t->completed.store(true, std::memory_order_release);
-                    progress = true;
-                }
-            }
-        }
-        return;
-    }
 
-    bool done = false;
-    while (!done)
-    {
-        done = true;
-        {
-            std::lock_guard lock(impl_->tasksMutex);
-            for (auto& [id, t] : impl_->taskMap)
+            for (Task* t : toRun)
             {
                 if (t && !t->completed.load(std::memory_order_acquire))
                 {
-                    done = false;
-                    break;
+                    runTask(t);
+                    impl_->completeTask(t);
+                    progress = true;
+                    if (impl_->incompleteTasks.load(std::memory_order_acquire) == 0)
+                    {
+                        break;
+                    }
                 }
             }
         }
-        if (!done)
-        {
-            // Work-helping
-            Task* toRun = nullptr;
-            {
-                std::unique_lock lock(impl_->queueMutex);
-                if (!impl_->readyQueue.empty())
-                {
-                    toRun = impl_->readyQueue.front();
-                    impl_->readyQueue.pop_front();
-                }
-            }
-            if (toRun && !toRun->completed.load())
-            {
-                runTask(toRun);
-                toRun->completed.store(true, std::memory_order_release);
 
-                std::vector<Task*> toSchedule;
-                {
-                    std::lock_guard lock(impl_->tasksMutex);
-                    for (std::uint64_t depId : toRun->dependents)
-                    {
-                        Task* dep = impl_->findTask(depId);
-                        if (dep)
-                        {
-                            std::uint32_t prev = dep->pendingDeps.fetch_sub(1, std::memory_order_acq_rel);
-                            if (prev == 1)
-                            {
-                                bool expected = false;
-                                if (dep->scheduled.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
-                                {
-                                    toSchedule.push_back(dep);
-                                }
-                            }
-                        }
-                    }
-                }
-                if (!toSchedule.empty())
-                {
-                    std::lock_guard qlock(impl_->queueMutex);
-                    for (Task* dep : toSchedule)
-                    {
-                        impl_->readyQueue.push_back(dep);
-                    }
-                    impl_->cv.notify_all();
-                }
-            }
-            else
+        impl_->compactIfQuiescent();
+        return;
+    }
+
+    while (impl_->incompleteTasks.load(std::memory_order_acquire) > 0)
+    {
+        Task* toRun = nullptr;
+        {
+            std::unique_lock lock(impl_->queueMutex);
+            if (!impl_->readyQueue.empty())
             {
-                std::this_thread::sleep_for(std::chrono::microseconds(100));
+                toRun = impl_->readyQueue.front();
+                impl_->readyQueue.pop_front();
             }
+        }
+        if (toRun && !toRun->completed.load(std::memory_order_acquire))
+        {
+            runTask(toRun);
+            impl_->completeTask(toRun);
+        }
+        else if (impl_->incompleteTasks.load(std::memory_order_acquire) > 0)
+        {
+            std::unique_lock lock(impl_->queueMutex);
+            impl_->cv.wait_for(lock, std::chrono::microseconds(100), [this] {
+                return impl_->shutdown.load(std::memory_order_acquire) ||
+                       !impl_->readyQueue.empty() ||
+                       impl_->incompleteTasks.load(std::memory_order_acquire) == 0;
+            });
         }
     }
+
+    impl_->compactIfQuiescent();
 }
 
 std::uint32_t JobScheduler::threadCount() const noexcept
@@ -518,15 +452,28 @@ thread_local std::vector<ScratchBlock> t_scratchBlocks;
 
 void* JobScheduler::scratchAlloc(std::size_t size, std::size_t alignment)
 {
-    // Thread-local scratch using chunked blocks to avoid pointer invalidation
+    // Thread-local scratch using chunked blocks to avoid pointer invalidation.
+    if (size == 0 || alignment == 0 || (alignment & (alignment - 1)) != 0)
+    {
+        return nullptr;
+    }
+    if (size > (std::numeric_limits<std::size_t>::max() - alignment))
+    {
+        return nullptr;
+    }
+
+    const auto alignUp = [alignment](std::uintptr_t addr) -> std::uintptr_t {
+        return (addr + alignment - 1) & ~(alignment - 1);
+    };
 
     // Find a block with enough space
     for (auto& block : t_scratchBlocks)
     {
-        auto baseAddr = reinterpret_cast<std::uintptr_t>(block.memory.data() + block.offset);
-        std::uintptr_t alignedAddr = (baseAddr + alignment - 1) & ~(alignment - 1);
-        std::size_t padding = alignedAddr - baseAddr;
-        if (block.offset + padding + size <= block.memory.size())
+        const auto baseAddr = reinterpret_cast<std::uintptr_t>(block.memory.data() + block.offset);
+        const std::uintptr_t alignedAddr = alignUp(baseAddr);
+        const std::size_t padding = static_cast<std::size_t>(alignedAddr - baseAddr);
+        if (padding <= block.memory.size() - block.offset &&
+            size <= block.memory.size() - block.offset - padding)
         {
             block.offset += padding + size;
             return reinterpret_cast<void*>(alignedAddr);
@@ -535,11 +482,11 @@ void* JobScheduler::scratchAlloc(std::size_t size, std::size_t alignment)
 
     // Allocate new block
     ScratchBlock newBlock;
-    std::size_t blockSize = std::max(size + alignment, static_cast<std::size_t>(65536));
+    const std::size_t blockSize = std::max(size + alignment, static_cast<std::size_t>(65536));
     newBlock.memory.resize(blockSize);
-    auto baseAddr = reinterpret_cast<std::uintptr_t>(newBlock.memory.data());
-    std::uintptr_t alignedAddr = (baseAddr + alignment - 1) & ~(alignment - 1);
-    std::size_t padding = alignedAddr - baseAddr;
+    const auto baseAddr = reinterpret_cast<std::uintptr_t>(newBlock.memory.data());
+    const std::uintptr_t alignedAddr = alignUp(baseAddr);
+    const std::size_t padding = static_cast<std::size_t>(alignedAddr - baseAddr);
     void* ptr = reinterpret_cast<void*>(alignedAddr);
     newBlock.offset = padding + size;
     t_scratchBlocks.push_back(std::move(newBlock));

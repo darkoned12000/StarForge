@@ -45,6 +45,8 @@ struct PlayerDelta
     double localY = 0.0;
     double localZ = 0.0;
     ContentType objectType = ContentType::Asteroid;
+    // Quantized orientation (yaw, pitch, reserved), matching ContentObject.
+    std::uint8_t orientation[3] = {0, 0, 0};
 
     // Unique key for this delta.
     [[nodiscard]] std::uint64_t key() const noexcept;
@@ -133,7 +135,7 @@ public:
     }
 
     // Clear all deltas.
-    void clear() noexcept
+    void clear()
     {
         std::unique_lock lock(mutex_);
         deltas_.clear();

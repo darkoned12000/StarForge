@@ -85,6 +85,9 @@ private:
     // Double-buffered per frame.
     std::vector<Buffer> indirectBuffers_;
     std::vector<Buffer> visibleIndicesBuffers_;
+
+    // Defensive fallback for misuse on moved-from/empty objects.
+    Buffer emptyBuffer_;
 };
 
 } // namespace starforge::gpu_resources

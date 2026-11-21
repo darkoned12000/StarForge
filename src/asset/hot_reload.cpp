@@ -6,14 +6,16 @@ namespace starforge::asset
 std::vector<std::string> HotReloadCoordinator::poll()
 {
     lastEvents_ = watcher_.poll();
-    std::size_t marked = 0;
     for (const auto& event : lastEvents_)
-        if (event.change == FileChange::Modified && manager_.markDirty(event.path))
-            ++marked;
+    {
+        if (event.change == FileChange::Modified || event.change == FileChange::Created)
+            (void)manager_.markDirty(event.path);
+    }
 
-    if (marked == 0) return {};
+    const auto before = manager_.reloadCount();
     auto failures = manager_.reloadDirty();
-    reloadCount_ += marked >= failures.size() ? marked - failures.size() : 0;
+    const auto after = manager_.reloadCount();
+    reloadCount_ += after >= before ? after - before : 0;
     return failures;
 }
 

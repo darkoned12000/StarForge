@@ -1042,6 +1042,13 @@ Do not build it until a working example needs it (ADR-0009 rule).
   - **Asset loading deferred to M17:** M12 proves playback with
     procedurally generated tones; file streaming, hot-reload, and
     glTF audio belong to M17 (Asset Pipeline).
+  - **Post-M12 gap fill (2026-11):** internal `SoundPool` for overlapping
+    one-shots, `SoundBank` file streaming/load, fade control, and richer
+    procedural waveform synthesis (sine/square/saw/triangle/noise, sweep,
+    envelope) landed in the audio engine; the public bridge exposes
+    file streaming and fade. Remaining gaps (public voice-pool facade,
+    DSP/effects node graph, memory-backed streaming/data-source
+    abstraction, mixing polish) are tracked in M20.
 
 | Step | Deliverable | Verified by | Done when |
 |------|-------------|-------------|-----------|
@@ -1506,6 +1513,27 @@ Missions tabs. Verification: Debug + Release CTest 12/12, zero validation errors
     the RX 7900 XTX dev machine.
   - Physics-island boundary stress (11.6) and doc-sync follow-up
     (below) closed or explicitly deferred with owners.
+
+### M20 – Audio Engine Fidelity
+
+- **Goal:** Close the remaining M12 audio gaps so gameplay audio
+  (laser/thruster/boost/missile/radar-lock, ambience, music) can be
+  authored and mixed without reaching around the engine. Builds on the
+  internal `SoundPool`, file streaming, fade, and procedural waveform
+  synthesis already landed after M12.
+- **Proof:** Public API can create a pooled SFX voice, play overlapping
+  one-shots, stream a long file, fade a voice/bus, and route through at
+  least one DSP effect node (e.g. low-pass or reverb send) on the null
+  backend with T1 tests; no miniaudio types leak through
+  `include/starforge/`.
+- **Depends on:** M12 (Audio), M17 (Asset Pipeline file/audio loading).
+
+| Step | Deliverable | Verified by | Done when |
+|------|-------------|-------------|-----------|
+| 20.1 | Public voice-pool facade: expose pooled overlapping one-shot playback through the public audio bridge/API (wrapping internal `SoundPool` or an equivalent voice allocator) with handle/volume/bus semantics consistent with `starforge::Audio`. | T1 | Public consumer can preload a pool and trigger overlapping one-shots without direct access to internal audio headers; pool exhaustion behavior is deterministic and documented. |
+| 20.2 | DSP/effects node graph: wrap miniaudio node-graph effects behind an internal/public-safe API (filters, reverb/EQ as needed, per-bus or per-voice sends). Keep ADR-0009 boundary intact. | T1 | At least one effect (e.g. low-pass filter or reverb send) can be attached/configured through engine API on the null backend; effect params are clamped/validated; no `ma_*` symbols in public headers. |
+| 20.3 | Memory-backed streaming/data-source abstraction: support streaming from a caller-provided data source or memory-backed stream in addition to file-path streaming, for packaged assets and generated audio. | T1 | A streamed voice can play from a non-file data source abstraction on the null backend; lifetime/seek/read contracts are explicit and tested. |
+| 20.4 | Audio mixing polish: bus-level fade/helpers, effect-send convenience, and documentation/tests covering the laser/thruster/boost/missile/radar-lock gameplay scenarios. | T1 | Representative gameplay SFX scenarios are covered by tests/examples using only supported engine APIs; docs updated. |
 
 ### Checkpoint: Asteroid Field Flythrough (superseded by steps 13.6 and 13.8)
 

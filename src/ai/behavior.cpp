@@ -235,7 +235,6 @@ BehaviorState updateBehavior(ecs::Ecs& world, const ecs::SpatialIndex& index, fl
             agent.target = perceived->entity;
         }
         agent.targetLostTimer = 0.0;
-        sensors.hasTarget = true;
         sensors.hasPerceivedTarget = true;
         sensors.targetDistance = agent.target == perceived->entity
                                      ? perceived->distance
@@ -246,7 +245,6 @@ BehaviorState updateBehavior(ecs::Ecs& world, const ecs::SpatialIndex& index, fl
         // A 0-HP target is a wreck: drop it instead of circling it forever
         // (tryFire refuses to shoot wrecks, so holding one as a target
         // would otherwise permanently lock the agent in Engaging).
-        sensors.hasTarget = true;
         sensors.targetDistance = distanceTo(transform.position, agent.target.get<ecs::Transform>().position);
     }
     else
@@ -280,10 +278,11 @@ BehaviorState updateBehavior(ecs::Ecs& world, const ecs::SpatialIndex& index, fl
     // resets them here so FSM dwell rules run at real simulation speed.
 
     // Steering: each state has one deterministic destination rule. Routed
-    // ships skip steering entirely — advanceRoute is the single owner of
-    // route-following motion (previously both systems wrote Velocity
-    // every tick on think frames and route won/lost arbitrarily).
+    // ships follow their route in civilian states (Transit/Docking), but
+    // combat owns the controls in Engaging/Evading/Retreating so routed
+    // ships can still maneuver instead of coasting on stale velocity.
     const bool routed = entity.has<NavigationRoute>();
+    const bool routeOwnsSteering = routed && (next == BehaviorState::Transit || next == BehaviorState::Docking);
     spatial::WorldPosition destination;
     bool steer = false;
     double arrivalRadius = 50.0;
@@ -354,11 +353,11 @@ BehaviorState updateBehavior(ecs::Ecs& world, const ecs::SpatialIndex& index, fl
         break;
     }
 
-    if (steer && !routed)
+    if (steer && !routeOwnsSteering)
     {
         steerToward(entity, destination, dt, agent, arrivalRadius, candidates);
     }
-    else if (!steer && !routed && entity.has<ecs::Velocity>())
+    else if (!steer && !routeOwnsSteering && entity.has<ecs::Velocity>())
     {
         entity.set<ecs::Velocity>({{0.0, 0.0, 0.0}, {0.0f, 0.0f, 0.0f}});
     }

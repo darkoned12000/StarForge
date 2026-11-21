@@ -29,35 +29,33 @@ bool InstanceBuffer::initialize(std::size_t instanceCount)
     return true;
 }
 
-void InstanceBuffer::update(const std::vector<InstanceData>& instances)
+std::expected<void, std::string> InstanceBuffer::update(const std::vector<InstanceData>& instances)
 {
-    // In a real implementation, this would properly handle buffer updates through staging
-    // For now we keep it simple as the main focus was on BDA support and structure
-    
-    if (instances.empty() || m_instanceCount == 0) return;
-    
-    // This is a simplified version that would normally:
-    // 1. Allocate staging memory from a staging ring buffer
-    // 2. Copy data to staging memory 
-    // 3. Submit a command buffer to copy from staging to GPU buffer
-    
-    // In the actual implementation, this function should be called during frame preparation,
-    // with proper staging and command submission using the Vulkan context.
+    if (instances.empty())
+    {
+        return std::unexpected("InstanceBuffer::update: instances must not be empty");
+    }
+    if (m_buffer.handle() == VK_NULL_HANDLE || m_instanceCount == 0)
+    {
+        return std::unexpected("InstanceBuffer::update: buffer is not initialized");
+    }
+    if (instances.size() > m_instanceCount)
+    {
+        return std::unexpected("InstanceBuffer::update: instance count exceeds buffer capacity");
+    }
+    return std::unexpected("InstanceBuffer::update: GPU upload path is not implemented");
 }
 
-std::uint64_t InstanceBuffer::getBufferAddress() const
+std::uint64_t InstanceBuffer::getBufferAddress(VkDevice device) const noexcept
 {
-    if (m_buffer.handle() == VK_NULL_HANDLE) return 0;
-    
-    // Get device address for BDA access in shaders - need to get device from the buffer's allocator
-    VkDevice device = nullptr; // This would normally be available via Vulkan context
-    
-    // In a real implementation, we'd need access to the Vulkan context 
-    // For now returning 0 as placeholder since this is just stubbed functionality
+    if (device == VK_NULL_HANDLE || m_buffer.handle() == VK_NULL_HANDLE)
+    {
+        return 0;
+    }
     return m_buffer.deviceAddress(device);
 }
 
-std::size_t InstanceBuffer::getInstanceCount() const
+std::size_t InstanceBuffer::getInstanceCount() const noexcept
 {
     return m_instanceCount;
 }

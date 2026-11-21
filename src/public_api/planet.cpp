@@ -42,9 +42,10 @@ namespace bridge = public_api_bridge;
 {
     return bridge::RawPlanet::CreateInfo{
         .device = RendererInternalAccess::device(renderer),
-        .colorFormat = RendererInternalAccess::colorFormat(renderer),
+        .colorFormat = RendererInternalAccess::sceneColorFormat(renderer),
         .depthFormat = RendererInternalAccess::depthFormat(renderer),
         .shaderDirectory = shaderDirectory,
+        .specializationInfo = RendererInternalAccess::specializationInfo(renderer),
     };
 }
 

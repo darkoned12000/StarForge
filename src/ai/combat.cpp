@@ -39,7 +39,10 @@ void clearCombatEvents(ecs::Ecs& world) noexcept
         [damaged](flecs::entity entity, DamageEvent&) { damaged->push_back(entity); });
     for (const auto entity : *damaged)
     {
-        entity.remove<DamageEvent>();
+        if (entity.is_alive() && entity.has<DamageEvent>())
+        {
+            entity.remove<DamageEvent>();
+        }
     }
 
     static thread_local std::vector<flecs::entity> firedStorage;
@@ -49,7 +52,10 @@ void clearCombatEvents(ecs::Ecs& world) noexcept
         [fired](flecs::entity entity, CombatFireEvent&) { fired->push_back(entity); });
     for (const auto entity : *fired)
     {
-        entity.remove<CombatFireEvent>();
+        if (entity.is_alive() && entity.has<CombatFireEvent>())
+        {
+            entity.remove<CombatFireEvent>();
+        }
     }
 }
 

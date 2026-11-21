@@ -88,7 +88,7 @@ ContentObject generateObject(
             std::uint32_t services = static_cast<std::uint32_t>(rng.nextInt(1, 15)); // bitmask of services
             std::uint32_t docking = static_cast<std::uint32_t>(rng.nextInt(1, 8));
             obj.properties = faction | (services << 4) | (docking << 8);
-            obj.scale = 0.01f + rng.nextFloat() * 0.04f; // stations (small) are large
+            obj.scale = 0.01f + rng.nextFloat() * 0.04f; // station relative scale
         }
         break;
 

@@ -360,7 +360,7 @@ void FrameRenderer::nextFrame()
 
 std::expected<FrameStatus, std::string>
 FrameRenderer::renderFrameImpl(const VulkanSwapchain& swapchain, VkQueue queue, VkClearColorValue clearColor,
-                               const FrameRecordFn* record)
+                               const FrameRecordFn* record, const OffscreenSceneTarget* target)
 {
     if (device_ == VK_NULL_HANDLE || currentFrame_ >= inFlightFences_.size())
     {
@@ -466,6 +466,23 @@ FrameRenderer::renderFrameImpl(const VulkanSwapchain& swapchain, VkQueue queue, 
     }
     else
     {
+        const bool offscreen = target != nullptr &&
+                                 target->colorImages != nullptr &&
+                                 target->colorViews != nullptr &&
+                                 target->frameCount > currentFrame_;
+        const std::uint32_t frameSlot = currentFrame_;
+        const VkImage sceneColor = offscreen ? target->colorImages[frameSlot] : images.at(imageIndex);
+        const VkImageView sceneView = offscreen ? target->colorViews[frameSlot] : views.at(imageIndex);
+        const VkImage sceneDepth = (offscreen && target->depthImages != nullptr && target->depthViews != nullptr)
+                                       ? target->depthImages[frameSlot]
+                                       : depthImage;
+        const VkImageView sceneDepthView = (offscreen && target->depthImages != nullptr && target->depthViews != nullptr)
+                                               ? target->depthViews[frameSlot]
+                                               : depthView;
+        const VkFormat sceneDepthFormat = offscreen ? target->depthFormat : swapchain.depthFormat();
+        const VkExtent2D sceneExtent = offscreen ? target->extent : swapchain.extent();
+        const bool sceneHasDepth = sceneDepth != VK_NULL_HANDLE && sceneDepthView != VK_NULL_HANDLE;
+
         // Single pass: transition to attachment, clear, and draw in the
         // same rendering instance (avoids a store+load round-trip that a
         // separate clear pass would cause on tile-based GPUs).
@@ -479,7 +496,7 @@ FrameRenderer::renderFrameImpl(const VulkanSwapchain& swapchain, VkQueue queue, 
         toAttachment.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         toAttachment.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         toAttachment.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        toAttachment.image = images.at(imageIndex);
+        toAttachment.image = sceneColor;
         toAttachment.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         toAttachment.subresourceRange.baseMipLevel = 0;
         toAttachment.subresourceRange.levelCount = 1;
@@ -492,7 +509,7 @@ FrameRenderer::renderFrameImpl(const VulkanSwapchain& swapchain, VkQueue queue, 
         preDep.pImageMemoryBarriers = &toAttachment;
         vkCmdPipelineBarrier2(cmd, &preDep);
 
-        if (hasDepth)
+        if (sceneHasDepth)
         {
             VkImageMemoryBarrier2 depthPre{};
             depthPre.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -504,8 +521,8 @@ FrameRenderer::renderFrameImpl(const VulkanSwapchain& swapchain, VkQueue queue, 
             depthPre.newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
             depthPre.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             depthPre.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            depthPre.image = depthImage;
-            depthPre.subresourceRange.aspectMask = depthAspectMask(swapchain.depthFormat());
+            depthPre.image = sceneDepth;
+            depthPre.subresourceRange.aspectMask = depthAspectMask(sceneDepthFormat);
             depthPre.subresourceRange.baseMipLevel = 0;
             depthPre.subresourceRange.levelCount = 1;
             depthPre.subresourceRange.baseArrayLayer = 0;
@@ -520,7 +537,7 @@ FrameRenderer::renderFrameImpl(const VulkanSwapchain& swapchain, VkQueue queue, 
 
         VkRenderingAttachmentInfo attachment{};
         attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-        attachment.imageView = views.at(imageIndex);
+        attachment.imageView = sceneView;
         attachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -528,7 +545,7 @@ FrameRenderer::renderFrameImpl(const VulkanSwapchain& swapchain, VkQueue queue, 
 
         VkRenderingAttachmentInfo depthAttachment{};
         depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-        depthAttachment.imageView = depthView;
+        depthAttachment.imageView = sceneDepthView;
         depthAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
         depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -537,17 +554,184 @@ FrameRenderer::renderFrameImpl(const VulkanSwapchain& swapchain, VkQueue queue, 
         VkRenderingInfo renderingInfo{};
         renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
         renderingInfo.renderArea.offset = {0, 0};
-        renderingInfo.renderArea.extent = swapchain.extent();
+        renderingInfo.renderArea.extent = sceneExtent;
         renderingInfo.layerCount = 1;
         renderingInfo.colorAttachmentCount = 1;
         renderingInfo.pColorAttachments = &attachment;
-        renderingInfo.pDepthAttachment = hasDepth ? &depthAttachment : nullptr;
+        renderingInfo.pDepthAttachment = sceneHasDepth ? &depthAttachment : nullptr;
 
         vkCmdBeginRendering(cmd, &renderingInfo);
-        (*record)(cmd, swapchain.extent());
+        (*record)(cmd, sceneExtent);
         vkCmdEndRendering(cmd);
 
-        if (hasDepth)
+        if (offscreen)
+        {
+            // Scene colour -> shader-readable for the tonemap pass. Return
+            // both offscreen images to UNDEFINED afterwards: the next frame
+            // clears them, so no contents need preserving and the barriers
+            // above can always use UNDEFINED as their old layout.
+            VkImageMemoryBarrier2 sceneRead{};
+            sceneRead.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+            sceneRead.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+            sceneRead.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+            sceneRead.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+            sceneRead.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+            sceneRead.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            sceneRead.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            sceneRead.image = sceneColor;
+            sceneRead.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            sceneRead.subresourceRange.levelCount = 1;
+            sceneRead.subresourceRange.layerCount = 1;
+            VkDependencyInfo sceneReadDep{};
+            sceneReadDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+            sceneReadDep.imageMemoryBarrierCount = 1;
+            sceneReadDep.pImageMemoryBarriers = &sceneRead;
+            vkCmdPipelineBarrier2(cmd, &sceneReadDep);
+
+            // Order pass-1 depth writes against pass 2's LOAD of that depth.
+            if (sceneHasDepth)
+            {
+                VkImageMemoryBarrier2 depthMid{};
+                depthMid.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+                depthMid.srcStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                                        VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+                depthMid.srcAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+                depthMid.dstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                                        VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+                depthMid.dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                                         VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+                depthMid.oldLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+                depthMid.newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+                depthMid.image = sceneDepth;
+                depthMid.subresourceRange.aspectMask = depthAspectMask(sceneDepthFormat);
+                depthMid.subresourceRange.levelCount = 1;
+                depthMid.subresourceRange.layerCount = 1;
+                VkDependencyInfo depthMidDep{};
+                depthMidDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                depthMidDep.imageMemoryBarrierCount = 1;
+                depthMidDep.pImageMemoryBarriers = &depthMid;
+                vkCmdPipelineBarrier2(cmd, &depthMidDep);
+            }
+
+            // Optional bloom chain runs outside any rendering instance.
+            if (target->bloom)
+                target->bloom(cmd, sceneExtent, sceneView, frameSlot);
+
+            VkImageMemoryBarrier2 barriers[2]{};
+            barriers[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+            barriers[0].srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+            barriers[0].srcAccessMask = 0;
+            barriers[0].dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+            barriers[0].dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+            barriers[0].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            barriers[0].newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            barriers[0].image = images.at(imageIndex);
+            barriers[0].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            barriers[0].subresourceRange.levelCount = 1;
+            barriers[0].subresourceRange.layerCount = 1;
+
+            std::uint32_t barrierCount = 1;
+            // Keep swapchain depth in a defined layout to avoid validation noise
+            // in HDR/offscreen mode, where pass 2 uses the offscreen depth.
+            if (depthImage != VK_NULL_HANDLE && depthImage != sceneDepth)
+            {
+                barriers[1].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+                barriers[1].srcStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                                           VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+                barriers[1].srcAccessMask = 0;
+                barriers[1].dstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                                           VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+                barriers[1].dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                                            VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+                barriers[1].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                barriers[1].newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+                barriers[1].image = depthImage;
+                barriers[1].subresourceRange.aspectMask = depthAspectMask(swapchain.depthFormat());
+                barriers[1].subresourceRange.levelCount = 1;
+                barriers[1].subresourceRange.layerCount = 1;
+                barrierCount = 2;
+            }
+
+            VkDependencyInfo swapDep{};
+            swapDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+            swapDep.imageMemoryBarrierCount = barrierCount;
+            swapDep.pImageMemoryBarriers = barriers;
+            vkCmdPipelineBarrier2(cmd, &swapDep);
+
+            VkRenderingAttachmentInfo presentAttachment{};
+            presentAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+            presentAttachment.imageView = views.at(imageIndex);
+            presentAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            presentAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE; // resolve covers every pixel
+            presentAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+            // Keep the swapchain depth attached with LOAD: the UI pipelines
+            // were created with a depth attachment format, and dynamic
+            // rendering requires the pipeline format to match the pass.
+            VkRenderingAttachmentInfo presentDepth{};
+            presentDepth.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+            // Use the SAME depth as the scene pass: the swapchain depth was
+            // never transitioned when rendering offscreen.
+            presentDepth.imageView = sceneDepthView;
+            presentDepth.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+            presentDepth.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+            presentDepth.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+
+            VkRenderingInfo presentRendering{};
+            presentRendering.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+            presentRendering.renderArea.offset = {0, 0};
+            presentRendering.renderArea.extent = swapchain.extent();
+            presentRendering.layerCount = 1;
+            presentRendering.colorAttachmentCount = 1;
+            presentRendering.pColorAttachments = &presentAttachment;
+            presentRendering.pDepthAttachment = sceneHasDepth ? &presentDepth : nullptr;
+            vkCmdBeginRendering(cmd, &presentRendering);
+            if (target->resolve)
+                target->resolve(cmd, swapchain.extent(), sceneView, frameSlot);
+            vkCmdEndRendering(cmd);
+
+            // Leave the HDR target in an attachment layout for the next frame.
+            VkImageMemoryBarrier2 sceneReset{};
+            sceneReset.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+            sceneReset.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+            sceneReset.srcAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+            sceneReset.dstStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
+            sceneReset.dstAccessMask = 0;
+            sceneReset.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            sceneReset.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            sceneReset.image = sceneColor;
+            sceneReset.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            sceneReset.subresourceRange.levelCount = 1;
+            sceneReset.subresourceRange.layerCount = 1;
+            VkDependencyInfo sceneResetDep{};
+            sceneResetDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+            sceneResetDep.imageMemoryBarrierCount = 1;
+            sceneResetDep.pImageMemoryBarriers = &sceneReset;
+            vkCmdPipelineBarrier2(cmd, &sceneResetDep);
+
+            if (sceneHasDepth)
+            {
+                VkImageMemoryBarrier2 depthReset{};
+                depthReset.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+                depthReset.srcStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                                          VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+                depthReset.srcAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+                depthReset.dstStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
+                depthReset.dstAccessMask = 0;
+                depthReset.oldLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+                depthReset.newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+                depthReset.image = sceneDepth;
+                depthReset.subresourceRange.aspectMask = depthAspectMask(sceneDepthFormat);
+                depthReset.subresourceRange.levelCount = 1;
+                depthReset.subresourceRange.layerCount = 1;
+                VkDependencyInfo depthResetDep{};
+                depthResetDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+                depthResetDep.imageMemoryBarrierCount = 1;
+                depthResetDep.pImageMemoryBarriers = &depthReset;
+                vkCmdPipelineBarrier2(cmd, &depthResetDep);
+            }
+        }
+        else if (hasDepth)
         {
             VkImageMemoryBarrier2 depthPost{};
             depthPost.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -665,14 +849,14 @@ FrameRenderer::renderFrameImpl(const VulkanSwapchain& swapchain, VkQueue queue, 
 std::expected<FrameStatus, std::string>
 FrameRenderer::renderClearedFrame(const VulkanSwapchain& swapchain, VkQueue queue, VkClearColorValue clearColor)
 {
-    return renderFrameImpl(swapchain, queue, clearColor, nullptr);
+    return renderFrameImpl(swapchain, queue, clearColor, nullptr, nullptr);
 }
 
 std::expected<FrameStatus, std::string>
 FrameRenderer::renderFrame(const VulkanSwapchain& swapchain, VkQueue queue, VkClearColorValue clearColor,
-                           const FrameRecordFn& record)
+                           const FrameRecordFn& record, const OffscreenSceneTarget* target)
 {
-    return renderFrameImpl(swapchain, queue, clearColor, &record);
+    return renderFrameImpl(swapchain, queue, clearColor, &record, target);
 }
 
 } // namespace starforge::vulkan

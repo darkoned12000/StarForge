@@ -94,8 +94,8 @@ TEST_CASE("M15 cargo: capacity and item arithmetic")
     hold.capacity = 10;
     CHECK(hold.canAdd("ore", 10));
     CHECK_FALSE(hold.canAdd("ore", 11));
-    hold.add("ore", 6);
-    hold.add("water", 2);
+    CHECK(hold.add("ore", 6));
+    CHECK(hold.add("water", 2));
     CHECK(hold.used() == 8);
     CHECK(hold.remove("ore", 3));
     CHECK(hold.used() == 5);

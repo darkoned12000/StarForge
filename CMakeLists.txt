@@ -137,6 +137,10 @@ if(STARFORGE_USE_JOLT)
     set(CPP_RTTI_ENABLED ON CACHE BOOL "" FORCE)
     set(DOUBLE_PRECISION OFF CACHE BOOL "" FORCE)
     set(CROSS_PLATFORM_DETERMINISTIC ON CACHE BOOL "" FORCE)
+    # Jolt's -Wall -Werror breaks on newer GCC false positives (e.g.
+    # array-bounds in SoftBodySharedSettings). STARFORGE applies its own
+    # warning policy to first-party targets via starforge_set_warnings.
+    set(ENABLE_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
     # We do not use Jolt's hair/compute shaders (dxc is unavailable).
     set(JPH_USE_VK OFF CACHE BOOL "" FORCE)
     set(JPH_USE_DX12 OFF CACHE BOOL "" FORCE)
@@ -387,7 +391,7 @@ starforge_add_shader(
     OUTPUT_NAME starfield.frag
 )
 
-foreach(effect_shaders IN ITEMS nebula dust sun_distortion wormhole ftl storm billboard asteroid sun sun_corona texture_blit hdr_tonemap hdr_bright hdr_blur gbuffer edge_detect hud planet_sphere planet_atmosphere rock_field rock_outline rock_impostor nebula_noise3d ui_text)
+foreach(effect_shaders IN ITEMS nebula dust sun_distortion wormhole ftl storm billboard asteroid sun sun_corona texture_blit hdr_tonemap hdr_resolve hdr_bright hdr_blur bloom_down bloom_up tonemap gbuffer edge_detect hud planet_sphere planet_atmosphere rock_field rock_outline rock_impostor nebula_noise3d ui_text)
     starforge_add_shader(
         SOURCE "${PROJECT_SOURCE_DIR}/shaders/graphics/${effect_shaders}.slang"
         STAGE  vertex

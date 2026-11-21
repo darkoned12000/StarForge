@@ -111,7 +111,7 @@ Buffer::Buffer(Buffer&& other) noexcept
     : allocator_(std::exchange(other.allocator_, nullptr)),
       buffer_(std::exchange(other.buffer_, VK_NULL_HANDLE)),
       allocation_(std::exchange(other.allocation_, nullptr)),
-      size_(other.size_),
+      size_(std::exchange(other.size_, 0)),
       mapped_(std::exchange(other.mapped_, nullptr))
 {
 }
@@ -131,7 +131,7 @@ Buffer& Buffer::operator=(Buffer&& other) noexcept
         allocator_ = std::exchange(other.allocator_, nullptr);
         buffer_ = std::exchange(other.buffer_, VK_NULL_HANDLE);
         allocation_ = std::exchange(other.allocation_, nullptr);
-        size_ = other.size_;
+        size_ = std::exchange(other.size_, 0);
         mapped_ = std::exchange(other.mapped_, nullptr);
     }
     return *this;

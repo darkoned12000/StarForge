@@ -48,6 +48,7 @@ public:
         std::string shaderDirectory;
         std::uint32_t variantCount = 4;
         std::uint32_t capacity = 4096;
+        const VkSpecializationInfo* specializationInfo = nullptr;
     };
 
     static std::expected<std::unique_ptr<RawAsteroidField>, std::string> create(const CreateInfo& info);

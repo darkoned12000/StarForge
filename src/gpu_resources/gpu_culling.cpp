@@ -157,21 +157,37 @@ GpuCulling::uploadBounds(const std::vector<float>& boundsData)
 
 Buffer& GpuCulling::indirectBuffer(std::uint32_t frameIndex) noexcept
 {
+    if (framesInFlight_ == 0 || indirectBuffers_.empty())
+    {
+        return emptyBuffer_;
+    }
     return indirectBuffers_[frameIndex % framesInFlight_];
 }
 
 const Buffer& GpuCulling::indirectBuffer(std::uint32_t frameIndex) const noexcept
 {
+    if (framesInFlight_ == 0 || indirectBuffers_.empty())
+    {
+        return emptyBuffer_;
+    }
     return indirectBuffers_[frameIndex % framesInFlight_];
 }
 
 Buffer& GpuCulling::visibleIndicesBuffer(std::uint32_t frameIndex) noexcept
 {
+    if (framesInFlight_ == 0 || visibleIndicesBuffers_.empty())
+    {
+        return emptyBuffer_;
+    }
     return visibleIndicesBuffers_[frameIndex % framesInFlight_];
 }
 
 const Buffer& GpuCulling::visibleIndicesBuffer(std::uint32_t frameIndex) const noexcept
 {
+    if (framesInFlight_ == 0 || visibleIndicesBuffers_.empty())
+    {
+        return emptyBuffer_;
+    }
     return visibleIndicesBuffers_[frameIndex % framesInFlight_];
 }
 

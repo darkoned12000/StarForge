@@ -81,11 +81,15 @@ public:
     [[nodiscard]] std::expected<RawVoiceHandle, std::string>
     loadFromMemory(std::span<const std::uint8_t> data, const RawSoundParams& params = {});
 
+    [[nodiscard]] std::expected<RawVoiceHandle, std::string>
+    loadFromFile(const std::string& path, const RawSoundParams& params = {}, bool stream = false);
+
     bool play(RawVoiceHandle voice, bool restartIfPlaying = false) noexcept;
     bool stop(RawVoiceHandle voice) noexcept;
     [[nodiscard]] bool isPlaying(RawVoiceHandle voice) const noexcept;
     bool setVolume(RawVoiceHandle voice, float volume) noexcept;
     bool setPitch(RawVoiceHandle voice, float pitch) noexcept;
+    bool fade(RawVoiceHandle voice, float fromVolume, float toVolume, std::uint64_t milliseconds) noexcept;
     bool setLoop(RawVoiceHandle voice, bool loop) noexcept;
     [[nodiscard]] float volume(RawVoiceHandle voice) const noexcept;
     [[nodiscard]] float pitch(RawVoiceHandle voice) const noexcept;

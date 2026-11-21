@@ -14,7 +14,7 @@ struct CargoHold
 
     [[nodiscard]] int used() const noexcept;
     [[nodiscard]] bool canAdd(const std::string& commodity, int amount) const;
-    void add(const std::string& commodity, int amount);
+    [[nodiscard]] bool add(const std::string& commodity, int amount);
     [[nodiscard]] bool remove(const std::string& commodity, int amount);
 };
 

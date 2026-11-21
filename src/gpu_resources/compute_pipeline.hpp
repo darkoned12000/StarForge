@@ -44,7 +44,9 @@ public:
     ComputePipeline& operator=(const ComputePipeline&) = delete;
 
     // Binds the storage buffers to bindings 0..N-1, dispatches workgroups, and
-    // waits for completion with a memory barrier making shader writes visible.
+    // waits for completion. Uses conservative barriers for correctness in
+    // generic one-shot use; performance-sensitive paths should prefer
+    // recordDispatch() with caller-managed barriers.
     [[nodiscard]] std::expected<void, std::string>
     dispatchAndWait(std::span<const Buffer* const> storageBuffers,
                     std::uint32_t groupCountX,
@@ -60,8 +62,6 @@ public:
                                     std::uint32_t groupCountY = 1,
                                     std::uint32_t groupCountZ = 1);
 
-    // Record a dispatch into an existing command buffer (no submit, no wait).
-    // Caller is responsible for barriers before/after.
     // Bind storage buffers into the descriptor set once. Repeated dispatches
     // with the same buffer handles skip vkUpdateDescriptorSets entirely.
     [[nodiscard]] std::expected<void, std::string>
@@ -72,6 +72,10 @@ public:
     // Number of descriptor-set updates actually issued (setup-phase proof).
     [[nodiscard]] std::uint64_t descriptorUpdateCount() const noexcept { return descriptorUpdateCount_; }
 
+    // Record a dispatch into an existing command buffer (no submit, no wait).
+    // Caller is responsible for barriers before/after and for ensuring the
+    // descriptor set is not updated while command buffers that bind it are
+    // pending execution.
     [[nodiscard]] std::expected<void, std::string>
     recordDispatch(VkCommandBuffer cmd,
                   std::span<const Buffer* const> storageBuffers,

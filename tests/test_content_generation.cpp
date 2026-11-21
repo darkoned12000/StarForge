@@ -254,6 +254,10 @@ TEST_CASE("PlayerDelta: serialize/deserialize round-trip")
     PlayerDelta d2;
     d2.cellX = 4; d2.cellY = 5; d2.cellZ = 6; d2.level = 0;
     d2.objectId = 99; d2.type = DeltaType::Modified;
+    d2.objectType = ContentType::Station;
+    d2.orientation[0] = 12;
+    d2.orientation[1] = 34;
+    d2.orientation[2] = 56;
     d2.scale = 1.5f; d2.subtype = 2;
     store.apply(d2);
 
@@ -265,7 +269,83 @@ TEST_CASE("PlayerDelta: serialize/deserialize round-trip")
     CHECK(loaded == 2);
     CHECK(store2.size() == 2);
     CHECK(store2.isRemoved(1, 2, 3, 1, 42));
-    CHECK(store2.getDelta(4, 5, 6, 0, 99).has_value());
+    auto restored = store2.getDelta(4, 5, 6, 0, 99);
+    REQUIRE(restored.has_value());
+    CHECK(restored->objectType == ContentType::Station);
+    CHECK(restored->orientation[0] == 12);
+    CHECK(restored->orientation[1] == 34);
+    CHECK(restored->orientation[2] == 56);
+}
+
+TEST_CASE("PlayerDelta: v1 deserialization preserves payload and defaults orientation")
+{
+    // v1 record: same 84-byte layout, version=1, orientation bytes were padding zeros.
+    DeltaStore v2;
+    PlayerDelta d;
+    d.cellX = 7; d.cellY = 8; d.cellZ = 9; d.level = 1;
+    d.objectId = 123;
+    d.type = DeltaType::Modified;
+    d.objectType = ContentType::Station;
+    d.scale = 2.5f;
+    d.subtype = 3;
+    d.properties = 0x11;
+    d.localX = 1.0; d.localY = 2.0; d.localZ = 3.0;
+    d.orientation[0] = 9; d.orientation[1] = 8; d.orientation[2] = 7;
+    v2.apply(d);
+
+    auto data = v2.serialize();
+    REQUIRE(data.size() >= 20);
+    // Downgrade header version to v1 and zero orientation/padding bytes in the record.
+    data[4] = 1; data[5] = 0; data[6] = 0; data[7] = 0;
+    constexpr std::size_t kHeader = 16;
+    constexpr std::size_t kOrientationOffset = 42; // within record
+    data[kHeader + kOrientationOffset + 0] = 0;
+    data[kHeader + kOrientationOffset + 1] = 0;
+    data[kHeader + kOrientationOffset + 2] = 0;
+
+    DeltaStore loaded;
+    CHECK(loaded.deserialize(data) == 1);
+    auto got = loaded.getDelta(7, 8, 9, 1, 123);
+    REQUIRE(got.has_value());
+    CHECK(got->type == DeltaType::Modified);
+    CHECK(got->objectType == ContentType::Station);
+    CHECK(got->scale == 2.5f);
+    CHECK(got->subtype == 3);
+    CHECK(got->properties == 0x11);
+    CHECK(got->orientation[0] == 0);
+    CHECK(got->orientation[1] == 0);
+    CHECK(got->orientation[2] == 0);
+}
+
+TEST_CASE("applyDeltas: modified delta updates object type and orientation")
+{
+    auto generated = generateContent(42, 0, 0, 0, 0);
+    REQUIRE(!generated.objects.empty());
+
+    DeltaStore store;
+    PlayerDelta d;
+    d.cellX = generated.cellX; d.cellY = generated.cellY; d.cellZ = generated.cellZ; d.level = generated.level;
+    d.objectId = generated.objects[0].objectId;
+    d.type = DeltaType::Modified;
+    d.objectType = ContentType::Station;
+    d.scale = 7.0f;
+    d.subtype = 1;
+    d.properties = 0x22;
+    d.localX = generated.objects[0].localX;
+    d.localY = generated.objects[0].localY;
+    d.localZ = generated.objects[0].localZ;
+    d.orientation[0] = 11;
+    d.orientation[1] = 22;
+    d.orientation[2] = 33;
+    store.apply(d);
+
+    auto modified = applyDeltas(generated, store);
+    REQUIRE(modified.objects.size() == generated.objects.size());
+    CHECK(modified.objects[0].type == ContentType::Station);
+    CHECK(modified.objects[0].scale == 7.0f);
+    CHECK(modified.objects[0].orientation[0] == 11);
+    CHECK(modified.objects[0].orientation[1] == 22);
+    CHECK(modified.objects[0].orientation[2] == 33);
 }
 
 TEST_CASE("applyDeltas: removed objects filtered")

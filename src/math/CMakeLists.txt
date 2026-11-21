@@ -17,8 +17,6 @@ target_link_libraries(starforge_math
 target_compile_definitions(starforge_math
     PUBLIC
         GLM_FORCE_DEPTH_ZERO_TO_ONE
-        GLM_FORCE_RIGHT_HANDED_COORDINATE_SYSTEM
-        GLM_FORCE_COLUMN_MAJOR
 )
 
 starforge_set_warnings(starforge_math)

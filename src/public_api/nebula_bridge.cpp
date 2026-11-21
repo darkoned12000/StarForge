@@ -73,6 +73,7 @@ std::expected<std::unique_ptr<RawNebula>, std::string> RawNebula::create(const C
         .colorFormat = info.colorFormat,
         .depthFormat = info.depthFormat,
         .shaderDirectory = info.shaderDirectory,
+        .specializationInfo = info.specializationInfo,
     });
     if (!backend)
     {

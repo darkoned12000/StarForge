@@ -29,6 +29,7 @@ target_link_libraries(starforge_vulkan_queue
 starforge_set_warnings(starforge_vulkan_queue)
 
 add_library(starforge_vulkan STATIC
+    hdr_target.cpp
     vulkan_context.cpp
     vulkan_device.cpp
     vulkan_physical_device.cpp

@@ -66,6 +66,7 @@ std::expected<std::unique_ptr<RawPlanet>, std::string> RawPlanet::create(const C
         .colorFormat = info.colorFormat,
         .depthFormat = info.depthFormat,
         .shaderDirectory = info.shaderDirectory,
+        .specializationInfo = info.specializationInfo,
     });
     if (!renderer) return std::unexpected(renderer.error());
     auto result = std::unique_ptr<RawPlanet>(new RawPlanet());
@@ -86,6 +87,7 @@ std::expected<void, std::string> RawPlanet::recreate(const CreateInfo& info)
         .colorFormat = info.colorFormat,
         .depthFormat = info.depthFormat,
         .shaderDirectory = info.shaderDirectory,
+        .specializationInfo = info.specializationInfo,
     });
     if (!renderer) return std::unexpected(renderer.error());
     impl_->renderer = std::move(*renderer);

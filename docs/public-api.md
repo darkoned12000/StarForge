@@ -122,7 +122,7 @@ convenience wrapper around the same path.
   WAVs without binary assets.
 - `starforge::math` — GLM-free `Vec2/3/4f/d`, `Mat3f/d`, `Mat4f/d`,
   arithmetic, `dot`/`cross`/`length`/`normalize`, `perspectiveVulkan`,
-  `perspectiveVulkanReverseZ`, `lookAt`, `inverse`, `toFloat32`.
+  `perspectiveVulkanReverseZ`, `perspectiveVulkanReverseZInfinite`, `lookAt`, `inverse`, `toFloat32`.
   Conventions: right-handed, Y-up, camera looks down −Z, Vulkan clip
   depth [0, 1] (Y-flip via negative viewport, handled by the backend).
 - `starforge::WorldPosition` and helpers (`toCameraRelative`,

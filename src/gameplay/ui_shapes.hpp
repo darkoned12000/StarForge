@@ -5,6 +5,7 @@
 #include "gameplay/ui_text.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 namespace starforge::gameplay::ui_shapes
@@ -21,7 +22,14 @@ struct ColoredQuad
 panelQuads(float x, float y, float w, float h, float outlineWidth)
 {
     std::vector<ColoredQuad> out;
-    const float ow = std::clamp(outlineWidth, 0.0f, std::min(w, h) * 0.25f);
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(w) || !std::isfinite(h) || w <= 0.0f ||
+        h <= 0.0f)
+    {
+        return out;
+    }
+    const float safeOutline = std::isfinite(outlineWidth) ? outlineWidth : 0.0f;
+    const float maxOutline = std::max(0.0f, std::min(w, h) * 0.25f);
+    const float ow = std::clamp(safeOutline, 0.0f, maxOutline);
     out.push_back({{x, y, x + w, y + h}, 1}); // outline
     out.push_back({{x + ow, y + ow, x + w - ow, y + h - ow}, 0}); // fill
     // Thin top strip so it never collides with panel titles/text.
@@ -35,8 +43,14 @@ panelQuads(float x, float y, float w, float h, float outlineWidth)
 barQuads(float x, float y, float w, float h, float value)
 {
     std::vector<ColoredQuad> out;
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(w) || !std::isfinite(h) || w <= 0.0f ||
+        h <= 0.0f)
+    {
+        return out;
+    }
     out.push_back({{x, y, x + w, y + h}, 1}); // track
-    const float v = std::clamp(value, 0.0f, 1.0f);
+    const float safeValue = std::isfinite(value) ? value : 0.0f;
+    const float v = std::clamp(safeValue, 0.0f, 1.0f);
     out.push_back({{x, y, x + w * v, y + h}, 0}); // fill
     return out;
 }

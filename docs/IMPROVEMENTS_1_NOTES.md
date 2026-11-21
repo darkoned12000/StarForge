@@ -128,6 +128,49 @@ the hub-tip lamps, pulsing smoothly. Debug + Release: 12/12.
 Debug and Release: build clean, CTest 12/12, no golden churn, zero validation
 errors.
 
+## HDR wiring (`hdrwiring` branch, in progress)
+
+Stage A of Claude's frame-graph plan is wired and running:
+
+- `FrameRenderer::renderFrame` gained an optional offscreen target. The scene
+  pass renders into RGBA16F + depth; a second pass tonemaps into the swapchain
+  and then draws UI with the swapchain depth still attached (LOAD), so the
+  existing UI pipelines remain dynamic-rendering compatible.
+- `RendererInternalAccess` gained `sceneColorFormat()` and
+  `specializationInfo()`. All scene facades (toon, starfield, nebula, planet,
+  rocks) now build pipelines for the HDR format and flip `kHdrOutput` to true;
+  UI/HUD stay on the 8-bit swapchain format.
+- Resolve uses `shaders/graphics/hdr_resolve.slang` — Claude's tonemap adapted
+  to `TextureEffect`'s descriptor layout — with exposure 1.0, bloom 0.6,
+  vignette 0.15, ACES, and animated dither.
+- Bloom: half-res RGBA16F ping-pong, bright extract (threshold 1.0) then
+  separable blur H/V, composited by the resolve pass.
+- `STARFORGE_HDR=0` restores the original direct path for A/B bisecting.
+- Atomic planet-atmosphere skip when intensity is zero: the disabled additive
+  limb was leaving a dark annulus on the HDR target.
+
+Claude's `hdr/` files were used as design reference (NOTES.md, frame layout,
+tonemap shader); the per-frame `HdrTarget` and patch files were not applied
+because the project already has a VMA-backed image helper and the offscreen
+path above was already in place.
+
+Verified: Debug + Release 12/12, zero validation errors with HDR on and off.
+Follow-up fixes:
+- **Mirrored sky / upside-down ship**: the resolve fullscreen triangle used
+  `uv = p*0.5+0.5` while both passes use a flipped-Y Vulkan viewport, so the
+  HDR texture was sampled vertically flipped. `hdr_resolve.slang` now flips V.
+  This fixed the mirrored stars/sun and restored the ship's upright, centred
+  chase view.
+- **Dome lamps**: beacon boxes replaced with low-poly UV spheres in
+  `generate_assets.py` (`Mesh.sphere()`), so the station lights read as round
+  navigation domes rather than red pulsing squares.
+- Disabled atmosphere draws now skip the pass entirely (zero-intensity additive
+  draws were leaving a dark annulus on the HDR target).
+
+Still open: per-frame-in-flight HDR targets, GPU timestamping, deliberate
+golden regeneration for the HDR path, and re-tuning emissive gains now that
+values above 1.0 survive.
+
 ## Not implemented (requires renderer restructuring)
 
 **Item 1 — HDR render target + bloom + tonemap.** `Renderer::renderFrame`

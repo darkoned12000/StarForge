@@ -1,6 +1,7 @@
 #include "gameplay/damage.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace starforge::gameplay
 {
@@ -45,6 +46,11 @@ DamageResult applyDamage(DamageState& state, float amount, Subsystem subsystem, 
 void tickDamage(DamageState& state, float dt, float shieldRechargePerSecond)
 {
     if (state.wreck) return;
+    if (!(dt > 0.0f) || !std::isfinite(dt) || !std::isfinite(shieldRechargePerSecond) ||
+        shieldRechargePerSecond <= 0.0f)
+    {
+        return;
+    }
     const float efficiency = shieldEfficiency(state);
     if (efficiency > 0.0f && state.shield < state.shieldMax)
     {

@@ -48,6 +48,7 @@ public:
         std::string shaderDirectory;
         double defaultRadius = 10000.0;
         std::uint32_t subdivisions = 16;
+        const VkSpecializationInfo* specializationInfo = nullptr;
     };
 
     [[nodiscard]] static std::expected<std::unique_ptr<RawSun>, std::string>

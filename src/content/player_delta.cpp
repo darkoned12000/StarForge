@@ -97,11 +97,13 @@ double getF64LE(const std::uint8_t*& p) noexcept
 //   cellX: int64 (8) | cellY: int64 (8) | cellZ: int64 (8)   -> 24
 //   level: uint32 (4) | padding: uint32 (4)                  -> 32
 //   objectId: uint64 (8)                                     -> 40
-//   type: uint8 (1) | objectType: uint8 (1) | padding: 6     -> 48
+//   type: uint8 (1) | objectType: uint8 (1) | orientation: 3 | padding: 3 -> 48
 //   scale: float (4) | subtype: uint32 (4) | properties: uint32 (4) -> 60
 //   localX: double (8) | localY: double (8) | localZ: double (8)    -> 84
+// Version 2 writes orientation bytes; version 1 readers ignore them (zeroed).
 constexpr std::size_t kHeaderSize = 16; // magic(4) + version(4) + uint64 record count
 constexpr std::size_t kRecordSize = 84;
+constexpr std::uint32_t kDeltaFormatVersion = 2;
 
 } // namespace
 
@@ -185,7 +187,7 @@ std::vector<std::uint8_t> DeltaStore::serialize() const
     data.resize(kHeaderSize);
     std::uint8_t* p = data.data();
     *p++ = 'S'; *p++ = 'F'; *p++ = 'D'; *p++ = 'L';
-    putU32LE(p, 1);
+    putU32LE(p, kDeltaFormatVersion);
     putU64LE(p, static_cast<std::uint64_t>(keys.size()));
 
     for (const DeltaKey& k : keys)
@@ -206,7 +208,10 @@ std::vector<std::uint8_t> DeltaStore::serialize() const
         putU64LE(p, v.objectId);
         *p++ = static_cast<std::uint8_t>(v.type);
         *p++ = static_cast<std::uint8_t>(v.objectType);
-        for (int i = 0; i < 6; ++i) *p++ = 0; // padding
+        *p++ = v.orientation[0];
+        *p++ = v.orientation[1];
+        *p++ = v.orientation[2];
+        for (int i = 0; i < 3; ++i) *p++ = 0; // padding
         putF32LE(p, v.scale);
         putU32LE(p, v.subtype);
         putU32LE(p, v.properties);
@@ -233,7 +238,7 @@ std::size_t DeltaStore::deserialize(const std::vector<std::uint8_t>& data)
     p += 4;
 
     const std::uint32_t version = getU32LE(p);
-    if (version != 1) return 0;
+    if (version != 1 && version != kDeltaFormatVersion) return 0;
 
     std::uint64_t count = getU64LE(p);
 
@@ -258,7 +263,10 @@ std::size_t DeltaStore::deserialize(const std::vector<std::uint8_t>& data)
 
         const std::uint8_t typeByte = *p++;
         const std::uint8_t objectTypeByte = *p++;
-        p += 6; // padding
+        const std::uint8_t orientation0 = *p++;
+        const std::uint8_t orientation1 = *p++;
+        const std::uint8_t orientation2 = *p++;
+        p += 3; // padding
 
         const float scale = getF32LE(p);
         const std::uint32_t subtype = getU32LE(p);
@@ -281,6 +289,9 @@ std::size_t DeltaStore::deserialize(const std::vector<std::uint8_t>& data)
         delta.level = static_cast<int>(levelRaw);
         delta.type = static_cast<DeltaType>(typeByte);
         delta.objectType = static_cast<ContentType>(objectTypeByte);
+        delta.orientation[0] = orientation0;
+        delta.orientation[1] = orientation1;
+        delta.orientation[2] = orientation2;
         delta.scale = scale;
         delta.subtype = subtype;
         delta.properties = properties;
@@ -340,12 +351,16 @@ ContentChunk applyDeltas(const ContentChunk& generated, const DeltaStore& store)
             if (d.type == DeltaType::Modified)
             {
                 ContentObject modified = obj;
+                modified.type = d.objectType;
                 modified.scale = d.scale;
                 modified.subtype = d.subtype;
                 modified.properties = d.properties;
                 modified.localX = d.localX;
                 modified.localY = d.localY;
                 modified.localZ = d.localZ;
+                modified.orientation[0] = d.orientation[0];
+                modified.orientation[1] = d.orientation[1];
+                modified.orientation[2] = d.orientation[2];
                 presentIds.insert(modified.objectId);
                 filtered.push_back(std::move(modified));
                 continue;
@@ -371,6 +386,9 @@ ContentChunk applyDeltas(const ContentChunk& generated, const DeltaStore& store)
         added.localX = d.localX;
         added.localY = d.localY;
         added.localZ = d.localZ;
+        added.orientation[0] = d.orientation[0];
+        added.orientation[1] = d.orientation[1];
+        added.orientation[2] = d.orientation[2];
         filtered.push_back(std::move(added));
     }
 

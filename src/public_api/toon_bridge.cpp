@@ -87,6 +87,7 @@ std::expected<std::unique_ptr<RawToon>, std::string> RawToon::create(const Creat
         .colorFormat = info.colorFormat,
         .depthFormat = info.depthFormat,
         .shaderDirectory = info.shaderDirectory,
+        .specializationInfo = info.specializationInfo,
     });
     if (!backend)
     {

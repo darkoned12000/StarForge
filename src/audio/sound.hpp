@@ -84,6 +84,12 @@ public:
     [[nodiscard]] std::expected<SoundHandle, std::string>
     loadFromMemory(std::span<const std::uint8_t> data, const SoundConfig& config = {});
 
+    // Loads audio from a file path. When `stream` is true, audio is
+    // streamed from disk during playback instead of being fully decoded
+    // into memory up front (useful for long music/ambience).
+    [[nodiscard]] std::expected<SoundHandle, std::string>
+    loadFromFile(const std::string& path, const SoundConfig& config = {}, bool stream = false);
+
     // Voice control. Invalid handles return false and have no effect.
     bool play(SoundHandle handle, bool restartIfPlaying = false) noexcept;
     bool playWithVolume(SoundHandle handle, float volume, bool restartIfPlaying = true) noexcept;
@@ -95,6 +101,7 @@ public:
     bool setLoop(SoundHandle handle, bool loop) noexcept;
     bool setVolume(SoundHandle handle, float volume) noexcept;
     bool setPitch(SoundHandle handle, float pitch) noexcept;
+    bool fade(SoundHandle handle, float fromVolume, float toVolume, std::uint64_t milliseconds) noexcept;
     [[nodiscard]] float volume(SoundHandle handle) const noexcept;
     [[nodiscard]] float pitch(SoundHandle handle) const noexcept;
 
@@ -144,6 +151,35 @@ private:
     bool groupsInitialized_ = false;
     std::vector<std::unique_ptr<Sound>> sounds_;
     float busVolumes_[kGroupCount] = {1.0f, 1.0f, 1.0f, 1.0f};
+};
+
+// A pool of preloaded voices for overlapping one-shot playback (rapid
+// lasers, impacts, etc.). The pool borrows the SoundBank; the bank must
+// outlive the pool.
+class SoundPool
+{
+public:
+    [[nodiscard]] static std::expected<SoundPool, std::string>
+    create(SoundBank& bank, std::span<const std::uint8_t> data, const SoundConfig& config = {},
+           std::size_t voices = 4);
+
+    SoundPool() noexcept = default;
+
+    // Plays one voice from the pool. Prefers a non-playing/finished
+    // voice; if all voices are busy, steals the next voice in
+    // round-robin order. Returns the handle that was played, or an
+    // invalid handle on failure.
+    SoundHandle play(float volume = 1.0f) noexcept;
+
+    void stopAll() noexcept;
+    [[nodiscard]] std::size_t size() const noexcept { return handles_.size(); }
+    [[nodiscard]] bool empty() const noexcept { return handles_.empty(); }
+    [[nodiscard]] const std::vector<SoundHandle>& handles() const noexcept { return handles_; }
+
+private:
+    SoundBank* bank_ = nullptr;
+    std::vector<SoundHandle> handles_;
+    std::size_t cursor_ = 0;
 };
 
 } // namespace starforge::audio

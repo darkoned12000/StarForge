@@ -17,9 +17,9 @@ struct MountedChunk
 
 // Instantiates ECS entities for a generated chunk, one per content
 // object. Local positions are converted through the cell origin into
-// precision-preserving world positions. Only asteroid-tagged entities
-// receive AsteroidTag; other content types use the AsteroidTag shell as
-// a visual carrier until their dedicated entity kinds exist.
+// precision-preserving world positions. Only asteroid content objects
+// retain AsteroidTag; other content types currently get a Transform-only
+// entity until dedicated entity kinds/components are added.
 [[nodiscard]] MountedChunk instantiateChunk(Ecs& world, const content::ContentChunk& chunk);
 
 // Destroys every entity owned by a mounted chunk.

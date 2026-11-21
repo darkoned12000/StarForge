@@ -30,7 +30,11 @@ TEST_CASE("AI traffic: route slots and lane points are deterministic")
     const auto slot1 = traffic.reserveDockSlot(station, shipB, 2);
     REQUIRE(slot0.has_value());
     REQUIRE(slot1.has_value());
-    CHECK(traffic.reserveDockSlot(station, shipA, 2) == std::nullopt);
+    // Idempotent: reserving the same ship returns its existing slot.
+    CHECK(traffic.reserveDockSlot(station, shipA, 2) == slot0);
+    // No free slots remain for a different ship.
+    const auto shipC = createNpcShip(world, *from, 1);
+    CHECK(traffic.reserveDockSlot(station, shipC, 2) == std::nullopt);
 
     const auto route0 = routeToStation(*from, *stationPos, slot0.value());
     const auto route1 = routeToStation(*from, *stationPos, slot1.value());

@@ -74,6 +74,7 @@ std::expected<std::unique_ptr<RawStarfield>, std::string> RawStarfield::create(c
         .colorFormat = info.colorFormat,
         .depthFormat = info.depthFormat,
         .shaderDirectory = info.shaderDirectory,
+        .specializationInfo = info.specializationInfo,
     });
     if (!backend)
     {

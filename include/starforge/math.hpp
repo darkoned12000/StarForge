@@ -396,6 +396,15 @@ namespace detail
 {
 [[nodiscard]] inline Mat4f perspectiveDepthZeroToOne(float fovYRadians, float aspect, float nearPlane, float farPlane) noexcept
 {
+    constexpr float kPi = 3.14159265358979323846f;
+    if (!std::isfinite(fovYRadians) || !std::isfinite(aspect) ||
+        !std::isfinite(nearPlane) || !std::isfinite(farPlane) ||
+        fovYRadians <= 0.0f || fovYRadians >= kPi ||
+        aspect <= 0.0f || nearPlane <= 0.0f || farPlane <= 0.0f)
+    {
+        return Mat4f{};
+    }
+
     const float f = 1.0f / std::tan(fovYRadians * 0.5f);
     Mat4f matrix{};
     matrix.columns[0][0] = f / aspect;
@@ -408,15 +417,38 @@ namespace detail
 } // namespace detail
 
 // Vulkan clip-space perspective projection (depth in [0, 1]).
+// Pure/stateless and safe to call concurrently from multiple threads.
 [[nodiscard]] inline Mat4f perspectiveVulkan(float fovYRadians, float aspect, float nearPlane, float farPlane) noexcept
 {
     return detail::perspectiveDepthZeroToOne(fovYRadians, aspect, nearPlane, farPlane);
 }
 
 // Vulkan reverse-Z perspective projection (near -> 1, far -> 0).
+// Pure/stateless and safe to call concurrently from multiple threads.
 [[nodiscard]] inline Mat4f perspectiveVulkanReverseZ(float fovYRadians, float aspect, float nearPlane, float farPlane) noexcept
 {
     return detail::perspectiveDepthZeroToOne(fovYRadians, aspect, farPlane, nearPlane);
+}
+
+// Vulkan reverse-Z perspective projection with an infinite far plane
+// (z = -nearPlane maps to depth 1, z -> -infinity maps to depth 0).
+// Pure/stateless and safe to call concurrently from multiple threads.
+[[nodiscard]] inline Mat4f perspectiveVulkanReverseZInfinite(float fovYRadians, float aspect, float nearPlane) noexcept
+{
+    constexpr float kPi = 3.14159265358979323846f;
+    if (!std::isfinite(fovYRadians) || !std::isfinite(aspect) || !std::isfinite(nearPlane) ||
+        fovYRadians <= 0.0f || fovYRadians >= kPi || aspect <= 0.0f || nearPlane <= 0.0f)
+    {
+        return Mat4f{};
+    }
+
+    const float f = 1.0f / std::tan(fovYRadians * 0.5f);
+    Mat4f matrix{};
+    matrix.columns[0][0] = f / aspect;
+    matrix.columns[1][1] = f;
+    matrix.columns[2][3] = -1.0f;
+    matrix.columns[3][2] = nearPlane;
+    return matrix;
 }
 
 } // namespace starforge::math

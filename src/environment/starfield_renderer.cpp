@@ -181,6 +181,7 @@ std::expected<StarfieldRenderer, std::string> StarfieldRenderer::create(const Cr
         .depthWrite = false,
         .depthCompare = VK_COMPARE_OP_ALWAYS,
         .backfaceCulling = false,
+        .specializationInfo = info.specializationInfo,
         .viewportWidth = 1.0f,
         .viewportHeight = 1.0f,
     });
@@ -206,6 +207,7 @@ std::expected<StarfieldRenderer, std::string> StarfieldRenderer::create(const Cr
         .shaderDirectory = info.shaderDirectory,
         .shaderBaseName = "billboard",
         .pushConstantSize = sizeof(internal::BillboardPush),
+        .specializationInfo = info.specializationInfo,
     });
     if (!sun)
     {

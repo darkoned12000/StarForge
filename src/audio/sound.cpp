@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <format>
+#include <fstream>
 #include <utility>
 
 namespace starforge::audio
@@ -201,6 +202,11 @@ SoundBank::loadFromMemory(std::span<const std::uint8_t> data, const SoundConfig&
 
     auto sound = std::make_unique<Sound>();
     sound->config = config;
+    sound->config.volume = clampGain(sound->config.volume);
+    if (sound->config.pitch <= 0.0f)
+    {
+        sound->config.pitch = 1.0f;
+    }
     // Retain the encoded bytes: ma_decoder_init_memory stores a raw
     // pointer and reads lazily during playback, so the caller's
     // buffer must not be the lifetime source (UAF fix, M12.2 review).
@@ -249,14 +255,80 @@ SoundBank::loadFromMemory(std::span<const std::uint8_t> data, const SoundConfig&
         ma_sound_set_spatialization_enabled(sound->voice.get(), MA_FALSE);
     }
 
-    ma_sound_set_volume(sound->voice.get(), clampGain(config.volume));
-    ma_sound_set_pitch(sound->voice.get(), config.pitch > 0.0f ? config.pitch : 1.0f);
+    ma_sound_set_volume(sound->voice.get(), sound->config.volume);
+    ma_sound_set_pitch(sound->voice.get(), sound->config.pitch);
 
     const auto handle = SoundHandle{static_cast<std::uint32_t>(sounds_.size())};
     sounds_.push_back(std::move(sound));
     core::logDebug(kTag, "SoundBank: loaded sound #{} ({} bytes, bus {})", handle.index, data.size(),
                    static_cast<int>(config.bus));
     return handle;
+}
+
+std::expected<SoundHandle, std::string>
+SoundBank::loadFromFile(const std::string& path, const SoundConfig& config, bool stream)
+{
+    if (context_ == nullptr || !context_->isValid() || !groupsInitialized_)
+    {
+        return std::unexpected<std::string>("sound bank has no valid audio context");
+    }
+
+    if (stream)
+    {
+        auto sound = std::make_unique<Sound>();
+        sound->config = config;
+        sound->config.volume = clampGain(sound->config.volume);
+        if (sound->config.pitch <= 0.0f)
+        {
+            sound->config.pitch = 1.0f;
+        }
+        sound->voice = MaSoundHandle(new ma_sound);
+
+        ma_sound_group* group = nullptr;
+        if (sound->config.bus != Bus::Master)
+        {
+            group = groups_[groupIndex(sound->config.bus)].get();
+        }
+        ma_uint32 flags = MA_SOUND_FLAG_STREAM;
+        if (sound->config.loop)
+        {
+            flags |= MA_SOUND_FLAG_LOOPING;
+        }
+
+        const ma_result result =
+            ma_sound_init_from_file(context_->engineHandle(), path.c_str(), flags, group, nullptr, sound->voice.get());
+        if (result != MA_SUCCESS)
+        {
+            return std::unexpected<std::string>(
+                std::format("failed to stream audio file '{}': {}", path, static_cast<int>(result)));
+        }
+
+        if (isTwoDimensional(sound->config.bus))
+        {
+            ma_sound_set_spatialization_enabled(sound->voice.get(), MA_FALSE);
+        }
+        ma_sound_set_volume(sound->voice.get(), sound->config.volume);
+        ma_sound_set_pitch(sound->voice.get(), sound->config.pitch);
+
+        const auto handle = SoundHandle{static_cast<std::uint32_t>(sounds_.size())};
+        sounds_.push_back(std::move(sound));
+        core::logDebug(kTag, "SoundBank: streamed sound #{} from '{}'", handle.index, path);
+        return handle;
+    }
+
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file)
+    {
+        return std::unexpected<std::string>("Cannot open audio file: " + path);
+    }
+    const auto size = static_cast<std::size_t>(file.tellg());
+    file.seekg(0);
+    std::vector<std::uint8_t> bytes(size);
+    if (size > 0 && !file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size)))
+    {
+        return std::unexpected<std::string>("Failed to read audio file: " + path);
+    }
+    return loadFromMemory(bytes, config);
 }
 
 bool SoundBank::play(SoundHandle handle, bool restartIfPlaying) noexcept
@@ -370,6 +442,18 @@ bool SoundBank::setPitch(SoundHandle handle, float pitch) noexcept
     return true;
 }
 
+bool SoundBank::fade(SoundHandle handle, float fromVolume, float toVolume, std::uint64_t milliseconds) noexcept
+{
+    Sound* sound = find(handle);
+    if (sound == nullptr || sound->voice == nullptr)
+    {
+        return false;
+    }
+    ma_sound_set_fade_in_milliseconds(sound->voice.get(), clampGain(fromVolume), clampGain(toVolume),
+                                      static_cast<ma_uint64>(milliseconds));
+    return true;
+}
+
 float SoundBank::volume(SoundHandle handle) const noexcept
 {
     const Sound* sound = find(handle);
@@ -477,6 +561,72 @@ float SoundBank::busVolume(Bus bus) const noexcept
         return context_ != nullptr ? context_->masterVolume() : 0.0f;
     }
     return busVolumes_[groupIndex(bus)];
+}
+
+std::expected<SoundPool, std::string>
+SoundPool::create(SoundBank& bank, std::span<const std::uint8_t> data, const SoundConfig& config, std::size_t voices)
+{
+    if (voices == 0)
+    {
+        return std::unexpected<std::string>("sound pool requires at least one voice");
+    }
+
+    SoundPool pool;
+    pool.bank_ = &bank;
+    pool.handles_.reserve(voices);
+    for (std::size_t i = 0; i < voices; ++i)
+    {
+        auto handle = bank.loadFromMemory(data, config);
+        if (!handle)
+        {
+            return std::unexpected<std::string>(handle.error());
+        }
+        pool.handles_.push_back(*handle);
+    }
+    return pool;
+}
+
+SoundHandle SoundPool::play(float volume) noexcept
+{
+    if (bank_ == nullptr || handles_.empty())
+    {
+        return {};
+    }
+
+    for (std::size_t i = 0; i < handles_.size(); ++i)
+    {
+        const std::size_t index = (cursor_ + i) % handles_.size();
+        const SoundHandle handle = handles_[index];
+        if (!bank_->isPlaying(handle))
+        {
+            cursor_ = (index + 1) % handles_.size();
+            if (bank_->playWithVolume(handle, volume, true))
+            {
+                return handle;
+            }
+            return {};
+        }
+    }
+
+    const SoundHandle handle = handles_[cursor_];
+    cursor_ = (cursor_ + 1) % handles_.size();
+    if (bank_->playWithVolume(handle, volume, true))
+    {
+        return handle;
+    }
+    return {};
+}
+
+void SoundPool::stopAll() noexcept
+{
+    if (bank_ == nullptr)
+    {
+        return;
+    }
+    for (const SoundHandle handle : handles_)
+    {
+        (void)bank_->stop(handle);
+    }
 }
 
 } // namespace starforge::audio

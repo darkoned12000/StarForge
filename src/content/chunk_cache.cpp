@@ -48,7 +48,11 @@ std::shared_ptr<const ContentChunk> RawGenerationStore::get(std::uint64_t seed, 
     const auto inserted = entries_.find(key);
     if (inserted != entries_.end())
     {
-        // Another worker won the race; return the resident chunk.
+        // Another worker won the race; the earlier miss was speculative.
+        if (stats_.misses > 0)
+        {
+            --stats_.misses;
+        }
         ++stats_.hits;
         if (inserted->second.orderIt != order_.begin())
         {

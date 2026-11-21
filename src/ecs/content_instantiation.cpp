@@ -16,7 +16,11 @@ namespace
 // checks. Returns false when the base coordinate is not representable.
 [[nodiscard]] bool shiftCellCoordinate(std::int64_t value, int shift, std::int64_t& result) noexcept
 {
-    const std::int64_t multiplier = 1LL << shift;
+    if (shift <= 0 || shift >= std::numeric_limits<std::int64_t>::digits)
+    {
+        return false;
+    }
+    const std::int64_t multiplier = std::int64_t{1} << shift;
     if (value > std::numeric_limits<std::int64_t>::max() / multiplier ||
         value < std::numeric_limits<std::int64_t>::min() / multiplier)
     {

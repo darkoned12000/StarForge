@@ -94,7 +94,7 @@ RawAsteroidField::create(const CreateInfo& info)
 
     auto renderer = environment::RockFieldRenderer::create({
         .device = info.device, .colorFormat = info.colorFormat, .depthFormat = info.depthFormat,
-        .shaderDirectory = info.shaderDirectory});
+        .shaderDirectory = info.shaderDirectory, .specializationInfo = info.specializationInfo});
     if (!renderer) return std::unexpected(renderer.error());
 
     auto result = std::unique_ptr<RawAsteroidField>(new RawAsteroidField());

@@ -53,7 +53,9 @@ private:
     VkDescriptorPool descriptorPool_ = VK_NULL_HANDLE;
     // Rotating sets: updating a bound descriptor set invalidates the command
     // buffer, so each render() call uses a different set.
-    static constexpr std::uint32_t kSetCount = 4;
+    // Enough slots for per-frame-in-flight HDR/bloom renders without reusing a
+    // descriptor set still in flight on the GPU.
+    static constexpr std::uint32_t kSetCount = 16;
     mutable VkDescriptorSet descriptorSets_[kSetCount] = {};
     mutable VkImageView boundViews_[kSetCount] = {};
     mutable std::uint32_t nextSet_ = 0;

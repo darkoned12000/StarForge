@@ -72,11 +72,39 @@ public:
     // attachment. The callback must set viewport/scissor if needed.
     using FrameRecordFn = std::function<void(VkCommandBuffer cmd, VkExtent2D extent)>;
 
+    // Optional offscreen scene target for HDR rendering. When supplied, the
+    // scene pass targets the given RGBA16F image + depth instead of the
+    // swapchain; `resolve` is then called with the scene color view as input
+    // to record a fullscreen tonemap pass into the swapchain image.
+    //
+    // Per-frame-in-flight resources: colorImages/colorViews (and depth) must
+    // have at least framesInFlight() entries. FrameRenderer indexes them by
+    // the current frame-in-flight slot to avoid GPU hazards when multiple
+    // frames are in flight.
+    struct OffscreenSceneTarget
+    {
+        const VkImage* colorImages = nullptr;
+        const VkImageView* colorViews = nullptr;
+        const VkImage* depthImages = nullptr;
+        const VkImageView* depthViews = nullptr;
+        std::uint32_t frameCount = 0;
+        VkFormat depthFormat = VK_FORMAT_UNDEFINED;
+        VkExtent2D extent{};
+        // Called after the scene colour is shader-readable but before the
+        // swapchain pass. frameIndex is the frame-in-flight slot. The
+        // callback may record its own passes/barriers and must leave the
+        // scene image readable for `resolve`.
+        std::function<void(VkCommandBuffer cmd, VkExtent2D extent, VkImageView sceneColor, std::uint32_t frameIndex)> bloom;
+        // Called inside the swapchain pass. Must set viewport/scissor.
+        std::function<void(VkCommandBuffer cmd, VkExtent2D extent, VkImageView sceneColor, std::uint32_t frameIndex)> resolve;
+    };
+
     // Like renderClearedFrame, but records `record` into the swapchain image
-    // in the same clear pass before presenting.
+    // in the same clear pass before presenting. If `target` is set, the scene
+    // renders offscreen and `target.resolve` composites it to the swapchain.
     [[nodiscard]] std::expected<FrameStatus, std::string>
     renderFrame(const VulkanSwapchain& swapchain, VkQueue queue, VkClearColorValue clearColor,
-                const FrameRecordFn& record);
+                const FrameRecordFn& record, const OffscreenSceneTarget* target = nullptr);
 
     [[nodiscard]] VkCommandBuffer currentCommandBuffer() const;
     [[nodiscard]] VkFence currentFence() const;
@@ -89,7 +117,7 @@ private:
 
     [[nodiscard]] std::expected<FrameStatus, std::string>
     renderFrameImpl(const VulkanSwapchain& swapchain, VkQueue queue, VkClearColorValue clearColor,
-                    const FrameRecordFn* record);
+                    const FrameRecordFn* record, const OffscreenSceneTarget* target);
 
     VkDevice device_ = VK_NULL_HANDLE;
     std::uint32_t queueFamily_ = 0;

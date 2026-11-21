@@ -11,16 +11,29 @@
 namespace starforge::audio
 {
 
+enum class Waveform
+{
+    Sine,
+    Square,
+    Saw,
+    Triangle,
+    Noise,
+};
+
 struct ToneParams
 {
     std::uint32_t sampleRate = 48000;
     std::uint32_t channels = 2;
     float frequencyHz = 440.0f;
+    float endFrequencyHz = 0.0f; // 0 = no sweep; otherwise linear frequency sweep.
     float durationSeconds = 0.1f;
     float amplitude = 0.5f; // Peak in [0, 1].
+    Waveform waveform = Waveform::Sine;
+    float attackSeconds = 0.0f;  // Simple linear envelope; 0 disables.
+    float releaseSeconds = 0.0f; // Simple linear envelope; 0 disables.
 };
 
-// Generates interleaved signed-16-bit PCM samples (sine, zero-phase start).
+// Generates interleaved signed-16-bit PCM samples.
 [[nodiscard]] std::vector<std::int16_t> generateTonePcm16(const ToneParams& params);
 
 // Wraps the PCM in a canonical 44-byte RIFF/WAVE header (16-bit PCM).

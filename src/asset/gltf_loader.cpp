@@ -51,33 +51,40 @@ std::size_t typeCount(const std::string& type)
     return 0;
 }
 
-float readComponent(const std::uint8_t* p, std::uint32_t componentType)
+float readComponent(const std::uint8_t* p, std::uint32_t componentType, bool normalized)
 {
     switch (componentType)
     {
-    case 5120: return static_cast<float>(static_cast<std::int8_t>(*p));
-    case 5121: return static_cast<float>(*p);
+    case 5120: {
+        const auto v = static_cast<std::int8_t>(*p);
+        return normalized ? std::max(-1.0f, static_cast<float>(v) / 127.0f) : static_cast<float>(v);
+    }
+    case 5121: {
+        const auto v = *p;
+        return normalized ? static_cast<float>(v) / 255.0f : static_cast<float>(v);
+    }
     case 5122: {
         std::int16_t v;
         std::memcpy(&v, p, sizeof(v));
-        return static_cast<float>(v);
+        return normalized ? std::max(-1.0f, static_cast<float>(v) / 32767.0f) : static_cast<float>(v);
     }
     case 5123: {
         std::uint16_t v;
         std::memcpy(&v, p, sizeof(v));
-        return static_cast<float>(v);
+        return normalized ? static_cast<float>(v) / 65535.0f : static_cast<float>(v);
     }
     case 5125: {
         std::uint32_t v;
         std::memcpy(&v, p, sizeof(v));
-        return static_cast<float>(v);
+        return normalized ? static_cast<float>(static_cast<double>(v) / 4294967295.0) : static_cast<float>(v);
     }
     case 5126: {
         float v;
         std::memcpy(&v, p, sizeof(v));
         return v;
     }
-    default: return 0.0f;
+    default:
+        return 0.0f;
     }
 }
 
@@ -190,9 +197,12 @@ bool readAccessor(const json& root, int accessorIndex, const LoadContext& contex
     const auto& accessors = root.at("accessors");
     if (static_cast<std::size_t>(accessorIndex) >= accessors.size()) return false;
     const auto& accessor = accessors[accessorIndex];
+    if (accessor.contains("sparse"))
+        return false; // Sparse accessors are not supported; reject instead of decoding wrong data.
     const std::uint32_t componentType = accessor.value("componentType", 0u);
     const std::size_t components = typeCount(accessor.value("type", ""));
     const std::size_t count = accessor.value("count", std::size_t{0});
+    const bool normalized = accessor.value("normalized", false);
     if (components == 0 || count == 0 || componentSize(componentType) == 0) return false;
 
     std::size_t bufferIndex = 0;
@@ -219,7 +229,69 @@ bool readAccessor(const json& root, int accessorIndex, const LoadContext& contex
         const std::size_t offset = base + i * stride;
         if (offset + components * componentSize(componentType) > binSize) return false;
         for (std::size_t c = 0; c < components; ++c)
-            out[i * components + c] = readComponent(bin + offset + c * componentSize(componentType), componentType);
+            out[i * components + c] = readComponent(bin + offset + c * componentSize(componentType),
+                                                    componentType, normalized);
+    }
+    return true;
+}
+
+bool readIndexAccessor(const json& root, int accessorIndex, const LoadContext& context,
+                       std::vector<std::uint32_t>& out)
+{
+    if (accessorIndex < 0) return false;
+    const auto& accessors = root.at("accessors");
+    if (static_cast<std::size_t>(accessorIndex) >= accessors.size()) return false;
+    const auto& accessor = accessors[accessorIndex];
+    if (accessor.contains("sparse")) return false;
+    const std::uint32_t componentType = accessor.value("componentType", 0u);
+    if (typeCount(accessor.value("type", "")) != 1) return false;
+    const std::size_t count = accessor.value("count", std::size_t{0});
+    const std::size_t compSize = componentSize(componentType);
+    if (count == 0 || compSize == 0) return false;
+    if (componentType != 5121u && componentType != 5123u && componentType != 5125u)
+        return false;
+
+    std::size_t bufferIndex = 0;
+    std::size_t base = accessor.value("byteOffset", std::size_t{0});
+    std::size_t stride = compSize;
+    if (accessor.contains("bufferView"))
+    {
+        const auto& views = root.at("bufferViews");
+        const std::size_t viewIndex = accessor["bufferView"].get<std::size_t>();
+        if (viewIndex >= views.size()) return false;
+        const auto& view = views[viewIndex];
+        bufferIndex = view.value("buffer", std::size_t{0});
+        base += view.value("byteOffset", std::size_t{0});
+        if (view.contains("byteStride")) stride = view["byteStride"].get<std::size_t>();
+    }
+    if (stride < compSize) return false;
+    const auto* bin = context.bufferData(bufferIndex);
+    const auto binSize = context.bufferSize(bufferIndex);
+    if (!bin) return false;
+
+    out.assign(count, 0u);
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        const std::size_t offset = base + i * stride;
+        if (offset + compSize > binSize) return false;
+        const auto* p = bin + offset;
+        switch (componentType)
+        {
+        case 5121: out[i] = static_cast<std::uint32_t>(*p); break;
+        case 5123: {
+            std::uint16_t v;
+            std::memcpy(&v, p, sizeof(v));
+            out[i] = static_cast<std::uint32_t>(v);
+            break;
+        }
+        case 5125: {
+            std::uint32_t v;
+            std::memcpy(&v, p, sizeof(v));
+            out[i] = v;
+            break;
+        }
+        default: return false;
+        }
     }
     return true;
 }
@@ -291,7 +363,8 @@ std::expected<GltfAsset, std::string> decodeMeshes(const json& root, const LoadC
             if (!primitive.contains("attributes") || !primitive["attributes"].contains("POSITION")) continue;
             const auto& attributes = primitive["attributes"];
 
-            std::vector<float> positions, normals, uvs, tangents, indices;
+            std::vector<float> positions, normals, uvs, tangents;
+            std::vector<std::uint32_t> indices;
             if (!readAccessor(root, attributes["POSITION"].get<int>(), context, positions))
                 return std::unexpected("Failed to read POSITION accessor");
             const std::size_t vertexCount = positions.size() / 3;
@@ -303,8 +376,9 @@ std::expected<GltfAsset, std::string> decodeMeshes(const json& root, const LoadC
                 readAccessor(root, attributes["TEXCOORD_0"].get<int>(), context, uvs);
             if (attributes.contains("TANGENT"))
                 readAccessor(root, attributes["TANGENT"].get<int>(), context, tangents);
-            if (primitive.contains("indices"))
-                readAccessor(root, primitive["indices"].get<int>(), context, indices);
+            if (primitive.contains("indices") &&
+                !readIndexAccessor(root, primitive["indices"].get<int>(), context, indices))
+                return std::unexpected("Failed to read indices accessor");
 
             MeshData mesh;
             mesh.name = sourceMesh.value("name", "");
@@ -337,9 +411,16 @@ std::expected<GltfAsset, std::string> decodeMeshes(const json& root, const LoadC
             };
 
             if (!indices.empty())
-                for (float index : indices) emitVertex(static_cast<std::size_t>(index));
+            {
+                for (const std::uint32_t index : indices)
+                {
+                    if (index < vertexCount) emitVertex(static_cast<std::size_t>(index));
+                }
+            }
             else
+            {
                 for (std::size_t i = 0; i < vertexCount; ++i) emitVertex(i);
+            }
             asset.meshes.push_back(std::move(mesh));
         }
     }
@@ -374,10 +455,20 @@ std::expected<GltfAsset, std::string> loadGlb(const std::uint8_t* data, std::siz
     if (context.buffers.empty()) return std::unexpected("GLB has no binary chunk");
 
     json root;
-    try { root = json::parse(jsonText); }
-    catch (const json::exception& e) { return std::unexpected(std::string("Invalid glTF JSON: ") + e.what()); }
-    resolveImages(root, {}, context);
-    return decodeMeshes(root, context);
+    try
+    {
+        root = json::parse(jsonText);
+        resolveImages(root, {}, context);
+        return decodeMeshes(root, context);
+    }
+    catch (const json::exception& e)
+    {
+        return std::unexpected(std::string("Invalid glTF JSON: ") + e.what());
+    }
+    catch (const std::exception& e)
+    {
+        return std::unexpected(std::string("glTF decode failed: ") + e.what());
+    }
 }
 
 std::expected<GltfAsset, std::string> loadGltf(const std::uint8_t* data, std::size_t size,
@@ -394,18 +485,29 @@ std::expected<GltfAsset, std::string> loadGltf(const std::uint8_t* data, std::si
     }
     catch (const json::exception& e) { return std::unexpected(std::string("Invalid glTF JSON: ") + e.what()); }
 
-    LoadContext context;
-    if (root.contains("buffers"))
-        for (const auto& buffer : root["buffers"])
-        {
-            if (!buffer.contains("uri"))
-                return std::unexpected("External glTF requires buffer URIs");
-            auto bytes = readUriBytes(buffer["uri"].get<std::string>(), baseDir);
-            if (bytes.empty()) return std::unexpected("Failed to resolve glTF buffer URI");
-            context.buffers.push_back(std::move(bytes));
-        }
-    resolveImages(root, baseDir, context);
-    return decodeMeshes(root, context);
+    try
+    {
+        LoadContext context;
+        if (root.contains("buffers"))
+            for (const auto& buffer : root["buffers"])
+            {
+                if (!buffer.contains("uri"))
+                    return std::unexpected("External glTF requires buffer URIs");
+                auto bytes = readUriBytes(buffer["uri"].get<std::string>(), baseDir);
+                if (bytes.empty()) return std::unexpected("Failed to resolve glTF buffer URI");
+                context.buffers.push_back(std::move(bytes));
+            }
+        resolveImages(root, baseDir, context);
+        return decodeMeshes(root, context);
+    }
+    catch (const json::exception& e)
+    {
+        return std::unexpected(std::string("Invalid glTF JSON: ") + e.what());
+    }
+    catch (const std::exception& e)
+    {
+        return std::unexpected(std::string("glTF decode failed: ") + e.what());
+    }
 }
 
 } // namespace starforge::asset

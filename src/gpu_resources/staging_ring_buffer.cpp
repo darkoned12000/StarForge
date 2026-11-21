@@ -57,6 +57,7 @@ std::expected<void, std::string> StagingRingBuffer::init(
 std::optional<StagingAllocation> StagingRingBuffer::reserve(std::size_t size, std::size_t alignment)
 {
     if (size == 0 || size > capacity_) return std::nullopt;
+    if (alignment == 0 || (alignment & (alignment - 1)) != 0) return std::nullopt;
 
     std::size_t current = writeOffset_.load(std::memory_order_relaxed);
     std::size_t aligned = 0;
@@ -80,9 +81,9 @@ std::optional<StagingAllocation> StagingRingBuffer::reserve(std::size_t size, st
     };
 }
 
-void StagingRingBuffer::flush(std::size_t offset, std::size_t size)
+std::expected<void, std::string> StagingRingBuffer::flush(std::size_t offset, std::size_t size)
 {
-    (void)buffer_.flush(offset, size);
+    return buffer_.flush(offset, size);
 }
 
 void StagingRingBuffer::reset() noexcept

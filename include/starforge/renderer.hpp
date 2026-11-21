@@ -77,8 +77,11 @@ public:
     // and presents. The backend sets viewport/scissor before invoking the
     // callback. Domain facades record through this callback.
     using RecordFn = std::function<void(FrameContext& frameContext)>;
+    // `uiRecord`, when provided, runs in a second pass after tonemapping so
+    // UI stays in the swapchain's 8-bit format. It is ignored on the legacy
+    // direct path, where UI must be part of `record` instead.
     [[nodiscard]] std::expected<FrameResult, std::string>
-    renderFrame(const ClearColor& clearColor, const RecordFn& record);
+    renderFrame(const ClearColor& clearColor, const RecordFn& record, const RecordFn& uiRecord = {});
 
     // Blocks until all submitted GPU work has completed. Call before
     // destroying or reassigning a renderer that has presented frames.

@@ -100,17 +100,19 @@ public:
     [[nodiscard]] std::expected<VoiceHandle, std::string>
     loadFromMemory(std::span<const std::uint8_t> data, const SoundParams& params);
 
-    // M17.6: reads a WAV/FLAC/MP3 file and decodes it through the same
-    // backend path as loadFromMemory.
+    // Reads a WAV/FLAC/MP3 file. When `stream` is true, audio is
+    // streamed from disk during playback instead of fully decoded into
+    // memory up front (useful for long music/ambience).
     [[nodiscard]] std::expected<VoiceHandle, std::string> loadFromFile(const std::string& path);
     [[nodiscard]] std::expected<VoiceHandle, std::string>
-    loadFromFile(const std::string& path, const SoundParams& params);
+    loadFromFile(const std::string& path, const SoundParams& params, bool stream = false);
 
     bool play(VoiceHandle voice, bool restartIfPlaying = false) noexcept;
     bool stop(VoiceHandle voice) noexcept;
     [[nodiscard]] bool isPlaying(VoiceHandle voice) const noexcept;
     bool setVolume(VoiceHandle voice, float volume) noexcept;
     bool setPitch(VoiceHandle voice, float pitch) noexcept;
+    bool fade(VoiceHandle voice, float fromVolume, float toVolume, std::uint64_t milliseconds) noexcept;
     bool setLoop(VoiceHandle voice, bool loop) noexcept;
     [[nodiscard]] float volume(VoiceHandle voice) const noexcept;
     [[nodiscard]] float pitch(VoiceHandle voice) const noexcept;

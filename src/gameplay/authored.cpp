@@ -46,13 +46,23 @@ LayeredGeneration::resolve(const CellKey& cell, std::vector<ContentPlacement> ge
     // Layer: authored overrides suppress generated content of the same kind
     // within this cell.
     const auto authored = authoredIn(cell);
-    std::array<bool, static_cast<std::size_t>(ContentKind::MissionObjective) + 1> authoredKinds{};
+    constexpr std::size_t kKindCount = static_cast<std::size_t>(ContentKind::MissionObjective) + 1;
+    auto kindIndex = [](ContentKind kind) -> std::size_t {
+        const auto index = static_cast<std::size_t>(kind);
+        return index < kKindCount ? index : kKindCount;
+    };
+
+    std::array<bool, kKindCount> authoredKinds{};
     for (const auto& placement : authored)
-        authoredKinds[static_cast<std::size_t>(placement.kind)] = true;
+    {
+        const std::size_t index = kindIndex(placement.kind);
+        if (index < kKindCount) authoredKinds[index] = true;
+    }
 
     generated.erase(
         std::remove_if(generated.begin(), generated.end(), [&](const ContentPlacement& placement) {
-            return authoredKinds[static_cast<std::size_t>(placement.kind)];
+            const std::size_t index = kindIndex(placement.kind);
+            return index < kKindCount && authoredKinds[index];
         }),
         generated.end());
 

@@ -2066,7 +2066,9 @@ int main()
             rockField->record(fc, rockContext, rockInstances.data(),
                               static_cast<std::uint32_t>(rockInstances.size()));
 
+        }, [&](starforge::FrameContext& fc) {
             // M16.5 flight HUD + targeting reticle (toon canvas, one draw).
+            // This runs in the post-tonemap pass so UI stays in 8-bit space.
             uiCanvas->clear();
             const float hudScale = 3.0f;
             const float cx = static_cast<float>(size.width) * 0.5f;

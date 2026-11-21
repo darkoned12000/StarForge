@@ -31,7 +31,7 @@ struct SchedulerConfig
 {
     std::uint32_t threadCount = 0; // 0 = hardware_concurrency() - 1
     SchedulerMode mode = SchedulerMode::Normal;
-    std::uint32_t dequeCapacity = 4096; // power of two
+    std::uint32_t dequeCapacity = 4096; // Reserved for future work-stealing deques; currently unused.
 };
 
 class JobScheduler
@@ -52,7 +52,9 @@ public:
     std::uint32_t threadCount() const noexcept;
     bool isDeterministic() const noexcept;
 
-    void* scratchAlloc(std::size_t size, std::size_t alignment = alignof(std::max_align_t));
+    // Thread-local scratch allocation. Returns nullptr on invalid input
+    // (size == 0, alignment not power-of-two, or overflow).
+    [[nodiscard]] void* scratchAlloc(std::size_t size, std::size_t alignment = alignof(std::max_align_t));
     void resetScratch();
 
     // Deferred deletion: retire a pointer for deletion after N epochs.

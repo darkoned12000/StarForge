@@ -94,6 +94,13 @@ TEST_CASE("Public math: perspective and lookAt conventions")
     CHECK(near(roundTrip.x(), 1.0f));
     CHECK(near(roundTrip.y(), 2.0f));
     CHECK(near(roundTrip.z(), 3.0f));
+
+    const auto infProj = perspectiveVulkanReverseZInfinite(kPi / 3.0f, 16.0f / 9.0f, 0.1f);
+    const auto nearClip = infProj * Vec4f{0.0f, 0.0f, -0.1f, 1.0f};
+    const auto farClip = infProj * Vec4f{0.0f, 0.0f, -1.0e6f, 1.0f};
+    CHECK(near(nearClip.z() / nearClip.w(), 1.0f));
+    CHECK(farClip.z() / farClip.w() >= 0.0f);
+    CHECK(farClip.z() / farClip.w() < 1.0e-4f);
 }
 
 TEST_CASE("Public world: fromMeters round-trips and rejects invalid input")

@@ -37,7 +37,7 @@ public:
 
     [[nodiscard]] std::optional<StagingAllocation> reserve(std::size_t size, std::size_t alignment = 256);
 
-    void flush(std::size_t offset = 0, std::size_t size = VK_WHOLE_SIZE);
+    [[nodiscard]] std::expected<void, std::string> flush(std::size_t offset = 0, std::size_t size = VK_WHOLE_SIZE);
 
     [[nodiscard]] Buffer& buffer() noexcept { return buffer_; }
     [[nodiscard]] const Buffer& buffer() const noexcept { return buffer_; }

@@ -44,6 +44,9 @@ public:
         VkFormat colorFormat = VK_FORMAT_R8G8B8A8_UNORM;
         VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
         std::string shaderDirectory;
+        // Specialization constants for rock_field.slang. HDR offscreen targets
+        // pass vulkan::hdrOutputSpecialization(true) to keep linear values.
+        const VkSpecializationInfo* specializationInfo = nullptr;
     };
 
     static std::expected<RockFieldRenderer, std::string> create(const CreateInfo& info);

@@ -129,7 +129,7 @@ std::vector<CellCoord> traverseCells(
 
     bool StreamingTraversal::contains(const CellCoord& cell) const
     {
-        return std::find(cells_.begin(), cells_.end(), cell) != cells_.end();
+        return std::binary_search(cells_.begin(), cells_.end(), cell, cellLess);
     }
 
     StreamingTraversal::Update StreamingTraversal::advance(

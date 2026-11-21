@@ -588,8 +588,8 @@ ComputePipeline::recordDispatch(VkCommandBuffer cmd,
 
     if (auto bound = bind(storageBuffers); !bound) return bound;
 
-    // The descriptor set is shared by all records; bind() serialized its update.
-    std::lock_guard lock(mutex_);
+    // bind() serializes descriptor-set updates; recording uses the external
+    // command buffer and does not touch the internal one-shot cmd/fence.
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout_,
                             0, 1, &descriptorSet_, 0, nullptr);

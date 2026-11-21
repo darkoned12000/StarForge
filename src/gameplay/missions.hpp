@@ -49,6 +49,9 @@ public:
     void define(MissionDef def);
     [[nodiscard]] bool isDefined(const std::string& id) const noexcept;
 
+    // Makes a mission available. Fails if the mission is currently active;
+    // use fail()/complete() first. Re-offering a completed/failed mission
+    // resets its delivered progress for repeatable missions.
     [[nodiscard]] std::expected<void, std::string> offer(const std::string& id);
     [[nodiscard]] std::expected<void, std::string> accept(const std::string& id);
     [[nodiscard]] std::expected<void, std::string> fail(const std::string& id);

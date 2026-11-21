@@ -126,8 +126,9 @@ std::expected<RockFieldRenderer, std::string> RockFieldRenderer::create(const Cr
     {
         bool frontCull;
         bool blend;
+        bool hdrOutput; // true only for rock_field.slang, which includes output_shoulder.slang
     };
-    const Spec specs[3] = {{false, false}, {true, false}, {false, false}};
+    const Spec specs[3] = {{false, false, true}, {true, false, false}, {false, false, false}};
     std::optional<vulkan::GraphicsPipeline>* pipelines[3] = {&renderer.mesh_, &renderer.outline_,
                                                              &renderer.impostor_};
     for (int i = 0; i < 3; ++i)
@@ -145,6 +146,7 @@ std::expected<RockFieldRenderer, std::string> RockFieldRenderer::create(const Cr
             .depthCompare = VK_COMPARE_OP_LESS,
             .backfaceCulling = specs[i].frontCull,
             .cullFrontFace = specs[i].frontCull,
+            .specializationInfo = specs[i].hdrOutput ? info.specializationInfo : nullptr,
             .viewportWidth = 1.0f,
             .viewportHeight = 1.0f,
         });

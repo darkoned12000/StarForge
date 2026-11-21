@@ -57,9 +57,10 @@ namespace bridge = public_api_bridge;
         .physicalDevice = RendererInternalAccess::physicalDevice(renderer),
         .queueFamily = RendererInternalAccess::queueFamily(renderer),
         .framesInFlight = RendererInternalAccess::framesInFlight(renderer),
-        .colorFormat = RendererInternalAccess::colorFormat(renderer),
+        .colorFormat = RendererInternalAccess::sceneColorFormat(renderer),
         .depthFormat = RendererInternalAccess::depthFormat(renderer),
         .shaderDirectory = shaderDirectory,
+        .specializationInfo = RendererInternalAccess::specializationInfo(renderer),
     };
 }
 

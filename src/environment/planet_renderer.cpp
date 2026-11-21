@@ -150,6 +150,7 @@ std::expected<PlanetRenderer, std::string> PlanetRenderer::create(const CreateIn
         .depthWrite = false,
         .depthCompare = VK_COMPARE_OP_ALWAYS,
         .backfaceCulling = false,
+        .specializationInfo = info.specializationInfo,
         .viewportWidth = 1.0f,
         .viewportHeight = 1.0f,
     });
@@ -214,6 +215,11 @@ void PlanetRenderer::render(VkCommandBuffer cmd, const PlanetRenderContext& cont
     vkCmdPushConstants(cmd, sphereLayout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(sphere), &sphere);
     vkCmdDraw(cmd, 3, 1, 0, 0);
+
+    // Callers disable the additive limb by setting intensity to zero. Skip
+    // the draw entirely: on an HDR target its zero-valued additive output
+    // was leaving a dark annulus around the disc.
+    if (params.atmosphereIntensity <= 0.0f) return;
 
     AtmoPush atmo;
     writeMat(atmo.viewProj, context.viewProj);

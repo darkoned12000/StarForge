@@ -47,6 +47,7 @@ public:
         VkFormat colorFormat = VK_FORMAT_R8G8B8A8_UNORM;
         VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
         std::string shaderDirectory;
+        const VkSpecializationInfo* specializationInfo = nullptr;
     };
 
     static std::expected<std::unique_ptr<RawPlanet>, std::string> create(const CreateInfo& info);

@@ -42,6 +42,7 @@ public:
         VkFormat colorFormat = VK_FORMAT_UNDEFINED;
         VkFormat depthFormat = VK_FORMAT_UNDEFINED;
         std::string shaderDirectory;
+        const VkSpecializationInfo* specializationInfo = nullptr;
     };
 
     [[nodiscard]] static std::expected<std::unique_ptr<RawNebula>, std::string> create(const CreateInfo& info);

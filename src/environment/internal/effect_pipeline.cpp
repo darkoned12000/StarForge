@@ -72,7 +72,8 @@ std::expected<PipelineBundle, std::string> createBundle(
     const std::string& dir, const std::string& base, VkDevice device, VkFormat colorFormat,
     std::uint32_t pushSize, VkShaderStageFlags stages,
     VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-    VkFormat depthFormat = VK_FORMAT_UNDEFINED, bool alphaBlend = false)
+    VkFormat depthFormat = VK_FORMAT_UNDEFINED, bool alphaBlend = false,
+    const VkSpecializationInfo* specializationInfo = nullptr)
 {
     PipelineBundle bundle;
     auto vertModule = loadShaderModule(device, dir + "/" + base + ".vert.spv");
@@ -124,6 +125,7 @@ std::expected<PipelineBundle, std::string> createBundle(
         .blendEnable = true,
         .blendSrcFactor = alphaBlend ? VK_BLEND_FACTOR_SRC_ALPHA : VK_BLEND_FACTOR_ONE,
         .blendDstFactor = alphaBlend ? VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA : VK_BLEND_FACTOR_ONE,
+        .specializationInfo = specializationInfo,
         .viewportWidth = 1.0f,
         .viewportHeight = 1.0f,
     });
@@ -174,7 +176,7 @@ std::expected<FullscreenEffect, std::string> FullscreenEffect::create(const Crea
     auto bundle = createBundle(info.shaderDirectory, info.shaderBaseName, info.device,
                                info.colorFormat, info.pushConstantSize,
                                VK_SHADER_STAGE_FRAGMENT_BIT, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-                               info.depthFormat, info.alphaBlend);
+                               info.depthFormat, info.alphaBlend, info.specializationInfo);
     if (!bundle)
     {
         return std::unexpected(std::move(bundle.error()));
@@ -248,7 +250,7 @@ std::expected<BillboardEffect, std::string> BillboardEffect::create(const Create
     auto bundle = createBundle(info.shaderDirectory, info.shaderBaseName, info.device,
                                info.colorFormat, info.pushConstantSize,
                                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                               VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP, info.depthFormat);
+                               VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP, info.depthFormat, false, info.specializationInfo);
     if (!bundle)
     {
         return std::unexpected(std::move(bundle.error()));

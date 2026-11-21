@@ -10,10 +10,25 @@ FileWatcher::Entry FileWatcher::stat(const std::string& path) noexcept
     Entry entry;
     std::error_code ec;
     entry.exists = std::filesystem::exists(path, ec);
-    if (!entry.exists || ec) return entry;
-    entry.lastWrite = std::filesystem::last_write_time(path, ec);
-    if (ec) return entry;
-    entry.size = std::filesystem::file_size(path, ec);
+    if (ec || !entry.exists)
+    {
+        entry.exists = false;
+        return entry;
+    }
+    const auto lastWrite = std::filesystem::last_write_time(path, ec);
+    if (ec)
+    {
+        entry.exists = std::filesystem::exists(path, ec);
+        return entry;
+    }
+    const auto size = std::filesystem::file_size(path, ec);
+    if (ec)
+    {
+        entry.exists = std::filesystem::exists(path, ec);
+        return entry;
+    }
+    entry.lastWrite = lastWrite;
+    entry.size = size;
     return entry;
 }
 

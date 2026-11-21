@@ -52,6 +52,9 @@ public:
         VkFormat colorFormat = VK_FORMAT_UNDEFINED;
         VkFormat depthFormat = VK_FORMAT_UNDEFINED;
         std::string shaderDirectory{};
+        // Specialization constants for the nebula shader. HDR offscreen targets
+        // pass vulkan::hdrOutputSpecialization(true) to keep linear values.
+        const VkSpecializationInfo* specializationInfo = nullptr;
     };
 
     [[nodiscard]] static std::expected<NebulaRenderer, std::string> create(const CreateInfo& info);

@@ -51,11 +51,15 @@ void assignRoute(flecs::entity entity, const spatial::WorldPosition& from,
     // advanceRoute's Transit/Docking gate admits them. Combat states are
     // left untouched — the FSM returns to Transit when the fight ends
     // because NavigationTarget still has a destination.
-    if (entity.has<AiAgent>() && entity.get<AiAgent>().state == BehaviorState::Patrol)
+    if (entity.has<AiAgent>())
     {
-        auto& agent = entity.get_mut<AiAgent>();
-        agent.state = BehaviorState::Transit;
-        entity.modified<AiAgent>();
+        const auto state = entity.get<AiAgent>().state;
+        if (state == BehaviorState::Patrol || state == BehaviorState::Stationary)
+        {
+            auto& agent = entity.get_mut<AiAgent>();
+            agent.state = BehaviorState::Transit;
+            entity.modified<AiAgent>();
+        }
     }
     NavigationTarget navigation;
     navigation.positionHint = points.front().position;
@@ -188,6 +192,15 @@ std::optional<std::uint8_t> TrafficManager::reserveDockSlot(flecs::entity statio
     if (slots.size() < slotCount)
     {
         slots.resize(slotCount);
+    }
+    // Idempotent: a ship that already holds a slot keeps it instead of
+    // consuming a second slot and starving other arrivals.
+    for (std::uint8_t slot = 0; slot < slotCount; ++slot)
+    {
+        if (slots[slot].has_value() && slots[slot]->is_alive() && slots[slot].value() == ship)
+        {
+            return slot;
+        }
     }
     for (std::uint8_t slot = 0; slot < slotCount; ++slot)
     {

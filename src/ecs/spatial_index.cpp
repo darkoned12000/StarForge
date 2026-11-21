@@ -22,6 +22,9 @@ void SpatialIndex::rebuild()
         cells_[coord].push_back(entity);
         ++entityCount_;
     });
+
+    // Prune empty buckets so long-running movement does not accumulate stale cells.
+    std::erase_if(cells_, [](const auto& kv) { return kv.second.empty(); });
 }
 
 const std::vector<flecs::entity>* SpatialIndex::findCell(const CellCoord& coord) const

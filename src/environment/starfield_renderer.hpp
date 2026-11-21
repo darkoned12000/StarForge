@@ -60,6 +60,10 @@ public:
         VkFormat depthFormat = VK_FORMAT_UNDEFINED;
         // Directory containing starfield.vert.spv and starfield.frag.spv.
         std::string shaderDirectory{};
+        // Specialization constants for the starfield/billboard shaders. HDR
+        // offscreen targets pass vulkan::hdrOutputSpecialization(true) to keep
+        // linear values.
+        const VkSpecializationInfo* specializationInfo = nullptr;
     };
 
     [[nodiscard]] static std::expected<StarfieldRenderer, std::string> create(const CreateInfo& info);

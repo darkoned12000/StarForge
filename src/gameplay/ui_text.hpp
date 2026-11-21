@@ -2,6 +2,7 @@
 
 // Built-in 5x7 bitmap font for ASCII 32..126 (pure CPU, no assets).
 // Each glyph is 7 rows of 5 bits, MSB = leftmost pixel.
+#include <cmath>
 #include <cstddef>
 #include <string_view>
 #include <vector>
@@ -138,6 +139,10 @@ struct Quad
 [[nodiscard]] inline std::vector<Quad> textQuads(std::string_view text, float x, float y, float scale)
 {
     std::vector<Quad> quads;
+    if (!std::isfinite(scale) || scale <= 0.0f || !std::isfinite(x) || !std::isfinite(y))
+    {
+        return quads;
+    }
     for (std::size_t ci = 0; ci < text.size(); ++ci)
     {
         const auto& g = glyph(text[ci]);

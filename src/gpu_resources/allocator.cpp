@@ -66,8 +66,7 @@ void Allocator::destroy() noexcept
         const std::uint32_t leaked = allocationCount();
         if (leaked != 0)
         {
-            // Leak: resources not destroyed before allocator.
-            (void)leaked;
+            core::logWarning(kTag, "VMA allocator destroyed with {} live allocation(s)", leaked);
         }
 #endif
         vmaDestroyAllocator(allocator_);

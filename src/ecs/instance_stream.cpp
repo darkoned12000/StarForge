@@ -44,7 +44,7 @@ std::uint32_t collectAsteroidInstances(
     out.clear();
     for (const auto entity : index.findNeighborhood(camera))
     {
-        if (!entity.has<AsteroidTag>())
+        if (!entity.is_alive() || !entity.has<AsteroidTag>())
         {
             continue;
         }

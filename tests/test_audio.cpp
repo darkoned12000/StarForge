@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -329,4 +331,123 @@ TEST_CASE("SoundBank: context tracks live banks and enforces teardown order")
         CHECK(context->liveBankCount() == 1U);
     }
     CHECK(context->liveBankCount() == 0U);
+}
+
+TEST_CASE("SoundPool: overlaps one-shot playback and recycles voices")
+{
+    auto context = createNullContext();
+    REQUIRE(context.has_value());
+    auto bankOrError = SoundBank::create(*context);
+    REQUIRE(bankOrError.has_value());
+    SoundBank& bank = *bankOrError;
+
+    ToneParams params;
+    params.durationSeconds = 0.2f;
+    const auto wav = generateToneWav(params);
+
+    auto poolOrError = SoundPool::create(bank, wav, {}, 3);
+    REQUIRE(poolOrError.has_value());
+    SoundPool& pool = *poolOrError;
+    CHECK(pool.size() == 3U);
+
+    const SoundHandle a = pool.play(1.0f);
+    const SoundHandle b = pool.play(0.8f);
+    const SoundHandle c = pool.play(0.6f);
+    CHECK(a.isValid());
+    CHECK(b.isValid());
+    CHECK(c.isValid());
+    CHECK(a.index != b.index);
+    CHECK(b.index != c.index);
+    CHECK(bank.isPlaying(a));
+    CHECK(bank.isPlaying(b));
+    CHECK(bank.isPlaying(c));
+
+    // All voices busy: pool steals/restarts one, but still returns a valid handle.
+    const SoundHandle d = pool.play(1.0f);
+    CHECK(d.isValid());
+    CHECK(bank.isPlaying(d));
+
+    pool.stopAll();
+    for (const SoundHandle handle : pool.handles())
+    {
+        CHECK(!bank.isPlaying(handle));
+    }
+}
+
+TEST_CASE("SoundBank: streams audio from file")
+{
+    auto context = createNullContext();
+    REQUIRE(context.has_value());
+    auto bankOrError = SoundBank::create(*context);
+    REQUIRE(bankOrError.has_value());
+    SoundBank& bank = *bankOrError;
+
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "starforge_audio_stream_test";
+    fs::create_directories(dir);
+    const fs::path path = dir / "tone.wav";
+    const auto wav = generateToneWav({});
+    {
+        std::ofstream file(path, std::ios::binary);
+        REQUIRE(file.good());
+        file.write(reinterpret_cast<const char*>(wav.data()), static_cast<std::streamsize>(wav.size()));
+    }
+
+    SoundConfig config;
+    config.loop = false;
+    auto streamed = bank.loadFromFile(path.string(), config, true);
+    REQUIRE(streamed.has_value());
+    CHECK(streamed->isValid());
+    CHECK(bank.play(*streamed));
+    CHECK(bank.isPlaying(*streamed));
+    CHECK(bank.stop(*streamed));
+
+    auto missing = bank.loadFromFile((dir / "missing.wav").string(), config, true);
+    CHECK(!missing.has_value());
+
+    fs::remove(path);
+}
+
+TEST_CASE("SoundBank: fade schedules volume ramp")
+{
+    auto context = createNullContext();
+    REQUIRE(context.has_value());
+    auto bankOrError = SoundBank::create(*context);
+    REQUIRE(bankOrError.has_value());
+    SoundBank& bank = *bankOrError;
+
+    auto handle = bank.loadFromMemory(generateToneWav({}), {});
+    REQUIRE(handle.has_value());
+    CHECK(bank.fade(*handle, 0.0f, 1.0f, 100));
+    CHECK(bank.play(*handle));
+
+    SoundHandle invalid;
+    CHECK(!bank.fade(invalid, 0.0f, 1.0f, 100));
+}
+
+TEST_CASE("Tone generator: supports waveforms, sweep, and envelope")
+{
+    ToneParams params;
+    params.durationSeconds = 0.05f;
+    params.waveform = Waveform::Square;
+    const auto square = generateTonePcm16(params);
+    REQUIRE(!square.empty());
+    const auto squarePeak = std::abs(*std::max_element(square.begin(), square.end(), [](std::int16_t a, std::int16_t b) {
+        return std::abs(a) < std::abs(b);
+    }));
+    CHECK(squarePeak > 15000);
+
+    params.waveform = Waveform::Noise;
+    const auto noise = generateTonePcm16(params);
+    REQUIRE(noise.size() == square.size());
+    CHECK(noise != square);
+
+    params.waveform = Waveform::Sine;
+    params.frequencyHz = 880.0f;
+    params.endFrequencyHz = 220.0f;
+    params.attackSeconds = 0.005f;
+    params.releaseSeconds = 0.01f;
+    const auto sweep = generateToneWav(params);
+    CHECK(sweep.size() > 44U);
+    CHECK(sweep[0] == 'R');
 }

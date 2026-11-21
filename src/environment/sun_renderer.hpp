@@ -60,6 +60,10 @@ public:
         VkFormat colorFormat = VK_FORMAT_UNDEFINED;
         VkFormat depthFormat = VK_FORMAT_UNDEFINED;
         std::string shaderDirectory{};
+        // Specialization constants for HDR offscreen targets. The current sun
+        // shaders do not declare the kHdrOutput constant; the field is kept so
+        // all scene renderer CreateInfos stay uniform.
+        const VkSpecializationInfo* specializationInfo = nullptr;
         double defaultRadius = 10000.0;
         std::uint32_t subdivisions = 16;
     };

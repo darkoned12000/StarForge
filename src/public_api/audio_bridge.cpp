@@ -155,6 +155,28 @@ std::expected<RawVoiceHandle, std::string> RawAudio::loadFromMemory(std::span<co
     return RawVoiceHandle{(*handle).index};
 }
 
+std::expected<RawVoiceHandle, std::string>
+RawAudio::loadFromFile(const std::string& path, const RawSoundParams& params, bool stream)
+{
+    if (impl_ == nullptr)
+    {
+        return std::unexpected<std::string>("RawAudio is moved-from");
+    }
+    audio::SoundConfig config;
+    config.bus = fromRaw(params.bus);
+    config.loop = params.loop;
+    config.volume = params.volume;
+    config.pitch = params.pitch;
+    auto handle = impl_->bank.loadFromFile(path, config, stream);
+    if (!handle)
+    {
+        return std::unexpected<std::string>(handle.error());
+    }
+    (void)impl_->bank.setEmitterAttenuation(*handle, params.minDistance, params.maxDistance, params.rolloff);
+    (void)impl_->bank.setEmitterDopplerFactor(*handle, params.dopplerFactor);
+    return RawVoiceHandle{(*handle).index};
+}
+
 bool RawAudio::play(RawVoiceHandle voice, bool restartIfPlaying) noexcept
 {
     return impl_ != nullptr && impl_->bank.play(audio::SoundHandle{voice.index}, restartIfPlaying);
@@ -178,6 +200,12 @@ bool RawAudio::setVolume(RawVoiceHandle voice, float volume) noexcept
 bool RawAudio::setPitch(RawVoiceHandle voice, float pitch) noexcept
 {
     return impl_ != nullptr && impl_->bank.setPitch(audio::SoundHandle{voice.index}, pitch);
+}
+
+bool RawAudio::fade(RawVoiceHandle voice, float fromVolume, float toVolume, std::uint64_t milliseconds) noexcept
+{
+    return impl_ != nullptr &&
+           impl_->bank.fade(audio::SoundHandle{voice.index}, fromVolume, toVolume, milliseconds);
 }
 
 bool RawAudio::setLoop(RawVoiceHandle voice, bool loop) noexcept

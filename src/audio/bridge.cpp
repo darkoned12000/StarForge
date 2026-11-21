@@ -5,6 +5,7 @@
 
 #include <glm/gtc/quaternion.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <utility>
 
@@ -140,7 +141,8 @@ void pushCollisionTriggers(ecs::Ecs& world, TriggerQueue& queue)
             if (entity.has<ecs::CollisionData>())
             {
                 const auto data = entity.get<ecs::CollisionData>();
-                for (std::uint32_t i = 0; i < data.count; ++i)
+                const auto count = std::min(data.count, static_cast<std::uint32_t>(ecs::CollisionData::kMaxContacts));
+                for (std::uint32_t i = 0; i < count; ++i)
                 {
                     maxImpulse = std::max(maxImpulse, data.contacts[i].impulse);
                 }

@@ -105,6 +105,31 @@ class Mesh:
         self.triangle(i0, i1, i2)
         self.triangle(i0, i2, i3)
 
+    def sphere(self, center, radius, segments=12, rings=8, squash=1.0):
+        """Smooth UV sphere. Outward CCW winding, used for round nav lamps."""
+        base = len(self.positions) // 3
+        for j in range(rings + 1):
+            theta = math.pi * j / rings
+            st, ct = math.sin(theta), math.cos(theta)
+            for i in range(segments + 1):
+                phi = 2.0 * math.pi * i / segments
+                n = (st * math.cos(phi), ct * squash, st * math.sin(phi))
+                n = v_norm(n)
+                p = (center[0] + radius * st * math.cos(phi),
+                     center[1] + radius * ct * squash,
+                     center[2] + radius * st * math.sin(phi))
+                self.vertex(p, n, (i / segments, j / rings))
+        for j in range(rings):
+            for i in range(segments):
+                a = base + j * (segments + 1) + i
+                b = a + 1
+                c = a + segments + 1
+                d = c + 1
+                if j != 0:
+                    self.triangle(a, b, c)
+                if j != rings - 1:
+                    self.triangle(b, d, c)
+
     def box(self, center, size, tile=2.0):
         """Box with world-scale UVs: `tile` is world units per texture repeat.
 
@@ -850,17 +875,19 @@ def build_station() -> bytes:
     # Big navigation lamps at both ends of the hub, plus one on each outer
     # docking pod. Kept OUTSIDE the pod hulls (pod centre r=3.72, half-size
     # 0.31 -> outer face r=4.03) so no lamp is buried inside opaque geometry.
+    # Round dome lamps instead of flat squares: smooth spheres read as
+    # navigation lights from any angle, with a soft cel highlight on the cap.
     for z in (3.88, -3.14):
-        beacons.box((0.0, 0.0, z), (0.55, 0.55, 0.55))
+        beacons.sphere((0.0, 0.0, z), 0.38, segments=12, rings=8)
         for ang in (0.0, math.pi / 2.0, math.pi, 3.0 * math.pi / 2.0):
-            beacons.box((0.62 * math.cos(ang), 0.62 * math.sin(ang), z),
-                        (0.22, 0.22, 0.22))
-    # Pod-tip lamps: a slightly larger cube centred ON each docking pod so it
-    # wraps the pod's outer face. A lamp merely placed beyond the pod (r=4.25)
-    # is entirely hidden behind it when the station is viewed obliquely.
+            beacons.sphere((0.62 * math.cos(ang), 0.62 * math.sin(ang), z),
+                           0.16, segments=10, rings=6)
+    # Pod lamps: spheres centred on each docking pod so they wrap the pod's
+    # outer face and stay visible from any viewing angle.
     for i in range(6):
         ang = i * (math.pi / 3.0)
-        beacons.box((3.72 * math.cos(ang), 3.72 * math.sin(ang), 0.0), (0.72, 0.72, 0.72))
+        beacons.sphere((3.72 * math.cos(ang), 3.72 * math.sin(ang), 0.0),
+                       0.44, segments=12, rings=8)
     glb.mesh("station-beacons", beacons, beacon_mat)
 
     return glb.build()

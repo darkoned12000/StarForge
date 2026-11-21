@@ -27,6 +27,10 @@ std::expected<void, std::string> MissionBoard::offer(const std::string& id)
 {
     auto it = states_.find(id);
     if (it == states_.end()) return std::unexpected("unknown mission: " + id);
+    if (it->second.status == MissionStatus::Active)
+    {
+        return std::unexpected("cannot re-offer active mission: " + id);
+    }
     it->second.status = MissionStatus::Offered;
     it->second.delivered = 0;
     return {};
@@ -71,7 +75,8 @@ MissionBoard::deliver(const std::string& id, const std::string& commodity, int a
     if (station != def.dockStation)
         return std::unexpected("wrong delivery station: " + station);
 
-    it->second.delivered = std::min(def.objectiveAmount, it->second.delivered + amount);
+    const int remaining = std::max(0, def.objectiveAmount - it->second.delivered);
+    it->second.delivered += std::min(amount, remaining);
     return it->second.delivered >= def.objectiveAmount;
 }
 

@@ -98,6 +98,7 @@ public:
         std::string shaderBaseName; // e.g. "nebula" -> nebula.vert.spv/nebula.frag.spv
         std::uint32_t pushConstantSize = 0;
         bool alphaBlend = false; // SRC_ALPHA/ONE_MINUS_SRC_ALPHA instead of additive
+        const VkSpecializationInfo* specializationInfo = nullptr;
     };
 
     [[nodiscard]] static std::expected<FullscreenEffect, std::string> create(const CreateInfo& info);
@@ -130,6 +131,7 @@ public:
         std::string shaderDirectory;
         std::string shaderBaseName; // e.g. "billboard"
         std::uint32_t pushConstantSize = 0;
+        const VkSpecializationInfo* specializationInfo = nullptr;
     };
 
     [[nodiscard]] static std::expected<BillboardEffect, std::string> create(const CreateInfo& info);

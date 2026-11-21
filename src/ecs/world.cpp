@@ -65,7 +65,7 @@ flecs::entity Ecs::createProjectile(const spatial::WorldPosition& pos, const mat
 // Deterministic for a fixed dt sequence; no wall-clock involvement.
 void Ecs::step(float dt)
 {
-    if (dt == 0.0f)
+    if (!(dt > 0.0f) || !std::isfinite(dt))
     {
         return;
     }

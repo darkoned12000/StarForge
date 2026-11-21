@@ -149,19 +149,22 @@ std::expected<Audio::VoiceHandle, std::string> Audio::loadFromMemory(std::span<c
 
 std::expected<Audio::VoiceHandle, std::string> Audio::loadFromFile(const std::string& path)
 {
-    return loadFromFile(path, SoundParams{});
+    return loadFromFile(path, SoundParams{}, false);
 }
 
 std::expected<Audio::VoiceHandle, std::string>
-Audio::loadFromFile(const std::string& path, const SoundParams& params)
+Audio::loadFromFile(const std::string& path, const SoundParams& params, bool stream)
 {
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file) return std::unexpected<std::string>("Cannot open audio file: " + path);
-    const auto size = static_cast<std::size_t>(file.tellg());
-    file.seekg(0);
-    std::vector<std::uint8_t> bytes(size);
-    file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size));
-    return loadFromMemory(bytes, params);
+    if (impl_ == nullptr)
+    {
+        return std::unexpected<std::string>("Audio is moved-from");
+    }
+    auto handle = impl_->backend->loadFromFile(path, toRaw(params), stream);
+    if (!handle)
+    {
+        return std::unexpected<std::string>(handle.error());
+    }
+    return VoiceHandle{(*handle).index};
 }
 
 bool Audio::play(VoiceHandle voice, bool restartIfPlaying) noexcept
@@ -187,6 +190,12 @@ bool Audio::setVolume(VoiceHandle voice, float volume) noexcept
 bool Audio::setPitch(VoiceHandle voice, float pitch) noexcept
 {
     return impl_ != nullptr && impl_->backend->setPitch(bridge::RawVoiceHandle{voice.index}, pitch);
+}
+
+bool Audio::fade(VoiceHandle voice, float fromVolume, float toVolume, std::uint64_t milliseconds) noexcept
+{
+    return impl_ != nullptr &&
+           impl_->backend->fade(bridge::RawVoiceHandle{voice.index}, fromVolume, toVolume, milliseconds);
 }
 
 bool Audio::setLoop(VoiceHandle voice, bool loop) noexcept
