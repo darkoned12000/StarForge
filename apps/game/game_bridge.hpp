@@ -40,6 +40,10 @@ struct RawTransform
     RawVec4f orientation{}; // xyzw, unit
     float scale = 1.0f;
     std::uint32_t seed = 0; // stable per-entity id (never camera-relative)
+    // Dissolve factor: 1 = fully visible, 0 = fully dissolved. Rocks fade
+    // out over a distance band at the edge of the streamed field so they
+    // never pop into or out of existence.
+    float fade = 1.0f;
 };
 
 // Owning wrapper around the ECS world with one player ship.

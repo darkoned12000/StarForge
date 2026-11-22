@@ -99,6 +99,14 @@ std::expected<std::unique_ptr<RawToon>, std::string> RawToon::create(const Creat
     return result;
 }
 
+void RawToon::beginFrame() noexcept
+{
+    if (impl_)
+    {
+        impl_->renderer.beginFrame();
+    }
+}
+
 void RawToon::render(VkCommandBuffer cmd, const RawToonContext& context, const RawToonParams& params)
 {
     if (impl_)

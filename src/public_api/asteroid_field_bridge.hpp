@@ -19,7 +19,11 @@ struct RawRockInstance
     float rotation[4] = {0.0f, 0.0f, 0.0f, 1.0f};
     float tint[4] = {0.55f, 0.45f, 0.35f, 1.0f};
     std::uint32_t seed = 0;
-    float pad[3] = {0.0f, 0.0f, 0.0f};
+    // Dissolve factor: 1 = fully visible, 0 = fully dissolved. Used to fade
+    // rocks out at the edge of the streamed field instead of popping them
+    // in and out.
+    float fade = 1.0f;
+    float pad[2] = {0.0f, 0.0f};
 };
 static_assert(sizeof(RawRockInstance) == 64, "RawRockInstance must match rock_*.slang (64 B)");
 

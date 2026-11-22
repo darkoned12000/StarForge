@@ -5,6 +5,7 @@ add_library(starforge_content STATIC
     lod_transition.cpp
     upload_budget.cpp
     player_delta.cpp
+    asteroid_field.cpp
 )
 
 target_include_directories(starforge_content

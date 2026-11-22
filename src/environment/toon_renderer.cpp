@@ -271,6 +271,7 @@ ToonRenderer::ToonRenderer(ToonRenderer&& other) noexcept
       currentDrawSlot_(std::exchange(other.currentDrawSlot_, 0)),
       allocator_(std::move(other.allocator_)),
       drawDataBuffer_(std::move(other.drawDataBuffer_)),
+      retiredDrawDataBuffers_(std::move(other.retiredDrawDataBuffers_)),
       mappedDrawData_(std::exchange(other.mappedDrawData_, nullptr)),
       toonPipeline_(std::exchange(other.toonPipeline_, std::nullopt)),
       outlinePipeline_(std::exchange(other.outlinePipeline_, std::nullopt)),
@@ -291,6 +292,7 @@ ToonRenderer& ToonRenderer::operator=(ToonRenderer&& other) noexcept
         currentDrawSlot_ = std::exchange(other.currentDrawSlot_, 0);
         allocator_ = std::move(other.allocator_);
         drawDataBuffer_ = std::move(other.drawDataBuffer_);
+        retiredDrawDataBuffers_ = std::move(other.retiredDrawDataBuffers_);
         mappedDrawData_ = std::exchange(other.mappedDrawData_, nullptr);
         toonPipeline_ = std::exchange(other.toonPipeline_, std::nullopt);
         outlinePipeline_ = std::exchange(other.outlinePipeline_, std::nullopt);
@@ -310,6 +312,7 @@ void ToonRenderer::destroy() noexcept
     }
     pipelineLayout_ = VK_NULL_HANDLE;
     drawDataBuffer_.reset();
+    retiredDrawDataBuffers_.clear();
     mappedDrawData_ = nullptr;
     allocator_.reset();
     device_ = VK_NULL_HANDLE;
@@ -478,6 +481,16 @@ std::expected<ToonMesh, std::string> ToonRenderer::createTexturedMesh(
 void ToonRenderer::beginFrame() noexcept
 {
     drawsInFrame_ = 0;
+
+    // Release draw-data buffers that the overflow path replaced. They were
+    // still referenced by the command buffer of the frame that triggered the
+    // growth (and by any frames still in flight), so they cannot be freed at
+    // the growth point itself - only once the device is idle.
+    if (!retiredDrawDataBuffers_.empty() && device_ != VK_NULL_HANDLE)
+    {
+        vkDeviceWaitIdle(device_);
+        retiredDrawDataBuffers_.clear();
+    }
 }
 
 void ToonRenderer::renderMesh(VkCommandBuffer cmd, const ToonRenderContext& context,
@@ -531,10 +544,22 @@ void ToonRenderer::renderMesh(VkCommandBuffer cmd, const ToonRenderContext& cont
             auto mapped = newBuffer->map();
             if (mapped)
             {
+                // The draws already recorded into THIS frame's command
+                // buffer point into the old buffer. Destroying it here
+                // leaves those draws referencing freed GPU memory, which
+                // faults the device as soon as the frame is submitted.
+                // Retire the old buffer instead and let beginFrame() free
+                // it once the device is idle.
+                if (drawDataBuffer_)
+                {
+                    retiredDrawDataBuffers_.push_back(std::move(drawDataBuffer_));
+                }
                 drawDataBuffer_ = std::make_unique<gpu_resources::Buffer>(std::move(*newBuffer));
                 mappedDrawData_ = *mapped;
                 maxDrawsPerFrame_ = newMax;
-                currentDrawSlot_ = 0;
+                // The slot cursor stays monotonic on purpose: resetting it
+                // would make this frame reuse the slots the previous frame
+                // wrote, and that frame may still be in flight.
                 drawsInFrame_ = 0;
             }
         }

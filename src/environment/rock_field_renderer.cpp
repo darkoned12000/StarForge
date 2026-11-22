@@ -108,8 +108,16 @@ std::expected<RockFieldRenderer, std::string> RockFieldRenderer::create(const Cr
         bool frontCull;
         bool blend;
         bool hdrOutput; // true only for rock_field.slang, which includes output_shoulder.slang
+        bool depthWrite;
     };
-    const Spec specs[3] = {{false, false, true}, {true, false, false}, {false, false, false}};
+    // The impostor tier is alpha blended: a distant rock fades up out of the
+    // background and solidifies as it comes into focus. It therefore must
+    // not write depth (it would punch holes in the opaque pass), and the
+    // blend is what makes the outer edge of the field dissolve smoothly
+    // instead of popping.
+    const Spec specs[3] = {{false, false, true, true},
+                            {true, false, false, true},
+                            {false, true, false, false}};
     std::optional<vulkan::GraphicsPipeline>* pipelines[3] = {&renderer.mesh_, &renderer.outline_,
                                                              &renderer.impostor_};
     for (int i = 0; i < 3; ++i)
@@ -123,10 +131,13 @@ std::expected<RockFieldRenderer, std::string> RockFieldRenderer::create(const Cr
             .pipelineLayout = renderer.layout_,
             .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
             .depthTest = true,
-            .depthWrite = true,
+            .depthWrite = specs[i].depthWrite,
             .depthCompare = VK_COMPARE_OP_LESS,
             .backfaceCulling = specs[i].frontCull,
             .cullFrontFace = specs[i].frontCull,
+            .blendEnable = specs[i].blend,
+            .blendSrcFactor = VK_BLEND_FACTOR_SRC_ALPHA,
+            .blendDstFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
             .specializationInfo = specs[i].hdrOutput ? info.specializationInfo : nullptr,
             .viewportWidth = 1.0f,
             .viewportHeight = 1.0f,
@@ -174,11 +185,17 @@ void RockFieldRenderer::render(VkCommandBuffer cmd, const RockRenderContext& con
     {
         vkCmdPushConstants(cmd, layout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                            0, sizeof(push), &push);
-        mesh_->bindAndDraw(cmd, 0, params.indexCount, params.nearInstanceCount);
+        // The outline is an inverted hull: it is drawn FIRST so the solid
+        // rock covers it everywhere except the sliver that sticks out past
+        // the silhouette. Drawn afterwards it would paint over the crater
+        // floors - the hull is built from the smooth radial direction, so
+        // inside a concave crater its back faces sit in front of the rock
+        // and turn every pit into a black blob.
         if (params.outline)
         {
             outline_->bindAndDraw(cmd, 0, params.indexCount, params.nearInstanceCount);
         }
+        mesh_->bindAndDraw(cmd, 0, params.indexCount, params.nearInstanceCount);
     }
 
     // Far rocks: one cheap impostor draw (no index buffer).

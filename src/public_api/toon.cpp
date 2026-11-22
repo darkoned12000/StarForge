@@ -83,6 +83,14 @@ std::expected<Toon, std::string> Toon::create(Renderer& renderer, const CreateIn
     return Toon(std::move(impl));
 }
 
+void Toon::beginFrame() noexcept
+{
+    if (impl_ && impl_->backend)
+    {
+        impl_->backend->beginFrame();
+    }
+}
+
 void Toon::record(FrameContext& frameContext, const Context& context, const Params& params)
 {
     if (!impl_ || !impl_->backend)

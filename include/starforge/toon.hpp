@@ -129,6 +129,12 @@ public:
     // active frame (inside Renderer::renderFrame).
     void record(FrameContext& frameContext, const Context& context, const Params& params);
 
+    // Resets the per-frame draw bookkeeping. Call once per frame, before
+    // the first record() of that frame: without it the renderer counts
+    // draws cumulatively across the whole session and keeps growing its
+    // per-frame draw-data buffer for no reason.
+    void beginFrame() noexcept;
+
     // Uploads a mesh into renderer-owned GPU memory. The renderer must
     // outlive every mesh it creates. Empty vertex lists are rejected.
     [[nodiscard]] std::expected<ToonMesh, std::string>

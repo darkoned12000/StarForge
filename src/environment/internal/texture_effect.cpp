@@ -1,6 +1,6 @@
 #include "texture_effect.hpp"
 
-#include "internal/effect_pipeline.hpp"
+#include "effect_pipeline.hpp"
 
 #include "vulkan/vulkan_result.hpp"
 

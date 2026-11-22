@@ -22,7 +22,9 @@ struct AsteroidMesh
     std::vector<std::uint32_t> indices;
 };
 
-// Displaced UV-sphere rock: hash-noise radius displacement per vertex.
+// Displaced UV-sphere rock: coherent lobe/lump displacement plus carved
+// craters with raised rims. Normals are recomputed from the displaced
+// triangles and the signed crater cavity is baked into normal.w.
 // Deterministic; `seed` selects a distinct lumpy variant. The three-argument
 // form (seed = 0) is kept for existing callers.
 [[nodiscard]] AsteroidMesh generateAsteroidMesh(float radius, std::uint32_t latSegments,

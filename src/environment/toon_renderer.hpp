@@ -11,6 +11,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <vector>
 
 namespace starforge::gpu_resources
 {
@@ -190,6 +191,10 @@ private:
     std::uint32_t currentDrawSlot_ = 0;
     std::shared_ptr<gpu_resources::Allocator> allocator_;
     std::unique_ptr<gpu_resources::Buffer> drawDataBuffer_;
+    // Draw-data buffers replaced by the overflow path. They are still
+    // referenced by the command buffer of the frame that triggered the
+    // growth, so they can only be released once the device is idle.
+    std::vector<std::unique_ptr<gpu_resources::Buffer>> retiredDrawDataBuffers_;
     void* mappedDrawData_ = nullptr;
     std::optional<vulkan::GraphicsPipeline> toonPipeline_;
     std::optional<vulkan::GraphicsPipeline> outlinePipeline_;

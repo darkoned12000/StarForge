@@ -47,7 +47,12 @@ struct RockInstance
     float rotation[4] = {0.0f, 0.0f, 0.0f, 1.0f};
     float tintWidth[4] = {0.55f, 0.45f, 0.35f, 0.02f};
     std::uint32_t seed = 0;
-    float pad[3] = {0.0f, 0.0f, 0.0f};
+    // Dissolve factor at offset 52: 1 = fully visible, 0 = fully dissolved.
+    // It has to match the shader's InstanceData exactly - the old padding
+    // slot became the fade value, so leaving it at zero dissolved the whole
+    // test field.
+    float fade = 1.0f;
+    float pad[2] = {0.0f, 0.0f};
 };
 static_assert(sizeof(RockInstance) == 64);
 

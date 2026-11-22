@@ -110,6 +110,7 @@ void AsteroidField::record(FrameContext& frameContext, const RenderContext& cont
             rawInstance.tint[2] = instance.tint.z();
             rawInstance.tint[3] = instance.tint.w();
             rawInstance.seed = instance.seed;
+            rawInstance.fade = instance.fade;
             rawInstances.push_back(rawInstance);
         }
     }

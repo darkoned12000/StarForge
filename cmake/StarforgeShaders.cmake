@@ -80,6 +80,7 @@ function(starforge_add_shader)
                 -o "${shader_output}"
         DEPENDS "${SF_SOURCE}"
                 "${CMAKE_SOURCE_DIR}/shaders/graphics/output_shoulder.slang"
+                "${CMAKE_SOURCE_DIR}/shaders/graphics/rock_shape.slang"
         COMMENT "Compiling Slang shader: ${shader_name}"
         VERBATIM
     )

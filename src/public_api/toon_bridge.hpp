@@ -101,6 +101,10 @@ public:
     RawToon(RawToon&& other) noexcept;
     RawToon& operator=(RawToon&& other) noexcept;
 
+    // Resets the per-frame draw bookkeeping (draw counter). Must be called
+    // once per frame before any draw is recorded.
+    void beginFrame() noexcept;
+
     void render(VkCommandBuffer cmd, const RawToonContext& context, const RawToonParams& params);
 
     [[nodiscard]] std::expected<std::unique_ptr<RawToonMesh>, std::string>

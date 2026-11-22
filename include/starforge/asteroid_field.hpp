@@ -46,6 +46,10 @@ public:
         math::Vec4f rotation{0.0f, 0.0f, 0.0f, 1.0f}; // unit quaternion xyzw
         math::Vec4f tint{0.55f, 0.45f, 0.35f, 1.0f};  // rgb palette tint
         std::uint32_t seed = 0; // stable per-rock id (shape must not change as you fly)
+        // Dissolve factor: 1 = fully visible, 0 = fully dissolved. Lets the
+        // caller fade rocks out at the edge of the streamed region so they
+        // never pop into or out of existence.
+        float fade = 1.0f;
     };
 
     [[nodiscard]] static std::expected<AsteroidField, std::string> create(Renderer& renderer,

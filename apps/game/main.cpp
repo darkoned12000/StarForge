@@ -38,7 +38,6 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
-#include <cstdlib>
 #include <memory>
 #include <string>
 #include <thread>
@@ -59,18 +58,26 @@ constexpr float kSimStep = 1.0f / 60.0f; // fixed 60 Hz simulation
 // renderer — the old demo had duplicated literals whose comments said
 // ~80 km while the actual position was 469 km away.
 //
-// Numbers are chosen so the *whole* sun fits inside the camera far
-// plane (150 km): centre 30 km from spawn, core 4 km, corona 3x = 12 km,
-// i.e. 18..42 km from the ship. It is also reachable: 30 km at 60 m/s
-// is ~8.5 minutes at full throttle. Direction is well away from the
-// planet (~67 degrees) so the two read as separate objects.
-constexpr starforge::game::RawVec3d kSunWorld{1047000.0 - 21000.0, 12000.0, -18000.0};
+// Scale: the sun used to sit 30 km away with a 4 km photosphere, which
+// filled ~15 degrees of the sky and read as a nearby wall of light rather
+// than a star. It now sits 150 km away with a 1.3 km photosphere, so it
+// subtends about one degree - the same apparent size as the real sun seen
+// from Earth - and the surrounding debris field finally reads as small
+// next to something very large and very far away.
+//
+// The direction is unchanged in spirit (the sun sits off the ship's port
+// bow, well away from the planet) but it is now aimed so the star is
+// actually inside the opening view: about 17 degrees to the left of the
+// nose and 15 degrees up, which lands just under the HUD panel. The debris
+// field therefore has a small, very bright, very distant light source in
+// frame, which is what sells the scale of the rocks around the ship.
+constexpr starforge::game::RawVec3d kSunWorld{1004644.0, 38823.0, -138549.0};
 // M17: station is anchored in world space, so flying changes your range to it
 // instead of dragging it along in front of the ship.
 // Ship spawns at kSpawnX (1047000 m); the outpost sits just ahead of it.
 constexpr starforge::game::RawVec3d kStationWorld{1047040.0, 20.0, -450.0};
-constexpr double kSunRadius = 4000.0;
-constexpr double kSunCoronaMultiplier = 3.0;
+constexpr double kSunRadius = 1300.0;
+constexpr double kSunCoronaMultiplier = 4.0;
 
 void logInfo(const char* message)
 {
@@ -543,8 +550,13 @@ int main()
     }
 
     // M15.0.8/15.0.9: instanced lumpy rock field with tint + LOD + outline.
+    // The instance capacity has to cover every rock inside the field's
+    // dissolve band, otherwise the surplus is culled by distance and pops
+    // back in while flying.
     auto rockField = starforge::AsteroidField::create(*renderer,
-                                                      {.shaderDirectory = {}, .variantCount = 4});
+                                                      {.shaderDirectory = {},
+                                                       .variantCount = 4,
+                                                       .capacity = 16384});
     if (!rockField)
     {
         logError(rockField.error().c_str());
@@ -1479,9 +1491,11 @@ int main()
 
         const float aspect = static_cast<float>(size.width) / std::max(static_cast<float>(size.height), 1.0f);
         const auto view = starforge::math::lookAt(eyeOffset, lookAhead, shipUp);
-        // Far plane covers the world-anchored planet (~63 km), sun (~30 km
-        // plus a 12 km corona) and rocks (within 2.5 km), with margin.
-        const auto proj = starforge::math::perspectiveVulkan(cameraFov, aspect, 0.1f, 150000.0f);
+        // Far plane covers the world-anchored planet (~63 km), the sun
+        // (150 km away, plus its corona) and rocks (within 2.2 km), with
+        // margin. The near plane stays tight so depth precision in the
+        // debris field is not eaten by the far distance.
+        const auto proj = starforge::math::perspectiveVulkan(cameraFov, aspect, 0.1f, 250000.0f);
         const auto viewProj = proj * view;
         const auto invViewProj = starforge::math::inverse(viewProj);
         // Ship sits at the ship-relative origin; lookAt already places it
@@ -1611,7 +1625,7 @@ int main()
         {
             auto fm = starforge::math::Mat4f(1.0f);
             // Keep the bubble well inside the 8 m chase-camera distance.
-            const float s = 2.1f + (0.35f - shieldFlash) * 1.2f;
+            const float s = 1.7f + (0.35f - shieldFlash) * 1.0f;
             fm.columns[0][0] = fm.columns[1][1] = fm.columns[2][2] = s;
             flashContext.viewProj = viewProj * fm;
             flashContext.modelView = view * fm;
@@ -1627,7 +1641,13 @@ int main()
             flashParams.rimStrength = 0.0f;
             flashParams.bandCount = 2.0f;
             flashParams.capabilities = 1u; // additive glow, no depth write
-            flashParams.emissiveColor = {0.10f, 0.42f, 1.0f, 0.03f + 0.10f * strength};
+            // The bubble is only a couple of metres from the chase camera,
+            // so its near hemisphere covers a large part of the frame. The
+            // toon shader clamps the emissive alpha to 1.0, so the flash
+            // strength has to be baked into the emissive *colour* - a full
+            // strength shell washed the whole view out in cyan.
+            flashParams.emissiveColor = {0.025f * strength, 0.090f * strength,
+                                         0.240f * strength, 1.0f};
             flashParams.outlineWidth = 0.0f;
         }
 
@@ -1653,16 +1673,23 @@ int main()
             boomParams.outlineWidth = 0.0f;
         }
 
-        // --- Asteroid field (M15.0.3): streaming chunks + authored
-        // near cluster, rendered as toon cubes (placeholder geometry).
-        const auto visibleRocks = world.visibleAsteroids(2500.0);
+        // --- Asteroid field (M15.0.3): procedural world-space field +
+        // authored near cluster, drawn as cratered toon rocks.
+        // The query radius matches the field's dissolve band exactly: every
+        // rock the field generates inside the band has to reach the GPU, or
+        // the ones the budget drops would pop back in while flying.
+        const auto visibleRocks = world.visibleAsteroids(2200.0);
         std::vector<const starforge::game::RawTransform*> sorted;
         sorted.reserve(visibleRocks.size());
         for (const auto& r : visibleRocks)
         {
             sorted.push_back(&r);
         }
-        constexpr std::size_t kMaxRocks = 64;
+        // The field is dense, so the draw budget has to cover the whole
+        // dissolve band (roughly 8000 rocks); the far tier is two triangles
+        // per impostor, and only the closest few hundred get the detailed
+        // cratered mesh.
+        constexpr std::size_t kMaxRocks = 16384;
         const std::size_t take = std::min(sorted.size(), kMaxRocks);
         std::partial_sort(sorted.begin(), sorted.begin() + static_cast<std::ptrdiff_t>(take), sorted.end(),
                           [](const starforge::game::RawTransform* a, const starforge::game::RawTransform* b) {
@@ -1707,8 +1734,8 @@ int main()
         starforge::Sun::Params sun3DParams;
         sun3DParams.worldPosition = starforge::WorldPosition::fromMeters(
             kSunWorld.x, kSunWorld.y, kSunWorld.z).value_or(starforge::WorldPosition{});
-        sun3DParams.radius = kSunRadius; // 4 km celestial photosphere radius
-        sun3DParams.coronaRadiusMultiplier = kSunCoronaMultiplier; // Corona reaches out to 12 km
+        sun3DParams.radius = kSunRadius; // 1.3 km celestial photosphere radius
+        sun3DParams.coronaRadiusMultiplier = kSunCoronaMultiplier; // Corona reaches out to 5.2 km
         sun3DParams.coreColor = {visual.sunCore[0], visual.sunCore[1],
                                  visual.sunCore[2], visual.sunCore[3]};
         sun3DParams.limbColor = {visual.sunLimb[0], visual.sunLimb[1],
@@ -1775,8 +1802,9 @@ int main()
                                    kSunWorld.y - ship.position.y,
                                    kSunWorld.z - ship.position.z});
         rockContext.cameraPosition = eyeOffset;
-        rockContext.lodDistance = 1600.0f;
-        rockContext.outlineWidthPixels = 1.2f;
+        // Close rocks get the detailed cratered mesh; everything beyond
+        // this uses the cheap impostor.
+        rockContext.lodDistance = 900.0f;        rockContext.outlineWidthPixels = 1.2f;
         rockContext.outline = true;
         std::vector<starforge::AsteroidField::Instance> rockInstances;
         rockInstances.reserve(sorted.size());
@@ -1785,15 +1813,19 @@ int main()
             const double rdist = std::sqrt(rock->position.x * rock->position.x +
                                            rock->position.y * rock->position.y +
                                            rock->position.z * rock->position.z);
-            if (rdist > 2500.0) break;
+            if (rdist > 2200.0) break;
             // Stable per-entity seed: never derived from camera-relative
             // position, which changes as the ship flies and caused flicker.
+            // The palette follows the reference art: warm tan, rust red,
+            // neutral basalt grey and cold ice blue. All four are kept
+            // fairly dark - the shader multiplies them by the light term,
+            // so a mid-grey albedo ends up as white rock.
             const int palette = static_cast<int>(rock->seed % 4);
             const float tints[4][3] = {
-                {0.72f, 0.55f, 0.30f}, // tan
-                {0.35f, 0.52f, 0.72f}, // slate blue
-                {0.70f, 0.32f, 0.24f}, // rust
-                {0.38f, 0.62f, 0.35f}}; // sage
+                {0.56f, 0.45f, 0.33f}, // tan sandstone
+                {0.50f, 0.27f, 0.18f}, // rust iron
+                {0.30f, 0.30f, 0.31f}, // basalt grey
+                {0.40f, 0.46f, 0.56f}}; // ice blue
             starforge::AsteroidField::Instance instance;
             instance.position = {static_cast<float>(rock->position.x),
                                  static_cast<float>(rock->position.y),
@@ -1803,6 +1835,8 @@ int main()
                                  rock->orientation.z, rock->orientation.w};
             instance.tint = {tints[palette][0], tints[palette][1], tints[palette][2], 1.0f};
             instance.seed = rock->seed; // stable shape/tint across frames
+            // Dissolve factor so the field edge never pops.
+            instance.fade = rock->fade;
             rockInstances.push_back(instance);
         }
         starforge::Hud::Params hudParams;
@@ -1846,6 +1880,12 @@ int main()
         // Composition order: starfield base (opaque stars), then nebula
         // additive over it, then 3D celestial sun (opaque core + additive corona),
         // then planet/ship/rocks depth-tested.
+        //
+        // The toon renderer keeps a per-frame draw-data buffer. Without this
+        // reset it counts draws cumulatively for the whole session and keeps
+        // replacing the buffer underneath frames that are still in flight,
+        // which faults the GPU.
+        toon->beginFrame();
         auto frame = renderer->renderFrame(starContext.clearColor, [&](starforge::FrameContext& fc) {
             starfield->record(fc, starContext, sunBillboardParams);
             nebula->record(fc, nebContext, nebParams);
