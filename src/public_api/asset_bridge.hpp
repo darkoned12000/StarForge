@@ -35,6 +35,9 @@ struct RawAssetMaterial
     std::uint32_t textureWidth = 0;
     std::uint32_t textureHeight = 0;
     std::vector<std::uint8_t> textureRGBA;
+    std::uint32_t emissiveTextureWidth = 0;
+    std::uint32_t emissiveTextureHeight = 0;
+    std::vector<std::uint8_t> emissiveTextureRGBA;
     std::string name;
 };
 

@@ -77,8 +77,9 @@ TEST_CASE("M17.7: station has a spire, lit habitat rings, trim and beacons")
     CHECK(asset.meshes[2].name == "station-trim");
     CHECK(asset.meshes[3].name == "station-beacons");
     CHECK(asset.meshes[2].material.metallicFactor > 0.5f);    // gold trim
-    // Windows must stay opaque (depth-writing): the additive pipeline draws
-    // back faces without depth and caused blue/white artifacts on the station.
-    CHECK(asset.meshes[1].material.emissiveFactor[0] == 0.0f);
-    CHECK(asset.meshes[1].material.hasBaseColorTexture); // lit bands in albedo
+    // Windows use an emissive map sampled in the normal toon pass so they can
+    // glow/bloom while preserving depth writes (no additive-pipeline artifacts).
+    CHECK(asset.meshes[1].material.hasEmissiveTexture);
+    CHECK(asset.meshes[1].material.emissiveFactor[0] > 0.0f);
+    CHECK(asset.meshes[1].material.hasBaseColorTexture);
 }

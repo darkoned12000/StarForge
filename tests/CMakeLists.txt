@@ -315,6 +315,8 @@ if(STARFORGE_PYTHON3)
     add_test(NAME render_conventions
         COMMAND ${STARFORGE_PYTHON3} ${CMAKE_CURRENT_SOURCE_DIR}/check_render_conventions.py
                 ${PROJECT_SOURCE_DIR})
+    add_test(NAME generate_assets_validation
+        COMMAND ${STARFORGE_PYTHON3} ${CMAKE_CURRENT_SOURCE_DIR}/test_generate_assets.py)
 endif()
 
 add_test(NAME public_consumer_compile

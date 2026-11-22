@@ -43,6 +43,9 @@ RawAssetMesh convertMesh(const asset::MeshData& mesh)
     converted.material.textureWidth = mesh.material.baseColorTexture.width;
     converted.material.textureHeight = mesh.material.baseColorTexture.height;
     converted.material.textureRGBA = mesh.material.baseColorTexture.rgba;
+    converted.material.emissiveTextureWidth = mesh.material.emissiveTexture.width;
+    converted.material.emissiveTextureHeight = mesh.material.emissiveTexture.height;
+    converted.material.emissiveTextureRGBA = mesh.material.emissiveTexture.rgba;
     converted.material.name = mesh.material.name;
     converted.vertices.reserve(mesh.vertices.size());
     for (const auto& vertex : mesh.vertices)

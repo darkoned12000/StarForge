@@ -29,8 +29,14 @@ ToonMaterialDesc mapMaterial(const MaterialData& material)
     std::uint32_t caps = 0;
     if (material.hasBaseColorTexture)
         caps |= static_cast<std::uint32_t>(ToonCapabilityBit::Textured);
-    if (material.emissiveFactor[0] > 0.0f || material.emissiveFactor[1] > 0.0f ||
-        material.emissiveFactor[2] > 0.0f || material.hasEmissiveTexture)
+    // Emissive capability drives the additive glow pipeline. Pure emissive-color
+    // materials use additive blending; emissive-textured opaque surfaces are
+    // sampled in the normal toon pass to preserve depth writes/culling.
+    const bool hasEmissiveOutput = material.emissiveFactor[0] > 0.0f ||
+                                   material.emissiveFactor[1] > 0.0f ||
+                                   material.emissiveFactor[2] > 0.0f;
+    const bool hasEmissiveMap = material.hasEmissiveTexture;
+    if (hasEmissiveOutput && !hasEmissiveMap)
         caps |= static_cast<std::uint32_t>(ToonCapabilityBit::Emissive);
     if (material.metallicFactor >= 0.5f)
         caps |= static_cast<std::uint32_t>(ToonCapabilityBit::Faceted);

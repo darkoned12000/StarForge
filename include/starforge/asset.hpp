@@ -41,6 +41,9 @@ struct MeshMaterialData
     std::uint32_t textureWidth = 0;
     std::uint32_t textureHeight = 0;
     std::vector<std::uint8_t> textureRGBA; // decoded RGBA8 pixels
+    std::uint32_t emissiveTextureWidth = 0;
+    std::uint32_t emissiveTextureHeight = 0;
+    std::vector<std::uint8_t> emissiveTextureRGBA; // decoded RGBA8 pixels
     std::string name;
 };
 

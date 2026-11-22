@@ -37,6 +37,7 @@ struct MaterialData
     bool doubleSided = false;
     std::string alphaMode = "OPAQUE";
     TextureData baseColorTexture;
+    TextureData emissiveTexture;
     std::string name;
 };
 

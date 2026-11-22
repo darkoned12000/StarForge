@@ -145,7 +145,10 @@ public:
     // the base-colour texture instead of the embedded full-resolution one.
     [[nodiscard]] std::expected<ToonMesh, std::string>
     createMeshFromAsset(const MeshData& mesh, std::span<const std::uint8_t> rgba,
-                        std::uint32_t textureWidth, std::uint32_t textureHeight) const;
+                        std::uint32_t textureWidth, std::uint32_t textureHeight,
+                        std::span<const std::uint8_t> emissiveRgba = {},
+                        std::uint32_t emissiveTextureWidth = 0,
+                        std::uint32_t emissiveTextureHeight = 0) const;
 
     // Records a draw with explicit mesh geometry (base + outline, or the
     // additive pass for emissive materials).

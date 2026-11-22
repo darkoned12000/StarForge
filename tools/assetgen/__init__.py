@@ -1,0 +1,1 @@
+"""Procedural asset generation package."""

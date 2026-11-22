@@ -59,10 +59,9 @@ struct DrawData
     uint64_t textureAddress;
     uint     textureWidth;
     uint     textureHeight;
-    uint     pad0;
-    uint     pad1;
-    uint     pad2;
-    uint     pad3;
+    uint64_t emissiveTextureAddress;
+    uint     emissiveTextureWidth;
+    uint     emissiveTextureHeight;
 };
 
 struct PushConstants
@@ -285,11 +284,36 @@ float4 fragmentMain(VSOutput input) : SV_Target
                      smoothstep(draw.highlight.w - 0.15, draw.highlight.w + 0.15, banded));
     }
 
-    // Emissive glow (modulated by the texture so cores have hot centres).
+    // Emissive: dedicated emissive texture when present, else fall back to
+    // base-color modulation for legacy emissive materials. Emissive textures
+    // can be used on opaque geometry (normal pipeline) for bloom-capable
+    // window/glow details without additive depth-write artifacts.
+    bool hasEmissiveTex = (draw.emissiveTextureAddress != 0u &&
+                           draw.emissiveTextureWidth > 0u &&
+                           draw.emissiveTextureHeight > 0u);
+    float3 emissiveSample = float3(1.0, 1.0, 1.0);
+    if (hasEmissiveTex)
+    {
+        emissiveSample = sampleTextureBilinear(draw.emissiveTextureAddress,
+                                               draw.emissiveTextureWidth,
+                                               draw.emissiveTextureHeight,
+                                               input.uv).rgb;
+    }
+    else if (hasTex)
+    {
+        emissiveSample = sampled.rgb;
+    }
     if ((caps & 1u) != 0u)
     {
-        float3 emTex = hasTex ? sampled.rgb : float3(1.0, 1.0, 1.0);
-        color += draw.emissive.rgb * draw.emissive.w * emTex;
+        color += draw.emissive.rgb * max(draw.emissive.w, 1.0) * emissiveSample;
+    }
+    else if (hasEmissiveTex)
+    {
+        // Opaque emissive-map contribution (windows/panels): adds HDR energy
+        // for bloom while preserving depth writes in the normal toon pass.
+        float emissiveStrength = max(draw.emissive.w, 0.0);
+        if (emissiveStrength <= 0.0) emissiveStrength = 1.0;
+        color += draw.emissive.rgb * emissiveStrength * emissiveSample;
     }
 
     // Fresnel shield rim / atmospheric scattering gradient.

@@ -70,6 +70,9 @@ std::expected<Asset, std::string> Asset::loadFromMemory(std::span<const std::uin
         mesh.material.textureWidth = raw.material.textureWidth;
         mesh.material.textureHeight = raw.material.textureHeight;
         mesh.material.textureRGBA = raw.material.textureRGBA;
+        mesh.material.emissiveTextureWidth = raw.material.emissiveTextureWidth;
+        mesh.material.emissiveTextureHeight = raw.material.emissiveTextureHeight;
+        mesh.material.emissiveTextureRGBA = raw.material.emissiveTextureRGBA;
         mesh.material.name = raw.material.name;
         mesh.vertices.reserve(raw.vertices.size());
         for (const auto& vertex : raw.vertices)
@@ -116,6 +119,9 @@ std::expected<Asset, std::string> Asset::loadFromFile(const std::string& path)
         mesh.material.textureWidth = raw.material.textureWidth;
         mesh.material.textureHeight = raw.material.textureHeight;
         mesh.material.textureRGBA = raw.material.textureRGBA;
+        mesh.material.emissiveTextureWidth = raw.material.emissiveTextureWidth;
+        mesh.material.emissiveTextureHeight = raw.material.emissiveTextureHeight;
+        mesh.material.emissiveTextureRGBA = raw.material.emissiveTextureRGBA;
         mesh.material.name = raw.material.name;
         mesh.vertices.reserve(raw.vertices.size());
         for (const auto& vertex : raw.vertices)
@@ -212,6 +218,12 @@ asset::MaterialData toInternal(const MeshMaterialData& material)
     out.hasEmissiveTexture = material.hasEmissiveTexture;
     out.doubleSided = material.doubleSided;
     out.alphaMode = material.alphaMode;
+    out.baseColorTexture.width = material.textureWidth;
+    out.baseColorTexture.height = material.textureHeight;
+    out.baseColorTexture.rgba = material.textureRGBA;
+    out.emissiveTexture.width = material.emissiveTextureWidth;
+    out.emissiveTexture.height = material.emissiveTextureHeight;
+    out.emissiveTexture.rgba = material.emissiveTextureRGBA;
     out.name = material.name;
     return out;
 }
@@ -225,6 +237,9 @@ asset::MeshData toInternalMesh(const MeshData& mesh)
     out.material.baseColorTexture.width = mesh.material.textureWidth;
     out.material.baseColorTexture.height = mesh.material.textureHeight;
     out.material.baseColorTexture.rgba = mesh.material.textureRGBA;
+    out.material.emissiveTexture.width = mesh.material.emissiveTextureWidth;
+    out.material.emissiveTexture.height = mesh.material.emissiveTextureHeight;
+    out.material.emissiveTexture.rgba = mesh.material.emissiveTextureRGBA;
     out.vertices.reserve(mesh.vertices.size());
     for (const auto& vertex : mesh.vertices)
     {
@@ -282,6 +297,9 @@ MeshData toPublicMesh(const asset::MeshData& source)
     mesh.material.textureWidth = source.material.baseColorTexture.width;
     mesh.material.textureHeight = source.material.baseColorTexture.height;
     mesh.material.textureRGBA = source.material.baseColorTexture.rgba;
+    mesh.material.emissiveTextureWidth = source.material.emissiveTexture.width;
+    mesh.material.emissiveTextureHeight = source.material.emissiveTexture.height;
+    mesh.material.emissiveTextureRGBA = source.material.emissiveTexture.rgba;
     mesh.material.name = source.material.name;
     mesh.vertices.reserve(source.vertices.size());
     for (const auto& vertex : source.vertices)

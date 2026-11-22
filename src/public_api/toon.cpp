@@ -171,15 +171,22 @@ Toon::createMeshFromAsset(const MeshData& mesh) const
 {
     static constexpr std::uint8_t kWhite[4] = {255, 255, 255, 255};
     const bool hasTexture = mesh.material.hasBaseColorTexture && !mesh.material.textureRGBA.empty();
-    if (hasTexture)
-        return createMeshFromAsset(mesh, mesh.material.textureRGBA,
-                                   mesh.material.textureWidth, mesh.material.textureHeight);
-    return createMeshFromAsset(mesh, kWhite, 1u, 1u);
+    const bool hasEmissive = mesh.material.hasEmissiveTexture && !mesh.material.emissiveTextureRGBA.empty();
+    const std::span<const std::uint8_t> baseRgba = hasTexture ? std::span<const std::uint8_t>(mesh.material.textureRGBA) : std::span<const std::uint8_t>(kWhite, 4);
+    const std::uint32_t baseW = hasTexture ? mesh.material.textureWidth : 1u;
+    const std::uint32_t baseH = hasTexture ? mesh.material.textureHeight : 1u;
+    const std::span<const std::uint8_t> emRgba = hasEmissive ? std::span<const std::uint8_t>(mesh.material.emissiveTextureRGBA) : std::span<const std::uint8_t>{};
+    const std::uint32_t emW = hasEmissive ? mesh.material.emissiveTextureWidth : 0u;
+    const std::uint32_t emH = hasEmissive ? mesh.material.emissiveTextureHeight : 0u;
+    return createMeshFromAsset(mesh, baseRgba, baseW, baseH, emRgba, emW, emH);
 }
 
 std::expected<Toon::ToonMesh, std::string>
 Toon::createMeshFromAsset(const MeshData& mesh, std::span<const std::uint8_t> rgba,
-                          std::uint32_t textureWidth, std::uint32_t textureHeight) const
+                          std::uint32_t textureWidth, std::uint32_t textureHeight,
+                          std::span<const std::uint8_t> emissiveRgba,
+                          std::uint32_t emissiveTextureWidth,
+                          std::uint32_t emissiveTextureHeight) const
 {
     if (!impl_ || !impl_->backend)
         return std::unexpected("Toon::createMeshFromAsset failed: Toon is moved-from");
@@ -218,8 +225,19 @@ Toon::createMeshFromAsset(const MeshData& mesh, std::span<const std::uint8_t> rg
         for (int c = 0; c < 4; ++c) raw[i].tangent[c] = v.tangent[c];
     }
 
+    const std::uint8_t* emData = nullptr;
+    std::uint32_t emW = 0;
+    std::uint32_t emH = 0;
+    if (emissiveTextureWidth > 0 && emissiveTextureHeight > 0 &&
+        emissiveRgba.size() >= static_cast<std::size_t>(emissiveTextureWidth) * emissiveTextureHeight * 4)
+    {
+        emData = emissiveRgba.data();
+        emW = emissiveTextureWidth;
+        emH = emissiveTextureHeight;
+    }
     auto backend = impl_->backend->createTexturedMesh(
-        raw.data(), static_cast<std::uint32_t>(raw.size()), rgba.data(), textureWidth, textureHeight);
+        raw.data(), static_cast<std::uint32_t>(raw.size()), rgba.data(), textureWidth, textureHeight,
+        emData, emW, emH);
     if (!backend) return std::unexpected(backend.error());
     auto impl = std::make_unique<ToonMesh::Impl>();
     impl->backend = std::move(*backend);

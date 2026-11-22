@@ -108,7 +108,9 @@ public:
 
     [[nodiscard]] std::expected<std::unique_ptr<RawToonMesh>, std::string>
     createTexturedMesh(const RawToonTexturedVertex* vertices, std::uint32_t vertexCount,
-                       const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height);
+                       const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height,
+                       const std::uint8_t* emissiveRgba = nullptr,
+                       std::uint32_t emissiveWidth = 0, std::uint32_t emissiveHeight = 0);
 
     void renderMesh(VkCommandBuffer cmd, const RawToonContext& context,
                     const RawToonParams& params, const RawToonMesh& mesh);

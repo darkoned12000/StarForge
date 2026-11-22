@@ -347,6 +347,22 @@ MaterialData readMaterial(const json& root, int materialIndex, const LoadContext
                 }
             }
         }
+
+    if (source.contains("emissiveTexture") && source["emissiveTexture"].contains("index") &&
+        root.contains("textures"))
+    {
+        const std::size_t textureIndex = source["emissiveTexture"]["index"].get<std::size_t>();
+        const auto& textures = root["textures"];
+        if (textureIndex < textures.size() && textures[textureIndex].contains("source"))
+        {
+            const int imageIndex = textures[textureIndex]["source"].get<int>();
+            if (imageIndex >= 0 && static_cast<std::size_t>(imageIndex) < context.images.size())
+            {
+                material.emissiveTexture = context.images[imageIndex];
+                material.hasEmissiveTexture = material.emissiveTexture.width > 0;
+            }
+        }
+    }
     }
     return material;
 }

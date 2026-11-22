@@ -38,10 +38,9 @@ struct alignas(16) DrawData
     std::uint64_t textureAddress = 0;
     std::uint32_t textureWidth = 0;
     std::uint32_t textureHeight = 0;
-    std::uint32_t pad0 = 0;
-    std::uint32_t pad1 = 0;
-    std::uint32_t pad2 = 0;
-    std::uint32_t pad3 = 0;
+    std::uint64_t emissiveTextureAddress = 0;
+    std::uint32_t emissiveTextureWidth = 0;
+    std::uint32_t emissiveTextureHeight = 0;
 };
 
 static_assert(sizeof(DrawData) == 240, "Toon DrawData must match the shader layout (240 bytes)");
@@ -376,7 +375,8 @@ std::expected<ToonMesh, std::string> ToonRenderer::createMesh(std::span<const To
 
 std::expected<ToonMesh, std::string> ToonRenderer::createTexturedMesh(
     std::span<const ToonTexturedVertex> vertices, const std::uint8_t* rgba,
-    std::uint32_t width, std::uint32_t height)
+    std::uint32_t width, std::uint32_t height,
+    const std::uint8_t* emissiveRgba, std::uint32_t emissiveWidth, std::uint32_t emissiveHeight)
 {
     if (!allocator_ || vertices.empty()) return std::unexpected("Textured toon mesh requires vertices");
     if ((width == 0 || height == 0) || rgba == nullptr)
@@ -441,6 +441,37 @@ std::expected<ToonMesh, std::string> ToonRenderer::createTexturedMesh(
     mesh.textureAddress_ = mesh.textureBuffer_->deviceAddress(device_);
     mesh.textureWidth_ = width;
     mesh.textureHeight_ = height;
+
+    if (emissiveRgba != nullptr && emissiveWidth > 0 && emissiveHeight > 0)
+    {
+        const std::size_t emTexelCount = static_cast<std::size_t>(emissiveWidth) * emissiveHeight;
+        std::vector<std::uint32_t> emTexels(emTexelCount);
+        for (std::size_t i = 0; i < emTexelCount; ++i)
+        {
+            emTexels[i] = static_cast<std::uint32_t>(emissiveRgba[i * 4 + 0]) |
+                          (static_cast<std::uint32_t>(emissiveRgba[i * 4 + 1]) << 8) |
+                          (static_cast<std::uint32_t>(emissiveRgba[i * 4 + 2]) << 16) |
+                          (static_cast<std::uint32_t>(emissiveRgba[i * 4 + 3]) << 24);
+        }
+        auto emTexture = gpu_resources::Buffer::create(*allocator_, {
+            .size = static_cast<VkDeviceSize>(emTexels.size() * sizeof(std::uint32_t)),
+            .usage = gpu_resources::BufferUsage::Storage,
+            .memory = gpu_resources::MemoryPlacement::CpuToGpu,
+            .name = "starforge.Toon.EmissiveTexture",
+        });
+        if (!emTexture) return std::unexpected(emTexture.error());
+        {
+            auto mapped = emTexture->map();
+            if (!mapped) return std::unexpected(mapped.error());
+            std::memcpy(*mapped, emTexels.data(), emTexels.size() * sizeof(std::uint32_t));
+            (void)emTexture->flush(0, emTexels.size() * sizeof(std::uint32_t));
+            emTexture->unmap();
+        }
+        mesh.emissiveTextureBuffer_ = std::make_unique<gpu_resources::Buffer>(std::move(*emTexture));
+        mesh.emissiveTextureAddress_ = mesh.emissiveTextureBuffer_->deviceAddress(device_);
+        mesh.emissiveTextureWidth_ = emissiveWidth;
+        mesh.emissiveTextureHeight_ = emissiveHeight;
+    }
     return mesh;
 }
 
@@ -471,6 +502,9 @@ void ToonRenderer::renderMesh(VkCommandBuffer cmd, const ToonRenderContext& cont
     drawData.textureAddress = mesh.textureAddress();
     drawData.textureWidth = mesh.textureWidth();
     drawData.textureHeight = mesh.textureHeight();
+    drawData.emissiveTextureAddress = mesh.emissiveTextureAddress();
+    drawData.emissiveTextureWidth = mesh.emissiveTextureWidth();
+    drawData.emissiveTextureHeight = mesh.emissiveTextureHeight();
 
     // Outline width is now in screen pixels; the shader offsets clip XY by
     // this amount using the viewport passed through push-constant padding.

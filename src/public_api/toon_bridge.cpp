@@ -144,7 +144,8 @@ RawToon::createMesh(const RawToonVertex* vertices, std::uint32_t vertexCount)
 
 std::expected<std::unique_ptr<RawToonMesh>, std::string>
 RawToon::createTexturedMesh(const RawToonTexturedVertex* vertices, std::uint32_t vertexCount,
-                            const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height)
+                            const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height,
+                            const std::uint8_t* emissiveRgba, std::uint32_t emissiveWidth, std::uint32_t emissiveHeight)
 {
     if (!impl_ || vertices == nullptr || vertexCount == 0)
         return std::unexpected("RawToon::createTexturedMesh requires a renderer and vertices");
@@ -161,7 +162,8 @@ RawToon::createTexturedMesh(const RawToonTexturedVertex* vertices, std::uint32_t
         converted[i].tangent = ::starforge::math::Vec4f{vertices[i].tangent[0], vertices[i].tangent[1],
                                                          vertices[i].tangent[2], vertices[i].tangent[3]};
     }
-    auto mesh = impl_->renderer.createTexturedMesh(converted, rgba, width, height);
+    auto mesh = impl_->renderer.createTexturedMesh(converted, rgba, width, height,
+                                                   emissiveRgba, emissiveWidth, emissiveHeight);
     if (!mesh) return std::unexpected(mesh.error());
     auto result = std::unique_ptr<RawToonMesh>(new RawToonMesh());
     result->impl_ = std::make_unique<RawToonMesh::Impl>(RawToonMesh::Impl{std::move(*mesh)});

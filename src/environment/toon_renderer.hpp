@@ -94,6 +94,9 @@ public:
     [[nodiscard]] std::uint64_t textureAddress() const noexcept { return textureAddress_; }
     [[nodiscard]] std::uint32_t textureWidth() const noexcept { return textureWidth_; }
     [[nodiscard]] std::uint32_t textureHeight() const noexcept { return textureHeight_; }
+    [[nodiscard]] std::uint64_t emissiveTextureAddress() const noexcept { return emissiveTextureAddress_; }
+    [[nodiscard]] std::uint32_t emissiveTextureWidth() const noexcept { return emissiveTextureWidth_; }
+    [[nodiscard]] std::uint32_t emissiveTextureHeight() const noexcept { return emissiveTextureHeight_; }
 
 private:
     friend class ToonRenderer;
@@ -105,11 +108,15 @@ private:
     std::shared_ptr<gpu_resources::Allocator> allocator_;
     std::unique_ptr<gpu_resources::Buffer> buffer_;
     std::unique_ptr<gpu_resources::Buffer> textureBuffer_;
+    std::unique_ptr<gpu_resources::Buffer> emissiveTextureBuffer_;
     std::uint64_t address_ = 0;
     std::uint64_t textureAddress_ = 0;
+    std::uint64_t emissiveTextureAddress_ = 0;
     std::uint32_t vertexCount_ = 0;
     std::uint32_t textureWidth_ = 0;
     std::uint32_t textureHeight_ = 0;
+    std::uint32_t emissiveTextureWidth_ = 0;
+    std::uint32_t emissiveTextureHeight_ = 0;
 };
 
 // Cel-shaded (toon) renderer: quantized diffuse bands, stepped specular,
@@ -159,10 +166,12 @@ public:
     [[nodiscard]] std::expected<ToonMesh, std::string>
     createMesh(std::span<const ToonVertex> vertices);
 
-    // Textured mesh from glTF-style attributes and RGBA8 base-colour pixels.
+    // Textured mesh from glTF-style attributes and RGBA8 base-colour/emissive pixels.
     [[nodiscard]] std::expected<ToonMesh, std::string>
     createTexturedMesh(std::span<const ToonTexturedVertex> vertices,
-                       const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height);
+                       const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height,
+                       const std::uint8_t* emissiveRgba = nullptr,
+                       std::uint32_t emissiveWidth = 0, std::uint32_t emissiveHeight = 0);
 
     // Records one draw with explicit mesh geometry. An invalid mesh falls
     // back to the built-in cube.
