@@ -2,7 +2,6 @@
 
 #include "jobs/job_scheduler.hpp"
 #include "planets/cubed_sphere.hpp"
-#include "spatial/world_position.hpp"
 
 #include <array>
 #include <cstdint>
@@ -86,6 +85,11 @@ private:
                    const math::Vec3d& cameraPos,
                    double planetRadius,
                    double mergeThreshold);
+
+    // In-face 2:1 balance: split shallower edge neighbors so adjacent
+    // leaves differ by at most one LOD level. Cross-face edges are not
+    // balanced here (single-face quadtree).
+    void enforceBalance();
 
     struct ParallelLeafJob;
     static void parallelLeafTrampoline(void* userData);

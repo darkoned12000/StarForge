@@ -8,6 +8,12 @@ math::Vec3d toCameraRelative(const WorldPosition& pos, const WorldPosition& came
     return pos - camera;
 }
 
+std::expected<math::Vec3d, std::string>
+toCameraRelativeChecked(const WorldPosition& pos, const WorldPosition& camera) noexcept
+{
+    return pos.checkedDifference(camera);
+}
+
 math::Vec3f toFloat32(const math::Vec3d& v) noexcept
 {
     return math::Vec3f{

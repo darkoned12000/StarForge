@@ -13,48 +13,22 @@ namespace
 void createChildren(PlanetQuadNode* node)
 {
     if (!node->isLeaf()) return;
-    
-    double uMid = (node->uMin + node->uMax) * 0.5;
-    double vMid = (node->vMin + node->vMax) * 0.5;
-    
-    // Create 4 children
+
     for (std::size_t i = 0; i < 4; ++i)
     {
-        node->children[i] = std::make_unique<PlanetQuadNode>();
-        node->children[i]->face = node->face;
-        node->children[i]->level = node->level + 1;
-        node->children[i]->x = node->x * 2 + static_cast<int>(i % 2);
-        node->children[i]->y = node->y * 2 + static_cast<int>(i / 2);
-        
-        // Set bounds
-        if (i == 0) // bottom-left
-        {
-            node->children[i]->uMin = node->uMin;
-            node->children[i]->uMax = uMid;
-            node->children[i]->vMin = node->vMin;
-            node->children[i]->vMax = vMid;
-        }
-        else if (i == 1) // bottom-right
-        {
-            node->children[i]->uMin = uMid;
-            node->children[i]->uMax = node->uMax;
-            node->children[i]->vMin = node->vMin;
-            node->children[i]->vMax = vMid;
-        }
-        else if (i == 2) // top-left
-        {
-            node->children[i]->uMin = node->uMin;
-            node->children[i]->uMax = uMid;
-            node->children[i]->vMin = vMid;
-            node->children[i]->vMax = node->vMax;
-        }
-        else if (i == 3) // top-right
-        {
-            node->children[i]->uMin = uMid;
-            node->children[i]->uMax = node->uMax;
-            node->children[i]->vMin = vMid;
-            node->children[i]->vMax = node->vMax;
-        }
+        auto child = std::make_unique<PlanetQuadNode>();
+        child->face = node->face;
+        child->level = node->level + 1;
+        child->x = node->x * 2 + static_cast<int>(i % 2);
+        child->y = node->y * 2 + static_cast<int>(i / 2);
+
+        const CubePatchUvBounds bounds = cubePatchUvBounds(child->x, child->y, static_cast<std::uint32_t>(child->level));
+        child->uMin = bounds.uMin;
+        child->uMax = bounds.uMax;
+        child->vMin = bounds.vMin;
+        child->vMax = bounds.vMax;
+
+        node->children[i] = std::move(child);
     }
 }
 
@@ -75,10 +49,11 @@ PlanetQuadtree::PlanetQuadtree(CubeFace face) : face_(face)
     root_->level = 0;
     root_->x = 0;
     root_->y = 0;
-    root_->uMin = -1.0;
-    root_->uMax = 1.0;
-    root_->vMin = -1.0;
-    root_->vMax = 1.0;
+    const CubePatchUvBounds bounds = cubePatchUvBounds(0, 0, 0);
+    root_->uMin = bounds.uMin;
+    root_->uMax = bounds.uMax;
+    root_->vMin = bounds.vMin;
+    root_->vMax = bounds.vMax;
 }
 
 double calculateScreenSpaceError(
@@ -220,6 +195,7 @@ std::vector<PlanetQuadNode*> PlanetQuadtree::update(
     int maxLevelDelta)
 {
     updateNode(root_.get(), planetCenter, cameraPos, planetRadius, splitThreshold, mergeThreshold, maxLevelDelta);
+    enforceBalance();
     return getLeaves();
 }
 
@@ -256,6 +232,7 @@ std::vector<PlanetQuadNode*> PlanetQuadtree::updateParallel(
     if (leaves.size() < 2 || scheduler.threadCount() <= 1)
     {
         updateNode(root_.get(), planetCenter, cameraPos, planetRadius, splitThreshold, mergeThreshold, maxLevelDelta);
+        enforceBalance();
         return getLeaves();
     }
 
@@ -281,6 +258,7 @@ std::vector<PlanetQuadNode*> PlanetQuadtree::updateParallel(
     // Merge pass (sequential, bottom-up): parallel jobs only see leaves,
     // so pruning must happen here for retreat-to-orbit to work.
     mergePass(root_.get(), planetCenter, cameraPos, planetRadius, mergeThreshold);
+    enforceBalance();
 
     return getLeaves();
 }
@@ -317,6 +295,75 @@ void PlanetQuadtree::mergePass(PlanetQuadNode* node,
     }
 }
 
+void PlanetQuadtree::enforceBalance()
+{
+    // In-face 2:1 balance. Cross-face neighbors are ignored because this
+    // quadtree owns a single cube face.
+    constexpr int kMaxIterations = 256;
+    for (int iter = 0; iter < kMaxIterations; ++iter)
+    {
+        bool changed = false;
+        std::vector<PlanetQuadNode*> leaves;
+        collectLeaves(root_.get(), leaves);
+
+        for (PlanetQuadNode* leaf : leaves)
+        {
+            const int level = leaf->level;
+            if (level <= 1)
+            {
+                continue;
+            }
+
+            const int extent = 1 << level;
+            static constexpr int kDirs[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+            for (const auto& dir : kDirs)
+            {
+                const int nx = leaf->x + dir[0];
+                const int ny = leaf->y + dir[1];
+                if (nx < 0 || ny < 0 || nx >= extent || ny >= extent)
+                {
+                    continue; // Cross-face edge: not handled here.
+                }
+
+                PlanetQuadNode* node = root_.get();
+                while (node != nullptr)
+                {
+                    if (node->isLeaf())
+                    {
+                        if (node->level < level - 1 && node->level < 20)
+                        {
+                            createChildren(node);
+                            changed = true;
+                            // Fall through to descend into the new child
+                            // that covers (nx, ny).
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+
+                    const int childLevel = node->level + 1;
+                    const int shift = level - childLevel;
+                    if (shift < 0)
+                    {
+                        break;
+                    }
+                    const int bx = (nx >> shift) & 1;
+                    const int by = (ny >> shift) & 1;
+                    const std::size_t childIndex = static_cast<std::size_t>(by * 2 + bx);
+                    node = node->children[childIndex].get();
+                }
+            }
+        }
+
+        if (!changed)
+        {
+            break;
+        }
+    }
+}
+
 void PlanetQuadtree::collectLeaves(PlanetQuadNode* node, std::vector<PlanetQuadNode*>& leaves) const
 {
     if (node->isLeaf())
@@ -340,21 +387,56 @@ std::vector<PlanetQuadNode*> PlanetQuadtree::getLeaves() const
     return leaves;
 }
 
+namespace
+{
+
+struct LeafDepthRange
+{
+    int minDepth = 0;
+    int maxDepth = 0;
+};
+
+LeafDepthRange leafDepthRange(const PlanetQuadNode* node)
+{
+    if (node->isLeaf())
+    {
+        return {node->level, node->level};
+    }
+
+    LeafDepthRange range = leafDepthRange(node->children[0].get());
+    for (std::size_t i = 1; i < 4; ++i)
+    {
+        const LeafDepthRange childRange = leafDepthRange(node->children[i].get());
+        range.minDepth = std::min(range.minDepth, childRange.minDepth);
+        range.maxDepth = std::max(range.maxDepth, childRange.maxDepth);
+    }
+    return range;
+}
+
+bool edgeAdjacentBalanced(const LeafDepthRange& a, const LeafDepthRange& b)
+{
+    // 2:1 balance: adjacent leaf regions must not differ by more than one
+    // LOD level. This range check is necessary but not sufficient (it can
+    // miss border-local violations inside overlapping ranges), but it never
+    // rejects a valid tree and catches gross imbalance the previous
+    // same-child-level check missed entirely.
+    return a.minDepth <= b.maxDepth + 1 && b.minDepth <= a.maxDepth + 1;
+}
+
+} // namespace
+
 bool PlanetQuadtree::checkNodeAdjacency(const PlanetQuadNode* node) const
 {
     if (node->isLeaf()) return true;
 
-    // Sibling 2:1 check: children of a node must be within one level of
-    // each other. (Cross-edge balancing is gradual via maxLevelDelta in
-    // updateNode; full neighbor lookup is a documented limitation.)
-    int minLevel = node->children[0]->level;
-    int maxLevel = node->children[0]->level;
-    for (std::size_t i = 1; i < 4; ++i)
-    {
-        minLevel = std::min(minLevel, node->children[i]->level);
-        maxLevel = std::max(maxLevel, node->children[i]->level);
-    }
-    if (maxLevel - minLevel > 1)
+    // Check edge-adjacent sibling subtrees (0:BL,1:BR,2:TL,3:TR).
+    const LeafDepthRange r0 = leafDepthRange(node->children[0].get());
+    const LeafDepthRange r1 = leafDepthRange(node->children[1].get());
+    const LeafDepthRange r2 = leafDepthRange(node->children[2].get());
+    const LeafDepthRange r3 = leafDepthRange(node->children[3].get());
+
+    if (!edgeAdjacentBalanced(r0, r1) || !edgeAdjacentBalanced(r2, r3) ||
+        !edgeAdjacentBalanced(r0, r2) || !edgeAdjacentBalanced(r1, r3))
     {
         return false;
     }
@@ -379,10 +461,11 @@ void PlanetQuadtree::reset()
     root_->level = 0;
     root_->x = 0;
     root_->y = 0;
-    root_->uMin = -1.0;
-    root_->uMax = 1.0;
-    root_->vMin = -1.0;
-    root_->vMax = 1.0;
+    const CubePatchUvBounds bounds = cubePatchUvBounds(0, 0, 0);
+    root_->uMin = bounds.uMin;
+    root_->uMax = bounds.uMax;
+    root_->vMin = bounds.vMin;
+    root_->vMax = bounds.vMax;
 }
 
 } // namespace starforge::planets

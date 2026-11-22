@@ -28,7 +28,7 @@ struct ContactEventData
     std::uint64_t idB = 0;
     math::Vec3f islandPoint{0.0f, 0.0f, 0.0f};
     math::Vec3f normal{0.0f, 0.0f, 1.0f};
-    float impulse = 0.0f;
+    float impulse = 0.0f; // Approximate impact magnitude (relative speed at contact).
 };
 
 class ContactQueue

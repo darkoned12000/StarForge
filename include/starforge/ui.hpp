@@ -79,6 +79,9 @@ public:
     // Total quads/vertices produced by the current draws (T1/T3 proof hook).
     [[nodiscard]] std::size_t vertexCount() const noexcept;
 
+    // Recreates backend resources after a renderer format/resize change.
+    [[nodiscard]] std::expected<void, std::string> recreate(Renderer& renderer);
+
 private:
     struct Impl;
     explicit UiCanvas(std::unique_ptr<Impl> impl) noexcept;

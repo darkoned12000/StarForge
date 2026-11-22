@@ -10,7 +10,9 @@
 #endif
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
@@ -30,7 +32,7 @@ std::size_t countKind(const std::vector<Event>& events, EventKind kind)
 std::size_t countNamed(const std::vector<Event>& events, EventKind kind, const char* name)
 {
     return static_cast<std::size_t>(std::count_if(events.begin(), events.end(), [&](const Event& e) {
-        return e.kind == kind && e.name != nullptr && std::string_view(e.name) == name;
+        return e.kind == kind && e.name == name;
     }));
 }
 
@@ -166,3 +168,52 @@ TEST_CASE("Profiling: instrumentation compiles out when disabled")
     enableCapture(false);
 }
 #endif // SF_TEST_PROFILING_ENABLED
+
+TEST_CASE("Profiling: nested zones do not double-count thread zone time")
+{
+    enableCapture(true);
+    resetThreadStats();
+
+    const auto wallStart = std::chrono::steady_clock::now();
+    beginZone("outer");
+    beginZone("inner");
+    volatile std::uint64_t sink = 0;
+    for (int i = 0; i < 2000000; ++i) sink += static_cast<std::uint64_t>(i);
+    (void)sink;
+    endZone();
+    endZone();
+    const auto wallNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now() - wallStart)
+                            .count();
+
+    const auto zoneNs = threadZoneTimeNs();
+    CHECK(zoneNs > 0);
+    // Nested zone accounting should approximate outermost wall time, not sum
+    // each nested interval independently.
+    const auto wallBudget = static_cast<std::uint64_t>(wallNs) + 5000000ULL;
+    CHECK(zoneNs <= wallBudget);
+
+    const auto events = drainCapture();
+    CHECK(countNamed(events, EventKind::ZoneBegin, "outer") == 1);
+    CHECK(countNamed(events, EventKind::ZoneBegin, "inner") == 1);
+    CHECK(countKind(events, EventKind::ZoneEnd) == 2);
+
+    enableCapture(false);
+}
+
+TEST_CASE("Profiling: capture copies dynamic event names")
+{
+    enableCapture(true);
+    clearCapture();
+
+    {
+        std::string dynamicName = "dynamic::zone";
+        beginZone(dynamicName.c_str());
+        endZone();
+    }
+
+    const auto events = drainCapture();
+    CHECK(countNamed(events, EventKind::ZoneBegin, "dynamic::zone") == 1);
+
+    enableCapture(false);
+}

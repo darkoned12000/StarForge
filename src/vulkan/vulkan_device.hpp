@@ -4,7 +4,6 @@
 
 #include <cstdint>
 #include <expected>
-#include <mutex>
 #include <string>
 #include <vector>
 
@@ -60,7 +59,6 @@ private:
     VkDevice device_ = VK_NULL_HANDLE;
     VkQueue  graphicsQueue_ = VK_NULL_HANDLE;
     std::uint32_t graphicsQueueFamily_ = 0;
-    mutable std::mutex submitMutex_;
 };
 
 } // namespace starforge::vulkan

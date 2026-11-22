@@ -222,7 +222,7 @@ std::uint32_t GpuTimer::beginScope(VkCommandBuffer cmd, std::uint32_t frameIndex
     const std::uint32_t endQuery = beginQuery + 1;
 
     ScopeInfo info;
-    info.name = name;
+    info.name = name ? name : "";
     info.beginQuery = beginQuery;
     info.endQuery = endQuery;
     info.collected = false;
@@ -287,6 +287,10 @@ bool GpuTimer::collectResults(std::uint32_t frameIndex)
         results.data(), 2 * sizeof(std::uint64_t),
         VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
 
+    if (availResult == VK_NOT_READY)
+    {
+        return false;
+    }
     if (availResult != VK_SUCCESS)
     {
         core::logWarning(kTag, "Query result read for frame {} failed: {} (queries={})",
@@ -347,7 +351,7 @@ const char* GpuTimer::scopeName(std::uint32_t frameIndex, std::uint32_t scopeInd
 {
     if (frameIndex < frameScopes_.size() && scopeIndex < frameScopes_[frameIndex].size())
     {
-        return frameScopes_[frameIndex][scopeIndex].name;
+        return frameScopes_[frameIndex][scopeIndex].name.c_str();
     }
     return nullptr;
 }

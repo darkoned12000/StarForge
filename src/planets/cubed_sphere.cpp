@@ -8,110 +8,44 @@ namespace starforge::planets
 
 void CubedSphere::faceToSphere(int32_t face, float u, float v, float* outPosition)
 {
-    switch (static_cast<CubeFace>(face))
+    if (outPosition == nullptr || face < 0 || face >= getFaceCount())
     {
-        case CubeFace::PositiveX:
-            outPosition[0] = 1.0f;
-            outPosition[1] = -v;
-            outPosition[2] = -u;
-            break;
-        case CubeFace::NegativeX:
-            outPosition[0] = -1.0f;
-            outPosition[1] = -v;
-            outPosition[2] = u;
-            break;
-        case CubeFace::PositiveY:
-            outPosition[0] = u;
-            outPosition[1] = 1.0f;
-            outPosition[2] = v;
-            break;
-        case CubeFace::NegativeY:
-            outPosition[0] = u;
-            outPosition[1] = -1.0f;
-            outPosition[2] = -v;
-            break;
-        case CubeFace::PositiveZ:
-            outPosition[0] = u;
-            outPosition[1] = -v;
-            outPosition[2] = 1.0f;
-            break;
-        case CubeFace::NegativeZ:
-            outPosition[0] = -u;
-            outPosition[1] = -v;
-            outPosition[2] = -1.0f;
-            break;
+        if (outPosition != nullptr)
+        {
+            outPosition[0] = 0.0f;
+            outPosition[1] = 0.0f;
+            outPosition[2] = 0.0f;
+        }
+        return;
     }
-    
-    // Normalize to unit sphere
-    const float len = std::sqrt(outPosition[0] * outPosition[0] +
-                                outPosition[1] * outPosition[1] +
-                                outPosition[2] * outPosition[2]);
-    if (len > 0.0f)
-    {
-        outPosition[0] /= len;
-        outPosition[1] /= len;
-        outPosition[2] /= len;
-    }
+
+    const math::Vec3d p = cubeToSphere(static_cast<CubeFace>(face), static_cast<double>(u), static_cast<double>(v));
+    outPosition[0] = static_cast<float>(p.x);
+    outPosition[1] = static_cast<float>(p.y);
+    outPosition[2] = static_cast<float>(p.z);
 }
 
 bool CubedSphere::sphereToFace(const float* position, CubeFace* outFace, float* outU, float* outV)
 {
-    // Find the face with maximum absolute coordinate
-    float absX = std::abs(position[0]);
-    float absY = std::abs(position[1]); 
-    float absZ = std::abs(position[2]);
-    
-    // Divide by the absolute dominant component to invert the normalization
-    // performed by faceToSphere (position is a unit-sphere direction).
-    if (absX >= absY && absX >= absZ)
+    if (position == nullptr || outFace == nullptr || outU == nullptr || outV == nullptr)
     {
-        // X face
-        if (position[0] > 0)
-        {
-            *outFace = CubeFace::PositiveX;
-            *outU = -position[2] / absX;
-            *outV = -position[1] / absX;
-        }
-        else
-        {
-            *outFace = CubeFace::NegativeX;
-            *outU = position[2] / absX;
-            *outV = -position[1] / absX;
-        }
+        return false;
     }
-    else if (absY >= absZ)
+
+    double u = 0.0;
+    double v = 0.0;
+    CubeFace face = CubeFace::PositiveX;
+    const bool ok = sphereToCube(
+        math::Vec3d{static_cast<double>(position[0]), static_cast<double>(position[1]), static_cast<double>(position[2])},
+        face, u, v);
+    if (!ok)
     {
-        // Y face
-        if (position[1] > 0)
-        {
-            *outFace = CubeFace::PositiveY;
-            *outU = position[0] / absY;
-            *outV = position[2] / absY;
-        }
-        else
-        {
-            *outFace = CubeFace::NegativeY;
-            *outU = position[0] / absY;
-            *outV = -position[2] / absY;
-        }
+        return false;
     }
-    else
-    {
-        // Z face
-        if (position[2] > 0)
-        {
-            *outFace = CubeFace::PositiveZ;
-            *outU = position[0] / absZ;
-            *outV = -position[1] / absZ;
-        }
-        else
-        {
-            *outFace = CubeFace::NegativeZ;
-            *outU = -position[0] / absZ;
-            *outV = -position[1] / absZ;
-        }
-    }
-    
+
+    *outFace = face;
+    *outU = static_cast<float>(u);
+    *outV = static_cast<float>(v);
     return true;
 }
 
@@ -135,6 +69,18 @@ math::Vec3d cubeToSphere(CubeFace face, double u, double v)
     return p;
 }
 
+CubePatchUvBounds cubePatchUvBounds(std::int32_t x, std::int32_t y, std::uint32_t level)
+{
+    const std::uint32_t safeLevel = level > 20u ? 20u : level;
+    const double span = 2.0 / static_cast<double>(1u << safeLevel);
+    CubePatchUvBounds bounds;
+    bounds.uMin = -1.0 + static_cast<double>(x) * span;
+    bounds.uMax = bounds.uMin + span;
+    bounds.vMin = -1.0 + static_cast<double>(y) * span;
+    bounds.vMax = bounds.vMin + span;
+    return bounds;
+}
+
 bool sphereToCube(const math::Vec3d& position, CubeFace& outFace, double& outU, double& outV)
 {
     // Double-precision inverse of cubeToSphere (do not route through the
@@ -143,6 +89,11 @@ bool sphereToCube(const math::Vec3d& position, CubeFace& outFace, double& outU, 
     const double absX = std::abs(position.x);
     const double absY = std::abs(position.y);
     const double absZ = std::abs(position.z);
+
+    if (absX == 0.0 && absY == 0.0 && absZ == 0.0)
+    {
+        return false;
+    }
 
     if (absX >= absY && absX >= absZ)
     {

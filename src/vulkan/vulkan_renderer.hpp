@@ -111,6 +111,10 @@ public:
     void nextFrame();
     [[nodiscard]] std::uint32_t framesInFlight() const noexcept { return framesInFlight_; }
 
+    // Waits for all frame-in-flight fences. Useful for rare resize/resource
+    // rebuilds without stalling unrelated queues via vkDeviceWaitIdle.
+    [[nodiscard]] std::expected<void, std::string> waitForAllFrames() const;
+
 private:
     FrameRenderer() = default;
     void destroy() noexcept;

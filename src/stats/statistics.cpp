@@ -1,6 +1,7 @@
 #include "stats/statistics.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -43,6 +44,27 @@ std::vector<double> filterFiniteFloat(std::span<const float> samples)
     return result;
 }
 
+// Neumaier compensated summation for improved numeric robustness.
+double compensatedSum(std::span<const double> values)
+{
+    double sum = 0.0;
+    double compensation = 0.0;
+    for (double value : values)
+    {
+        const double total = sum + value;
+        if (std::abs(sum) >= std::abs(value))
+        {
+            compensation += (sum - total) + value;
+        }
+        else
+        {
+            compensation += (value - total) + sum;
+        }
+        sum = total;
+    }
+    return sum + compensation;
+}
+
 // Compute statistics from already-sorted finite data.
 Statistics computeFromSorted(std::span<const double> sortedData)
 {
@@ -60,22 +82,30 @@ Statistics computeFromSorted(std::span<const double> sortedData)
     stats.min = sortedData.front();
     stats.max = sortedData.back();
 
-    double sum = 0.0;
-    for (double v : sortedData)
-    {
-        sum += v;
-    }
+    const double sum = compensatedSum(sortedData);
     stats.mean = sum / static_cast<double>(sortedData.size());
 
     if (sortedData.size() >= 2)
     {
         double sqSum = 0.0;
+        double sqCompensation = 0.0;
         for (double v : sortedData)
         {
-            double diff = v - stats.mean;
-            sqSum += diff * diff;
+            const double diff = v - stats.mean;
+            const double term = diff * diff;
+            const double total = sqSum + term;
+            if (std::abs(sqSum) >= std::abs(term))
+            {
+                sqCompensation += (sqSum - total) + term;
+            }
+            else
+            {
+                sqCompensation += (term - total) + sqSum;
+            }
+            sqSum = total;
         }
-        stats.stddev = std::sqrt(sqSum / static_cast<double>(sortedData.size() - 1));
+        const double compensatedSqSum = sqSum + sqCompensation;
+        stats.stddev = std::sqrt(compensatedSqSum / static_cast<double>(sortedData.size() - 1));
     }
     else
     {
@@ -98,12 +128,15 @@ double percentile(std::span<const double> sortedData, double p)
         return std::numeric_limits<double>::quiet_NaN();
     }
 
-    if (std::isnan(p))
+    if (!std::isfinite(p))
     {
         return std::numeric_limits<double>::quiet_NaN();
     }
 
-    // Clamp p to [0, 100].
+    assert(std::is_sorted(sortedData.begin(), sortedData.end()) &&
+           "stats::percentile requires sorted data");
+
+    // Clamp finite p to [0, 100].
     p = std::clamp(p, 0.0, 100.0);
 
     const std::size_t n = sortedData.size();
@@ -136,6 +169,32 @@ Statistics compute(std::span<const double> samples)
 Statistics compute(std::span<const float> samples)
 {
     auto finite = filterFiniteFloat(samples);
+    std::sort(finite.begin(), finite.end());
+    return computeFromSorted(finite);
+}
+
+Statistics computeSorted(std::span<const double> sortedSamples)
+{
+    assert(std::is_sorted(sortedSamples.begin(), sortedSamples.end()) &&
+           "stats::computeSorted requires sorted data");
+    assert(std::all_of(sortedSamples.begin(), sortedSamples.end(),
+                       [](double v) { return std::isfinite(v); }) &&
+           "stats::computeSorted requires finite data");
+    return computeFromSorted(sortedSamples);
+}
+
+Statistics computeInPlace(std::span<double> samples)
+{
+    std::size_t write = 0;
+    for (std::size_t read = 0; read < samples.size(); ++read)
+    {
+        if (std::isfinite(samples[read]))
+        {
+            samples[write++] = samples[read];
+        }
+    }
+
+    auto finite = samples.first(write);
     std::sort(finite.begin(), finite.end());
     return computeFromSorted(finite);
 }

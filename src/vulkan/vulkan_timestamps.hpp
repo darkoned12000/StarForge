@@ -98,7 +98,7 @@ private:
     // Per-frame scope tracking.
     struct ScopeInfo
     {
-        const char* name = nullptr;
+        std::string name;
         std::uint32_t beginQuery = 0;
         std::uint32_t endQuery = 0;
         bool collected = false;

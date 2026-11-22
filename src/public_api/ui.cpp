@@ -23,6 +23,7 @@ namespace bridge = public_api_bridge;
 struct UiCanvas::Impl
 {
     std::unique_ptr<bridge::RawUiCanvas> backend;
+    std::string shaderDirectory;
 };
 
 UiCanvas::UiCanvas(std::unique_ptr<Impl> impl) noexcept : impl_(std::move(impl)) {}
@@ -34,17 +35,19 @@ std::expected<UiCanvas, std::string> UiCanvas::create(Renderer& renderer, const 
 {
     if (!RendererInternalAccess::isValid(renderer))
         return std::unexpected("UiCanvas::create failed: Renderer is invalid or moved-from");
+    const std::string shaderDirectory = resolveShaderDirectory(info.shaderDirectory);
     auto backend = bridge::RawUiCanvas::create({
         .instance = RendererInternalAccess::instance(renderer),
         .device = RendererInternalAccess::device(renderer),
         .physicalDevice = RendererInternalAccess::physicalDevice(renderer),
-        .colorFormat = RendererInternalAccess::colorFormat(renderer),
+        .colorFormat = RendererInternalAccess::uiColorFormat(renderer),
         .depthFormat = RendererInternalAccess::depthFormat(renderer),
-        .shaderDirectory = resolveShaderDirectory(info.shaderDirectory),
+        .shaderDirectory = shaderDirectory,
     });
     if (!backend) return std::unexpected(backend.error());
     auto impl = std::make_unique<Impl>();
     impl->backend = std::move(*backend);
+    impl->shaderDirectory = shaderDirectory;
     return UiCanvas(std::move(impl));
 }
 
@@ -117,6 +120,22 @@ void UiCanvas::record(FrameContext& frameContext)
 std::size_t UiCanvas::vertexCount() const noexcept
 {
     return impl_ ? impl_->backend->vertexCount() : 0u;
+}
+
+std::expected<void, std::string> UiCanvas::recreate(Renderer& renderer)
+{
+    if (!impl_ || !impl_->backend) return std::unexpected("UiCanvas is moved-from");
+    if (!RendererInternalAccess::isValid(renderer))
+        return std::unexpected("UiCanvas::recreate failed: Renderer is invalid or moved-from");
+    renderer.waitIdle();
+    return impl_->backend->recreate({
+        .instance = RendererInternalAccess::instance(renderer),
+        .device = RendererInternalAccess::device(renderer),
+        .physicalDevice = RendererInternalAccess::physicalDevice(renderer),
+        .colorFormat = RendererInternalAccess::uiColorFormat(renderer),
+        .depthFormat = RendererInternalAccess::depthFormat(renderer),
+        .shaderDirectory = impl_->shaderDirectory,
+    });
 }
 
 } // namespace starforge

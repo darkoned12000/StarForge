@@ -5,7 +5,6 @@
 #include "gpu_resources/image.hpp"
 #include "math/math.hpp"
 #include "planets/planet_mesh.hpp"
-#include "planets/planet_patch.hpp"
 #include "vulkan/vulkan_context.hpp"
 #include "vulkan/vulkan_device.hpp"
 #include "vulkan/vulkan_pipeline.hpp"

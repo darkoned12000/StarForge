@@ -1,5 +1,7 @@
 #include "rock_field_renderer.hpp"
 
+#include "internal/effect_pipeline.hpp"
+
 #include "vulkan/vulkan_result.hpp"
 
 #include <cstring>
@@ -14,30 +16,7 @@ namespace starforge::environment
 namespace
 {
 
-std::vector<char> readFile(const std::string& path)
-{
-    std::ifstream file(path, std::ios::ate | std::ios::binary);
-    if (!file) return {};
-    const auto size = static_cast<std::size_t>(file.tellg());
-    std::vector<char> buffer(size);
-    file.seekg(0);
-    file.read(buffer.data(), static_cast<std::streamsize>(size));
-    return buffer;
-}
 
-VkShaderModule loadModule(VkDevice device, const std::string& path)
-{
-    const auto spv = readFile(path);
-    if (spv.size() < 20 || (spv.size() % 4) != 0) return VK_NULL_HANDLE;
-    std::vector<std::uint32_t> words(spv.size() / 4);
-    std::memcpy(words.data(), spv.data(), spv.size());
-    VkShaderModuleCreateInfo info{};
-    info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    info.codeSize = spv.size();
-    info.pCode = words.data();
-    VkShaderModule module = VK_NULL_HANDLE;
-    return vkCreateShaderModule(device, &info, nullptr, &module) == VK_SUCCESS ? module : VK_NULL_HANDLE;
-}
 
 // Must match Push in rock_*.slang (112 bytes).
 struct alignas(16) Push
@@ -92,17 +71,19 @@ std::expected<RockFieldRenderer, std::string> RockFieldRenderer::create(const Cr
     VkShaderModule frags[3] = {};
     for (int i = 0; i < 3; ++i)
     {
-        verts[i] = loadModule(info.device, dir + "/" + bases[i] + ".vert.spv");
-        frags[i] = loadModule(info.device, dir + "/" + bases[i] + ".frag.spv");
-        if (!verts[i] || !frags[i])
+        auto vert = internal::loadShaderModule(info.device, dir + "/" + bases[i] + ".vert.spv");
+        auto frag = internal::loadShaderModule(info.device, dir + "/" + bases[i] + ".frag.spv");
+        if (!vert || !frag)
         {
             for (int j = 0; j < 3; ++j)
             {
                 if (verts[j]) vkDestroyShaderModule(info.device, verts[j], nullptr);
                 if (frags[j]) vkDestroyShaderModule(info.device, frags[j], nullptr);
             }
-            return std::unexpected(std::string("RockFieldRenderer: missing shader ") + bases[i]);
+            return std::unexpected(vert ? frag.error() : vert.error());
         }
+        verts[i] = *vert;
+        frags[i] = *frag;
     }
 
     VkPushConstantRange pushRange{};

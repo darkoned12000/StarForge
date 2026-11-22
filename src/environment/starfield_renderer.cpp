@@ -57,61 +57,7 @@ static_assert(offsetof(PushConstants, timeIntensityAspectTan) == 48, "Starfield 
     return push;
 }
 
-std::vector<char> readFile(const std::string& path)
-{
-    std::ifstream file(path, std::ios::ate | std::ios::binary);
-    if (!file)
-    {
-        return {};
-    }
-    const auto size = static_cast<std::size_t>(file.tellg());
-    std::vector<char> buffer(size);
-    file.seekg(0);
-    file.read(buffer.data(), static_cast<std::streamsize>(size));
-    return buffer;
-}
 
-std::expected<VkShaderModule, std::string> loadShaderModule(VkDevice device, const std::string& path)
-{
-    const auto spv = readFile(path);
-    if (spv.empty())
-    {
-        return std::unexpected("Cannot read shader file: " + path);
-    }
-
-    // SPIR-V binaries are word-aligned and start with a 5-word header
-    // (magic 0x07230203, version, generator, bound, schema). Reject
-    // truncated/corrupt files before copying (avoids a heap overflow
-    // when the byte count is not a multiple of sizeof(uint32_t)).
-    constexpr std::size_t kSpirvHeaderBytes = 20;
-    constexpr std::uint32_t kSpirvMagic = 0x07230203u;
-    if (spv.size() < kSpirvHeaderBytes || (spv.size() % sizeof(std::uint32_t)) != 0)
-    {
-        return std::unexpected("Corrupt SPIR-V binary: invalid byte count in " + path);
-    }
-    std::uint32_t magic = 0;
-    std::memcpy(&magic, spv.data(), sizeof(magic));
-    if (magic != kSpirvMagic)
-    {
-        return std::unexpected("Corrupt SPIR-V binary: bad magic in " + path);
-    }
-
-    std::vector<std::uint32_t> aligned(spv.size() / sizeof(std::uint32_t));
-    std::memcpy(aligned.data(), spv.data(), spv.size());
-
-    VkShaderModuleCreateInfo info{};
-    info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    info.codeSize = spv.size();
-    info.pCode = aligned.data();
-
-    VkShaderModule module = VK_NULL_HANDLE;
-    if (const VkResult result = vkCreateShaderModule(device, &info, nullptr, &module);
-        result != VK_SUCCESS)
-    {
-        return std::unexpected(vulkan::describeFailure("vkCreateShaderModule", result));
-    }
-    return module;
-}
 
 } // namespace
 
@@ -133,12 +79,12 @@ std::expected<StarfieldRenderer, std::string> StarfieldRenderer::create(const Cr
     StarfieldRenderer renderer;
     renderer.device_ = info.device;
 
-    auto vertModule = loadShaderModule(info.device, info.shaderDirectory + "/starfield.vert.spv");
+    auto vertModule = internal::loadShaderModule(info.device, info.shaderDirectory + "/starfield.vert.spv");
     if (!vertModule)
     {
         return std::unexpected(std::move(vertModule.error()));
     }
-    auto fragModule = loadShaderModule(info.device, info.shaderDirectory + "/starfield.frag.spv");
+    auto fragModule = internal::loadShaderModule(info.device, info.shaderDirectory + "/starfield.frag.spv");
     if (!fragModule)
     {
         vkDestroyShaderModule(info.device, *vertModule, nullptr);

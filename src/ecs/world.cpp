@@ -13,13 +13,16 @@ Ecs::Ecs()
     world_.component<Velocity>("Velocity");
     world_.component<CollisionEvent>("CollisionEvent");
     world_.component<CollisionData>("CollisionData");
+    world_.component<PhysicsDrivenTag>("PhysicsDrivenTag");
     world_.component<ShipTag>("ShipTag");
     world_.component<AsteroidTag>("AsteroidTag");
     world_.component<StationTag>("StationTag");
     world_.component<ProjectileTag>("ProjectileTag");
 
     // Cached once: only entities with both Transform and Velocity move.
-    movementQuery_ = world_.query<Transform, const Velocity>();
+    // Physics-driven bodies are integrated by Jolt and read back via the
+    // physics bridge, so ECS movement must not double-integrate them.
+    movementQuery_ = world_.query_builder<Transform, const Velocity>().without<PhysicsDrivenTag>().build();
     asteroidQuery_ = world_.query<const Transform, const AsteroidTag>();
 }
 

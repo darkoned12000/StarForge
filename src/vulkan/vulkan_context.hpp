@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cstdint>
 #include <expected>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -57,15 +58,23 @@ public:
     [[nodiscard]] const GpuCapabilities& capabilities() const noexcept { return capabilities_; }
     [[nodiscard]] std::uint32_t instanceApiVersion() const noexcept { return instanceApiVersion_; }
     [[nodiscard]] bool validationEnabled() const noexcept { return messenger_ != VK_NULL_HANDLE; }
-    [[nodiscard]] std::uint64_t validationErrorCount() const noexcept { return validationErrorCount_.load(std::memory_order_relaxed); }
-    [[nodiscard]] std::uint64_t validationWarningCount() const noexcept { return validationWarningCount_.load(std::memory_order_relaxed); }
+    [[nodiscard]] std::uint64_t validationErrorCount() const noexcept
+    {
+        return callbackState_ ? callbackState_->errors.load(std::memory_order_relaxed) : 0;
+    }
+    [[nodiscard]] std::uint64_t validationWarningCount() const noexcept
+    {
+        return callbackState_ ? callbackState_->warnings.load(std::memory_order_relaxed) : 0;
+    }
 
-    // For debug messenger pUserData access.
-    [[nodiscard]] std::atomic<std::uint64_t>& errorCounter() noexcept { return validationErrorCount_; }
-    [[nodiscard]] std::atomic<std::uint64_t>& warningCounter() noexcept { return validationWarningCount_; }
+    struct CallbackState
+    {
+        std::atomic<std::uint64_t> errors{0};
+        std::atomic<std::uint64_t> warnings{0};
+    };
 
 private:
-    VulkanContext() = default;
+    VulkanContext();
     void destroy() noexcept;
 
     VkInstance                 instance_ = VK_NULL_HANDLE;
@@ -73,8 +82,7 @@ private:
     VkPhysicalDevice           physicalDevice_ = VK_NULL_HANDLE;
     GpuCapabilities            capabilities_;
     std::uint32_t              instanceApiVersion_ = 0;
-    std::atomic<std::uint64_t> validationErrorCount_{0};
-    std::atomic<std::uint64_t> validationWarningCount_{0};
+    std::unique_ptr<CallbackState> callbackState_;
 };
 
 } // namespace starforge::vulkan

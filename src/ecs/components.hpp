@@ -49,6 +49,12 @@ struct CollisionData
     std::array<Entry, kMaxContacts> contacts;
 };
 
+// Marks entities whose motion is integrated by an external system (e.g.
+// Jolt physics). Ecs::step skips these to prevent double integration.
+struct PhysicsDrivenTag
+{
+};
+
 // Entity kind tags (Flecs empty components).
 struct ShipTag
 {

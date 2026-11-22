@@ -1,5 +1,7 @@
 #include "spatial/world_position.hpp"
 
+#include "core/log.hpp"
+
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -120,6 +122,10 @@ WorldPosition::fromCellAndOffset(std::int64_t cx, std::int64_t cy, std::int64_t 
 
 std::expected<WorldPosition, std::string> WorldPosition::fromMeters(double x, double y, double z)
 {
+    if (std::abs(x) > kMaxReach || std::abs(y) > kMaxReach || std::abs(z) > kMaxReach)
+    {
+        return std::unexpected("WorldPosition: coordinate exceeds maximum representable range");
+    }
     return fromCellAndOffset(0, 0, 0, x, y, z);
 }
 
@@ -200,8 +206,7 @@ WorldPosition& WorldPosition::operator+=(const math::Vec3d& delta)
     }
     else
     {
-        // Log the failure; caller should use translated() for explicit error handling.
-        // In debug builds this is a programming error.
+        core::logError("SPATIAL", "WorldPosition::operator+= failed: {}", moved.error());
 #ifndef NDEBUG
         assert(false && "WorldPosition translation overflow or invalid delta");
 #endif
@@ -239,6 +244,10 @@ math::Vec3d WorldPosition::operator-(const WorldPosition& other) const noexcept
     // directly, avoiding the catastrophic cancellation of converting both
     // positions to absolute metres. Promote to double when the int64 subtraction
     // would overflow to avoid undefined behaviour.
+    //
+    // Note: for astronomically extreme cell differences, the resulting double
+    // components can overflow to +/-inf. Use checkedDifference() when callers
+    // need to detect that condition explicitly.
     auto safeDelta = [](std::int64_t c1, double o1, std::int64_t c2, double o2) noexcept -> double {
         // If the subtraction would overflow int64, promote to double.
         if ((c2 > 0 && c1 < std::numeric_limits<std::int64_t>::min() + c2) ||
@@ -254,6 +263,18 @@ math::Vec3d WorldPosition::operator-(const WorldPosition& other) const noexcept
         safeDelta(cellY, offsetY, other.cellY, other.offsetY),
         safeDelta(cellZ, offsetZ, other.cellZ, other.offsetZ),
     };
+}
+
+std::expected<math::Vec3d, std::string>
+WorldPosition::checkedDifference(const WorldPosition& other) const noexcept
+{
+    const math::Vec3d delta = *this - other;
+    if (!std::isfinite(delta.x) || !std::isfinite(delta.y) || !std::isfinite(delta.z))
+    {
+        return std::unexpected(
+            "WorldPosition::checkedDifference: result is non-finite (positions too far apart for double)");
+    }
+    return delta;
 }
 
 bool WorldPosition::operator==(const WorldPosition& other) const noexcept
@@ -340,9 +361,10 @@ std::expected<bool, std::string> WorldPosition::normalize() noexcept
 
 bool WorldPosition::isNormalized() const noexcept
 {
-    return offsetX >= 0.0 && offsetX < kCellSize &&
-           offsetY >= 0.0 && offsetY < kCellSize &&
-           offsetZ >= 0.0 && offsetZ < kCellSize;
+    auto normalizedOffset = [](double v) noexcept {
+        return std::isfinite(v) && v >= 0.0 && v < kCellSize && !(v == 0.0 && std::signbit(v));
+    };
+    return normalizedOffset(offsetX) && normalizedOffset(offsetY) && normalizedOffset(offsetZ);
 }
 
 std::int64_t WorldPosition::coarseCellByBitsX(int shiftBits) const noexcept

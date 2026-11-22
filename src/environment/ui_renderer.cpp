@@ -2,6 +2,7 @@
 
 #include "gpu_resources/allocator.hpp"
 #include "gpu_resources/buffer.hpp"
+#include "internal/effect_pipeline.hpp"
 #include "vulkan/vulkan_pipeline.hpp"
 
 #include <cstring>
@@ -21,22 +22,7 @@ struct Push
 };
 static_assert(sizeof(Push) == 8);
 
-VkShaderModule loadModule(VkDevice device, const std::string& path)
-{
-    std::ifstream file(path, std::ios::ate | std::ios::binary);
-    if (!file) return VK_NULL_HANDLE;
-    const auto size = static_cast<std::size_t>(file.tellg());
-    if (size < 20 || (size % 4) != 0) return VK_NULL_HANDLE;
-    std::vector<std::uint32_t> words(size / 4);
-    file.seekg(0);
-    file.read(reinterpret_cast<char*>(words.data()), static_cast<std::streamsize>(size));
-    VkShaderModuleCreateInfo info{};
-    info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    info.codeSize = size;
-    info.pCode = words.data();
-    VkShaderModule module = VK_NULL_HANDLE;
-    return vkCreateShaderModule(device, &info, nullptr, &module) == VK_SUCCESS ? module : VK_NULL_HANDLE;
-}
+
 
 } // namespace
 
@@ -92,10 +78,12 @@ std::expected<UiRenderer, std::string> UiRenderer::create(const CreateInfo& info
     if (!buffer) return std::unexpected(buffer.error());
     impl->vertexBuffer = std::make_unique<Buffer>(std::move(*buffer));
 
-    impl->vert = loadModule(info.device, info.shaderDirectory + "/ui_text.vert.spv");
-    impl->frag = loadModule(info.device, info.shaderDirectory + "/ui_text.frag.spv");
-    if (!impl->vert || !impl->frag)
-        return std::unexpected("UiRenderer: missing ui_text shaders");
+    auto vert = internal::loadShaderModule(info.device, info.shaderDirectory + "/ui_text.vert.spv");
+    auto frag = internal::loadShaderModule(info.device, info.shaderDirectory + "/ui_text.frag.spv");
+    if (!vert || !frag)
+        return std::unexpected(vert ? frag.error() : vert.error());
+    impl->vert = *vert;
+    impl->frag = *frag;
 
     VkPushConstantRange push{};
     push.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
@@ -145,6 +133,8 @@ void UiRenderer::render(VkCommandBuffer cmd, const std::vector<UiVertex>& vertic
             .size = needed, .usage = gpu_resources::BufferUsage::Storage,
             .memory = gpu_resources::MemoryPlacement::CpuToGpu});
         if (!grown) return;
+        // Avoid destroying a buffer still referenced by in-flight command buffers.
+        vkDeviceWaitIdle(impl_->device);
         impl_->vertexBuffer = std::make_unique<gpu_resources::Buffer>(std::move(*grown));
         impl_->capacity = needed;
     }

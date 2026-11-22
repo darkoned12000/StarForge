@@ -63,7 +63,7 @@ private:
     VkFormat format_ = VK_FORMAT_UNDEFINED;
     VkExtent2D extent_{};
     std::vector<VkImage> images_;
-    std::vector<VkDeviceMemory> memory_;
+    VkDeviceMemory memory_ = VK_NULL_HANDLE;
     std::vector<VkImageView> views_;
 };
 

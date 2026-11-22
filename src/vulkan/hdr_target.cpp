@@ -2,6 +2,7 @@
 
 #include "vulkan/vulkan_result.hpp"
 
+#include <string>
 #include <utility>
 
 namespace starforge::vulkan
@@ -9,6 +10,26 @@ namespace starforge::vulkan
 
 namespace
 {
+void setDebugObjectName(VkDevice device, std::uint64_t handle, VkObjectType type, const char* name)
+{
+    if (device == VK_NULL_HANDLE || handle == 0 || name == nullptr || name[0] == '\0')
+    {
+        return;
+    }
+    const auto setName = reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(
+        vkGetDeviceProcAddr(device, "vkSetDebugUtilsObjectNameEXT"));
+    if (setName == nullptr)
+    {
+        return;
+    }
+    VkDebugUtilsObjectNameInfoEXT info{};
+    info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+    info.objectType = type;
+    info.objectHandle = handle;
+    info.pObjectName = name;
+    (void)setName(device, &info);
+}
+
 [[nodiscard]] std::expected<std::uint32_t, std::string>
 findDeviceLocalMemoryType(VkPhysicalDevice physicalDevice, std::uint32_t typeBits)
 {
@@ -55,8 +76,11 @@ std::expected<HdrTarget, std::string> HdrTarget::create(const CreateInfo& info)
     target.format_ = info.format;
     target.extent_ = info.extent;
     target.images_.assign(info.count, VK_NULL_HANDLE);
-    target.memory_.assign(info.count, VK_NULL_HANDLE);
     target.views_.assign(info.count, VK_NULL_HANDLE);
+
+    std::vector<VkDeviceSize> offsets(info.count, 0);
+    VkDeviceSize totalSize = 0;
+    std::uint32_t memoryTypeBits = 0xFFFFFFFFu;
 
     for (std::uint32_t i = 0; i < info.count; ++i)
     {
@@ -80,21 +104,37 @@ std::expected<HdrTarget, std::string> HdrTarget::create(const CreateInfo& info)
 
         VkMemoryRequirements req{};
         vkGetImageMemoryRequirements(info.device, target.images_[i], &req);
-        auto typeIndex = findDeviceLocalMemoryType(info.physicalDevice, req.memoryTypeBits);
-        if (!typeIndex)
-        {
-            return std::unexpected(std::move(typeIndex.error()));
-        }
+        memoryTypeBits &= req.memoryTypeBits;
+        const VkDeviceSize align = req.alignment == 0 ? 1 : req.alignment;
+        totalSize = (totalSize + align - 1) & ~(align - 1);
+        offsets[i] = totalSize;
+        totalSize += req.size;
+    }
 
-        VkMemoryAllocateInfo alloc{};
-        alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        alloc.allocationSize = req.size;
-        alloc.memoryTypeIndex = *typeIndex;
-        if (const VkResult r = vkAllocateMemory(info.device, &alloc, nullptr, &target.memory_[i]); r != VK_SUCCESS)
-        {
-            return std::unexpected(describeFailure("vkAllocateMemory (hdr)", r));
-        }
-        if (const VkResult r = vkBindImageMemory(info.device, target.images_[i], target.memory_[i], 0);
+    if (memoryTypeBits == 0)
+    {
+        return std::unexpected("HdrTarget: no common memory type for batched scene colour images");
+    }
+
+    auto typeIndex = findDeviceLocalMemoryType(info.physicalDevice, memoryTypeBits);
+    if (!typeIndex)
+    {
+        return std::unexpected(std::move(typeIndex.error()));
+    }
+
+    VkMemoryAllocateInfo alloc{};
+    alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc.allocationSize = totalSize;
+    alloc.memoryTypeIndex = *typeIndex;
+    if (const VkResult r = vkAllocateMemory(info.device, &alloc, nullptr, &target.memory_); r != VK_SUCCESS)
+    {
+        return std::unexpected(describeFailure("vkAllocateMemory (hdr)", r));
+    }
+    setDebugObjectName(info.device, reinterpret_cast<std::uint64_t>(target.memory_), VK_OBJECT_TYPE_DEVICE_MEMORY, "starforge.hdr.memory");
+
+    for (std::uint32_t i = 0; i < info.count; ++i)
+    {
+        if (const VkResult r = vkBindImageMemory(info.device, target.images_[i], target.memory_, offsets[i]);
             r != VK_SUCCESS)
         {
             return std::unexpected(describeFailure("vkBindImageMemory (hdr)", r));
@@ -111,6 +151,12 @@ std::expected<HdrTarget, std::string> HdrTarget::create(const CreateInfo& info)
         {
             return std::unexpected(describeFailure("vkCreateImageView (hdr)", r));
         }
+        {
+            const std::string name = "starforge.hdr.color." + std::to_string(i);
+            setDebugObjectName(info.device, reinterpret_cast<std::uint64_t>(target.images_[i]), VK_OBJECT_TYPE_IMAGE, name.c_str());
+            const std::string viewName = "starforge.hdr.color_view." + std::to_string(i);
+            setDebugObjectName(info.device, reinterpret_cast<std::uint64_t>(target.views_[i]), VK_OBJECT_TYPE_IMAGE_VIEW, viewName.c_str());
+        }
     }
     // Early returns above are safe: ~HdrTarget() frees whatever was created.
     return target;
@@ -126,11 +172,10 @@ HdrTarget::HdrTarget(HdrTarget&& other) noexcept
       format_(other.format_),
       extent_(other.extent_),
       images_(std::move(other.images_)),
-      memory_(std::move(other.memory_)),
+      memory_(std::exchange(other.memory_, VK_NULL_HANDLE)),
       views_(std::move(other.views_))
 {
     other.images_.clear();
-    other.memory_.clear();
     other.views_.clear();
 }
 
@@ -143,10 +188,9 @@ HdrTarget& HdrTarget::operator=(HdrTarget&& other) noexcept
         format_ = other.format_;
         extent_ = other.extent_;
         images_ = std::move(other.images_);
-        memory_ = std::move(other.memory_);
+        memory_ = std::exchange(other.memory_, VK_NULL_HANDLE);
         views_ = std::move(other.views_);
         other.images_.clear();
-        other.memory_.clear();
         other.views_.clear();
     }
     return *this;
@@ -164,14 +208,14 @@ void HdrTarget::destroy() noexcept
         {
             if (img != VK_NULL_HANDLE) vkDestroyImage(device_, img, nullptr);
         }
-        for (VkDeviceMemory m : memory_)
+        if (memory_ != VK_NULL_HANDLE)
         {
-            if (m != VK_NULL_HANDLE) vkFreeMemory(device_, m, nullptr);
+            vkFreeMemory(device_, memory_, nullptr);
         }
     }
     device_ = VK_NULL_HANDLE;
+    memory_ = VK_NULL_HANDLE;
     images_.clear();
-    memory_.clear();
     views_.clear();
 }
 

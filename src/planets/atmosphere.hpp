@@ -4,6 +4,11 @@
 #include <cstdint>
 #include <vector>
 
+namespace starforge::jobs
+{
+class JobScheduler;
+}
+
 namespace starforge::planets
 {
 
@@ -17,7 +22,7 @@ struct AtmosphereParams
     float atmosphereRadius = 6471000.0f;
 
     // Rayleigh scattering coefficients (RGB)
-    float rayleighScatter[3] = {5.8e-6f, 13.5e-6f, 33.1e-6f};
+    std::array<float, 3> rayleighScatter{5.8e-6f, 13.5e-6f, 33.1e-6f};
 
     // Mie scattering coefficient
     float mieScatter = 2.0e-5f;
@@ -25,8 +30,9 @@ struct AtmosphereParams
     // Mie phase function asymmetry parameter
     float mieG = 0.76f;
 
-    // Sun direction (normalized, planet frame, zenith = +Y)
-    float sunDirection[3] = {0.0f, 0.0f, -1.0f};
+    // Sun direction (normalized, planet frame, zenith = +Y). Stored for
+    // renderers; the 2D LUT integrates over zenith angles in a fixed plane.
+    std::array<float, 3> sunDirection{0.0f, 0.0f, -1.0f};
 
     // Sun irradiance (W/m²)
     float sunIrradiance = 1361.0f;
@@ -42,11 +48,14 @@ struct AtmosphereLut
 };
 
 // Generate the scattering LUT by integrating single scattering along
-// view rays through a spherical shell atmosphere. When `parallel` is
-// true, row batches run on the global job scheduler; output is
-// bit-identical either way (each texel is an independent pure function).
+// view rays through a spherical shell atmosphere. The scheduler overload
+// allows callers to control execution; the bool overload uses the global
+// scheduler when parallel is true. Output is bit-identical either way
+// (each texel is an independent pure function).
 [[nodiscard]] AtmosphereLut generateAtmosphereLut(
     const AtmosphereParams& params, bool parallel = true);
+[[nodiscard]] AtmosphereLut generateAtmosphereLut(
+    const AtmosphereParams& params, jobs::JobScheduler& scheduler);
 
 // Atmosphere rendering state: owns parameters + precomputed LUT.
 // GPU shell rendering consumes `lut()` (see TODO 7.4b follow-ups).
@@ -57,6 +66,7 @@ public:
 
     // Initialize atmosphere with parameters and generate the LUT.
     bool initialize(const AtmosphereParams& params, bool parallel = true);
+    bool initialize(const AtmosphereParams& params, jobs::JobScheduler& scheduler);
 
     [[nodiscard]] const AtmosphereLut& lut() const noexcept { return lut_; }
     [[nodiscard]] const AtmosphereParams& params() const noexcept { return params_; }

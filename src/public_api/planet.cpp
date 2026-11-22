@@ -1,5 +1,6 @@
 #include "starforge/planet.hpp"
 
+#include "convert.hpp"
 #include "planet_bridge.hpp"
 #include "renderer_impl.hpp"
 #include "shader_dir.hpp"
@@ -12,30 +13,7 @@ namespace starforge
 namespace
 {
 namespace bridge = public_api_bridge;
-
-[[nodiscard]] bridge::RawMat4f toRaw(const math::Mat4f& value) noexcept
-{
-    bridge::RawMat4f result;
-    for (std::size_t column = 0; column < 4; ++column)
-        for (std::size_t row = 0; row < 4; ++row)
-            result.columns[column][row] = value.columns[column][row];
-    return result;
-}
-
-[[nodiscard]] bridge::RawVec2f toRaw(const math::Vec2f& value) noexcept
-{
-    return bridge::RawVec2f{value.x(), value.y()};
-}
-
-[[nodiscard]] bridge::RawVec3f toRaw(const math::Vec3f& value) noexcept
-{
-    return bridge::RawVec3f{value.x(), value.y(), value.z()};
-}
-
-[[nodiscard]] bridge::RawVec4f toRaw(const math::Vec4f& value) noexcept
-{
-    return bridge::RawVec4f{value.x(), value.y(), value.z(), value.w()};
-}
+using public_api_convert::toRaw;
 
 [[nodiscard]] bridge::RawPlanet::CreateInfo makeBackendInfo(Renderer& renderer,
                                                             const std::string& shaderDirectory)
@@ -125,6 +103,8 @@ Planet::render(Renderer& renderer, const RenderContext& context, const Params& p
 std::expected<void, std::string> Planet::recreate(Renderer& renderer)
 {
     if (!impl_ || !impl_->backend) return std::unexpected("Planet is moved-from");
+    if (!RendererInternalAccess::isValid(renderer))
+        return std::unexpected("Planet::recreate failed: Renderer is invalid or moved-from");
     renderer.waitIdle();
     return impl_->backend->recreate(makeBackendInfo(renderer, impl_->shaderDirectory));
 }

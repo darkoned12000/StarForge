@@ -58,6 +58,7 @@ private:
     static constexpr std::uint32_t kSetCount = 16;
     mutable VkDescriptorSet descriptorSets_[kSetCount] = {};
     mutable VkImageView boundViews_[kSetCount] = {};
+    mutable VkImageView boundSecondViews_[kSetCount] = {};
     mutable std::uint32_t nextSet_ = 0;
     VkSampler sampler_ = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;

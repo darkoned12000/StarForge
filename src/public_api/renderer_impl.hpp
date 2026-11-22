@@ -135,6 +135,10 @@ struct RendererInternalAccess
     {
         return renderer.impl_->swapchain->format();
     }
+    [[nodiscard]] static VkFormat uiColorFormat(Renderer& renderer) noexcept
+    {
+        return colorFormat(renderer);
+    }
     // Format used for scene pipelines (toon, starfield, nebula, planet,
     // rocks, sun). These target the linear HDR buffer when enabled.
     [[nodiscard]] static VkFormat sceneColorFormat(Renderer& renderer) noexcept

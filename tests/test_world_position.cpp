@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <limits>
 
 namespace math = starforge::math;
@@ -166,3 +167,57 @@ TEST_CASE("WorldPosition: shift-based coarse cell index with floor semantics")
     // Arbitrary power-of-two bit shift also uses floor semantics.
     CHECK(pos->coarseCellByBitsZ(4) == -1);
 }
+
+TEST_CASE("WorldPosition: -0.0 offsets are canonicalized for normalization, equality, and hash")
+{
+    WorldPosition a;
+    a.cellX = 1; a.cellY = 2; a.cellZ = 3;
+    a.offsetX = -0.0; a.offsetY = 0.0; a.offsetZ = 5.0;
+
+    WorldPosition b = a;
+    b.offsetX = 0.0;
+
+    CHECK(a == b);
+    CHECK(std::hash<WorldPosition>{}(a) == std::hash<WorldPosition>{}(b));
+    CHECK_FALSE(a.isNormalized());
+
+    auto normalized = a.normalize();
+    REQUIRE(normalized.has_value());
+    CHECK(*normalized);
+    CHECK(a.isNormalized());
+    CHECK(a.offsetX == 0.0);
+    CHECK_FALSE(std::signbit(a.offsetX));
+}
+
+TEST_CASE("WorldPosition: checkedDifference returns finite relative vector")
+{
+    auto a = WorldPosition::fromMeters(100.0, -50.0, 25.0);
+    auto b = WorldPosition::fromMeters(10.0, 5.0, -5.0);
+    REQUIRE(a.has_value());
+    REQUIRE(b.has_value());
+
+    auto delta = a->checkedDifference(*b);
+    REQUIRE(delta.has_value());
+    CHECK(approxEqual(delta->x, 90.0));
+    CHECK(approxEqual(delta->y, -55.0));
+    CHECK(approxEqual(delta->z, 30.0));
+}
+
+TEST_CASE("WorldPosition: fromMeters rejects values beyond kMaxReach")
+{
+    CHECK_FALSE(WorldPosition::fromMeters(WorldPosition::kMaxReach * 2.0, 0.0, 0.0).has_value());
+    CHECK_FALSE(WorldPosition::fromMeters(0.0, -WorldPosition::kMaxReach * 2.0, 0.0).has_value());
+}
+
+#ifdef NDEBUG
+TEST_CASE("WorldPosition: operator+= logs and leaves position unchanged on invalid delta in release")
+{
+    auto pos = WorldPosition::fromMeters(10.0, 20.0, 30.0);
+    REQUIRE(pos.has_value());
+    const WorldPosition before = *pos;
+
+    *pos += math::Vec3d{std::numeric_limits<double>::quiet_NaN(), 0.0, 0.0};
+    CHECK(*pos == before);
+}
+#endif
+

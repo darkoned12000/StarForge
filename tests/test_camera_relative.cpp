@@ -117,3 +117,18 @@ TEST_CASE("Large object: planet radius 6.4e6 m at 1e15 m from origin has no surf
     CHECK(std::fabs((v2.x - v1.x) - 0.01f) < 1e-5f);
     CHECK(std::fabs((v2.y - v1.y) - 0.01f) < 1e-5f);
 }
+
+TEST_CASE("Camera-relative: checked variant reports finite relative vectors")
+{
+    auto cam = WorldPosition::fromMeters(10.0, 20.0, 30.0);
+    auto obj = WorldPosition::fromMeters(110.0, -80.0, 30.5);
+    REQUIRE(cam.has_value());
+    REQUIRE(obj.has_value());
+
+    auto rel = toCameraRelativeChecked(*obj, *cam);
+    REQUIRE(rel.has_value());
+    CHECK(approxEqual(rel->x, 100.0));
+    CHECK(approxEqual(rel->y, -100.0));
+    CHECK(approxEqual(rel->z, 0.5));
+}
+

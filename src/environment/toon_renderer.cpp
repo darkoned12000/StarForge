@@ -2,6 +2,7 @@
 
 #include "gpu_resources/allocator.hpp"
 #include "gpu_resources/buffer.hpp"
+#include "internal/effect_pipeline.hpp"
 #include "vulkan/vulkan_result.hpp"
 
 #include <algorithm>
@@ -63,58 +64,9 @@ static_assert(offsetof(PushConstants, drawDataAddress) == 64, "Toon draw data ad
 static_assert(offsetof(PushConstants, vertexAddress) == 72, "Toon vertex address offset must be 72");
 
 constexpr std::size_t kDrawDataStride = 256;
-constexpr std::uint32_t kMaxDrawsPerFrame = 128;
+constexpr std::uint32_t kDefaultMaxDrawsPerFrame = 512;
 
-std::vector<char> readFile(const std::string& path)
-{
-    std::ifstream file(path, std::ios::ate | std::ios::binary);
-    if (!file)
-    {
-        return {};
-    }
-    const auto size = static_cast<std::size_t>(file.tellg());
-    std::vector<char> buffer(size);
-    file.seekg(0);
-    file.read(buffer.data(), static_cast<std::streamsize>(size));
-    return buffer;
-}
 
-std::expected<VkShaderModule, std::string> loadShaderModule(VkDevice device, const std::string& path)
-{
-    const auto spv = readFile(path);
-    if (spv.empty())
-    {
-        return std::unexpected("Cannot read shader file: " + path);
-    }
-    constexpr std::size_t kSpirvHeaderBytes = 20;
-    constexpr std::uint32_t kSpirvMagic = 0x07230203u;
-    if (spv.size() < kSpirvHeaderBytes || (spv.size() % sizeof(std::uint32_t)) != 0)
-    {
-        return std::unexpected("Corrupt SPIR-V binary: invalid byte count in " + path);
-    }
-    std::uint32_t magic = 0;
-    std::memcpy(&magic, spv.data(), sizeof(magic));
-    if (magic != kSpirvMagic)
-    {
-        return std::unexpected("Corrupt SPIR-V binary: bad magic in " + path);
-    }
-
-    std::vector<std::uint32_t> aligned(spv.size() / sizeof(std::uint32_t));
-    std::memcpy(aligned.data(), spv.data(), spv.size());
-
-    VkShaderModuleCreateInfo info{};
-    info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    info.codeSize = spv.size();
-    info.pCode = aligned.data();
-
-    VkShaderModule module = VK_NULL_HANDLE;
-    if (const VkResult result = vkCreateShaderModule(device, &info, nullptr, &module);
-        result != VK_SUCCESS)
-    {
-        return std::unexpected(vulkan::describeFailure("vkCreateShaderModule", result));
-    }
-    return module;
-}
 
 } // namespace
 
@@ -166,6 +118,7 @@ std::expected<ToonRenderer, std::string> ToonRenderer::create(const CreateInfo& 
     ToonRenderer renderer;
     renderer.device_ = info.device;
     renderer.framesInFlight_ = info.framesInFlight;
+    renderer.maxDrawsPerFrame_ = kDefaultMaxDrawsPerFrame;
 
     // Host-visible per-draw buffer. Each frame gets its own slot so the GPU
     // never reads data that the CPU is about to overwrite on the next frame.
@@ -179,7 +132,7 @@ std::expected<ToonRenderer, std::string> ToonRenderer::create(const CreateInfo& 
         return std::unexpected(std::move(allocator.error()));
     }
     auto drawBuffer = gpu_resources::Buffer::create(*allocator, {
-        .size = static_cast<VkDeviceSize>(kDrawDataStride * kMaxDrawsPerFrame * info.framesInFlight),
+        .size = static_cast<VkDeviceSize>(kDrawDataStride * renderer.maxDrawsPerFrame_ * info.framesInFlight),
         .usage = gpu_resources::BufferUsage::Storage,
         .memory = gpu_resources::MemoryPlacement::CpuToGpu,
         .name = "starforge.Toon.DrawData",
@@ -190,13 +143,19 @@ std::expected<ToonRenderer, std::string> ToonRenderer::create(const CreateInfo& 
     }
     renderer.allocator_ = std::make_shared<gpu_resources::Allocator>(std::move(*allocator));
     renderer.drawDataBuffer_ = std::make_unique<gpu_resources::Buffer>(std::move(*drawBuffer));
+    auto mappedDrawData = renderer.drawDataBuffer_->map();
+    if (!mappedDrawData)
+    {
+        return std::unexpected(mappedDrawData.error());
+    }
+    renderer.mappedDrawData_ = *mappedDrawData;
 
-    auto vertModule = loadShaderModule(info.device, info.shaderDirectory + "/toon.vert.spv");
+    auto vertModule = internal::loadShaderModule(info.device, info.shaderDirectory + "/toon.vert.spv");
     if (!vertModule)
     {
         return std::unexpected(vertModule.error());
     }
-    auto fragModule = loadShaderModule(info.device, info.shaderDirectory + "/toon.frag.spv");
+    auto fragModule = internal::loadShaderModule(info.device, info.shaderDirectory + "/toon.frag.spv");
     if (!fragModule)
     {
         vkDestroyShaderModule(info.device, *vertModule, nullptr);
@@ -308,9 +267,12 @@ ToonRenderer::ToonRenderer(ToonRenderer&& other) noexcept
     : device_(std::exchange(other.device_, VK_NULL_HANDLE)),
       pipelineLayout_(std::exchange(other.pipelineLayout_, VK_NULL_HANDLE)),
       framesInFlight_(std::exchange(other.framesInFlight_, 1)),
+      maxDrawsPerFrame_(std::exchange(other.maxDrawsPerFrame_, 512)),
+      drawsInFrame_(std::exchange(other.drawsInFrame_, 0)),
       currentDrawSlot_(std::exchange(other.currentDrawSlot_, 0)),
       allocator_(std::move(other.allocator_)),
       drawDataBuffer_(std::move(other.drawDataBuffer_)),
+      mappedDrawData_(std::exchange(other.mappedDrawData_, nullptr)),
       toonPipeline_(std::exchange(other.toonPipeline_, std::nullopt)),
       outlinePipeline_(std::exchange(other.outlinePipeline_, std::nullopt)),
       emissivePipeline_(std::exchange(other.emissivePipeline_, std::nullopt))
@@ -325,9 +287,12 @@ ToonRenderer& ToonRenderer::operator=(ToonRenderer&& other) noexcept
         device_ = std::exchange(other.device_, VK_NULL_HANDLE);
         pipelineLayout_ = std::exchange(other.pipelineLayout_, VK_NULL_HANDLE);
         framesInFlight_ = std::exchange(other.framesInFlight_, 1);
+        maxDrawsPerFrame_ = std::exchange(other.maxDrawsPerFrame_, 512);
+        drawsInFrame_ = std::exchange(other.drawsInFrame_, 0);
         currentDrawSlot_ = std::exchange(other.currentDrawSlot_, 0);
         allocator_ = std::move(other.allocator_);
         drawDataBuffer_ = std::move(other.drawDataBuffer_);
+        mappedDrawData_ = std::exchange(other.mappedDrawData_, nullptr);
         toonPipeline_ = std::exchange(other.toonPipeline_, std::nullopt);
         outlinePipeline_ = std::exchange(other.outlinePipeline_, std::nullopt);
         emissivePipeline_ = std::exchange(other.emissivePipeline_, std::nullopt);
@@ -346,9 +311,12 @@ void ToonRenderer::destroy() noexcept
     }
     pipelineLayout_ = VK_NULL_HANDLE;
     drawDataBuffer_.reset();
+    mappedDrawData_ = nullptr;
     allocator_.reset();
     device_ = VK_NULL_HANDLE;
     framesInFlight_ = 2;
+    maxDrawsPerFrame_ = 512;
+    drawsInFrame_ = 0;
     currentDrawSlot_ = 0;
 }
 
@@ -476,6 +444,11 @@ std::expected<ToonMesh, std::string> ToonRenderer::createTexturedMesh(
     return mesh;
 }
 
+void ToonRenderer::beginFrame() noexcept
+{
+    drawsInFrame_ = 0;
+}
+
 void ToonRenderer::renderMesh(VkCommandBuffer cmd, const ToonRenderContext& context,
                               const ToonParams& params, const ToonMesh& mesh)
 {
@@ -504,21 +477,48 @@ void ToonRenderer::renderMesh(VkCommandBuffer cmd, const ToonRenderContext& cont
     drawData.params = math::Vec4f{std::max(params.bandCount, 2.0f), params.rimStrength,
                                    params.outlineWidth, static_cast<float>(params.capabilities)};
 
-    // Monotonic slot cursor over framesInFlight * kMaxDrawsPerFrame slots:
-    // a slot is never rewritten while an in-flight frame can still read it.
-    const std::uint32_t totalSlots = std::max(1U, framesInFlight_) * kMaxDrawsPerFrame;
+    if (drawsInFrame_ >= maxDrawsPerFrame_)
+    {
+        // Rare overflow: grow per-frame draw capacity. Wait for idle before
+        // replacing the buffer because previous frames may still read it.
+        if (device_ != VK_NULL_HANDLE)
+        {
+            vkDeviceWaitIdle(device_);
+        }
+        const std::uint32_t newMax = std::max(maxDrawsPerFrame_ * 2u, drawsInFrame_ + 1u);
+        auto newBuffer = gpu_resources::Buffer::create(*allocator_, {
+            .size = static_cast<VkDeviceSize>(kDrawDataStride * newMax * std::max(1u, framesInFlight_)),
+            .usage = gpu_resources::BufferUsage::Storage,
+            .memory = gpu_resources::MemoryPlacement::CpuToGpu,
+            .name = "starforge.Toon.DrawData",
+        });
+        if (newBuffer)
+        {
+            auto mapped = newBuffer->map();
+            if (mapped)
+            {
+                drawDataBuffer_ = std::make_unique<gpu_resources::Buffer>(std::move(*newBuffer));
+                mappedDrawData_ = *mapped;
+                maxDrawsPerFrame_ = newMax;
+                currentDrawSlot_ = 0;
+                drawsInFrame_ = 0;
+            }
+        }
+    }
+
+    // Monotonic slot cursor over framesInFlight * maxDrawsPerFrame_ slots.
+    // beginFrame() resets drawsInFrame_; callers that do not call beginFrame
+    // still get safe growth on overflow.
+    const std::uint32_t totalSlots = std::max(1u, framesInFlight_) * std::max(1u, maxDrawsPerFrame_);
     const std::uint32_t slot = currentDrawSlot_ % totalSlots;
     ++currentDrawSlot_;
+    ++drawsInFrame_;
     const VkDeviceSize slotOffset = static_cast<VkDeviceSize>(slot) * kDrawDataStride;
+    if (mappedDrawData_ != nullptr)
     {
-        auto mapped = drawDataBuffer_->map();
-        if (mapped)
-        {
-            auto* destination = static_cast<char*>(*mapped) + slotOffset;
-            std::memcpy(destination, &drawData, sizeof(DrawData));
-            (void)drawDataBuffer_->flush(slotOffset, sizeof(DrawData));
-            drawDataBuffer_->unmap();
-        }
+        auto* destination = static_cast<char*>(mappedDrawData_) + slotOffset;
+        std::memcpy(destination, &drawData, sizeof(DrawData));
+        (void)drawDataBuffer_->flush(slotOffset, sizeof(DrawData));
     }
 
     PushConstants push;

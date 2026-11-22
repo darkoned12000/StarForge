@@ -6,6 +6,11 @@
 #include <span>
 #include <vector>
 
+namespace starforge::jobs
+{
+class JobScheduler;
+}
+
 namespace starforge::planets
 {
 
@@ -33,8 +38,25 @@ public:
         double persistence = 0.5,
         double baseFrequency = 1.0) const;
 
+    void heightFractalBatch(
+        std::span<const math::Vec3d> dirs,
+        std::span<double> outHeights,
+        jobs::JobScheduler& scheduler,
+        int octaves = 6,
+        double lacunarity = 2.0,
+        double persistence = 0.5,
+        double baseFrequency = 1.0) const;
+
     [[nodiscard]] std::vector<double> heightFractalBatch(
         std::span<const math::Vec3d> dirs,
+        int octaves = 6,
+        double lacunarity = 2.0,
+        double persistence = 0.5,
+        double baseFrequency = 1.0) const;
+
+    [[nodiscard]] std::vector<double> heightFractalBatch(
+        std::span<const math::Vec3d> dirs,
+        jobs::JobScheduler& scheduler,
         int octaves = 6,
         double lacunarity = 2.0,
         double persistence = 0.5,

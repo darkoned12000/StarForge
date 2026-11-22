@@ -35,7 +35,17 @@ struct Statistics
 // Compute statistics from a span of float samples (converted to double).
 [[nodiscard]] Statistics compute(std::span<const float> samples);
 
+// Compute statistics from already-sorted, finite samples. This avoids
+// filtering/sorting/allocation overhead. Debug builds assert that data is
+// sorted and finite.
+[[nodiscard]] Statistics computeSorted(std::span<const double> sortedSamples);
+
+// Compute statistics in place by filtering non-finite values and sorting the
+// mutable buffer. This avoids allocating a separate sample buffer.
+[[nodiscard]] Statistics computeInPlace(std::span<double> samples);
+
 // Compute a single percentile (0..100) from sorted data.
+// Finite values outside [0, 100] are clamped; non-finite p returns NaN.
 // Returns NaN if data is empty.
 [[nodiscard]] double percentile(std::span<const double> sortedData, double p);
 

@@ -145,6 +145,10 @@ public:
     ToonRenderer(ToonRenderer&& other) noexcept;
     ToonRenderer& operator=(ToonRenderer&& other) noexcept;
 
+    // Resets per-frame draw bookkeeping. Call once per frame before issuing
+    // toon draws when using a fixed frame-in-flight loop.
+    void beginFrame() noexcept;
+
     // Records the outline pass followed by the toon-shaded mesh into an
     // active dynamic-rendering pass. The caller must have set viewport
     // and scissor for the target extent.
@@ -172,9 +176,12 @@ private:
     VkDevice device_ = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;
     std::uint32_t framesInFlight_ = 2;
+    std::uint32_t maxDrawsPerFrame_ = 512;
+    std::uint32_t drawsInFrame_ = 0;
     std::uint32_t currentDrawSlot_ = 0;
     std::shared_ptr<gpu_resources::Allocator> allocator_;
     std::unique_ptr<gpu_resources::Buffer> drawDataBuffer_;
+    void* mappedDrawData_ = nullptr;
     std::optional<vulkan::GraphicsPipeline> toonPipeline_;
     std::optional<vulkan::GraphicsPipeline> outlinePipeline_;
     std::optional<vulkan::GraphicsPipeline> emissivePipeline_; // additive glow

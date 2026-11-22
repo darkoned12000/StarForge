@@ -124,4 +124,17 @@ std::size_t RawUiCanvas::vertexCount() const noexcept
     return impl_ ? impl_->quads.size() * 6 : 0u;
 }
 
+std::expected<void, std::string> RawUiCanvas::recreate(const CreateInfo& info)
+{
+    if (!impl_) return std::unexpected("RawUiCanvas is moved-from");
+    auto renderer = environment::UiRenderer::create({
+        .instance = info.instance, .device = info.device,
+        .physicalDevice = info.physicalDevice, .colorFormat = info.colorFormat,
+        .depthFormat = info.depthFormat,
+        .shaderDirectory = info.shaderDirectory});
+    if (!renderer) return std::unexpected(renderer.error());
+    impl_->renderer = std::move(*renderer);
+    return {};
+}
+
 } // namespace starforge::public_api_bridge

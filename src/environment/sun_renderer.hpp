@@ -2,7 +2,7 @@
 
 #include "math/math.hpp"
 #include "planets/cubed_sphere.hpp"
-#include "planets/planet_patch.hpp"
+#include "planets/planet_mesh.hpp"
 #include "spatial/world_position.hpp"
 #include "vulkan/vulkan_pipeline.hpp"
 
@@ -100,7 +100,6 @@ private:
     std::unique_ptr<gpu_resources::Buffer> coreVertexBuffer_;
     std::unique_ptr<gpu_resources::Buffer> coreIndexBuffer_;
     std::unique_ptr<gpu_resources::Buffer> coronaVertexBuffer_;
-    std::unique_ptr<gpu_resources::Buffer> coronaIndexBuffer_;
 
     double currentRadius_ = 0.0;
     std::uint32_t subdivisions_ = 16;

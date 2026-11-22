@@ -62,6 +62,7 @@ public:
     void addText(const RawUiTextDraw& draw);
     void render(VkCommandBuffer cmd, float width, float height);
     [[nodiscard]] std::size_t vertexCount() const noexcept;
+    [[nodiscard]] std::expected<void, std::string> recreate(const CreateInfo& info);
 
 private:
     RawUiCanvas() = default;

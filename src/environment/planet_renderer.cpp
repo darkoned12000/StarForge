@@ -1,5 +1,6 @@
 #include "planet_renderer.hpp"
 
+#include "internal/effect_pipeline.hpp"
 #include "vulkan/vulkan_pipeline.hpp"
 
 #include <algorithm>
@@ -47,23 +48,7 @@ void writeMat(std::array<float, N>& out, const math::Mat4f& value)
             out[c * 4 + r] = value[c][r];
 }
 
-VkShaderModule loadModule(VkDevice device, const std::string& path)
-{
-    std::ifstream file(path, std::ios::ate | std::ios::binary);
-    if (!file) return VK_NULL_HANDLE;
-    const auto size = static_cast<std::size_t>(file.tellg());
-    if (size < 20 || (size % 4) != 0) return VK_NULL_HANDLE;
-    std::vector<std::uint32_t> words(size / 4);
-    file.seekg(0);
-    file.read(reinterpret_cast<char*>(words.data()), static_cast<std::streamsize>(size));
-    VkShaderModuleCreateInfo info{};
-    info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    info.codeSize = size;
-    info.pCode = words.data();
-    VkShaderModule module = VK_NULL_HANDLE;
-    if (vkCreateShaderModule(device, &info, nullptr, &module) != VK_SUCCESS) return VK_NULL_HANDLE;
-    return module;
-}
+
 
 } // namespace
 
@@ -106,15 +91,22 @@ std::expected<PlanetRenderer, std::string> PlanetRenderer::create(const CreateIn
     const std::string dir = info.shaderDirectory;
     PlanetRenderer renderer;
     renderer.device_ = info.device;
-    renderer.sphereVert_ = loadModule(info.device, dir + "/planet_sphere.vert.spv");
-    renderer.sphereFrag_ = loadModule(info.device, dir + "/planet_sphere.frag.spv");
-    renderer.atmoVert_ = loadModule(info.device, dir + "/planet_atmosphere.vert.spv");
-    renderer.atmoFrag_ = loadModule(info.device, dir + "/planet_atmosphere.frag.spv");
-    if (!renderer.sphereVert_ || !renderer.sphereFrag_ || !renderer.atmoVert_ || !renderer.atmoFrag_)
+    auto sphereVert = internal::loadShaderModule(info.device, dir + "/planet_sphere.vert.spv");
+    auto sphereFrag = internal::loadShaderModule(info.device, dir + "/planet_sphere.frag.spv");
+    auto atmoVert = internal::loadShaderModule(info.device, dir + "/planet_atmosphere.vert.spv");
+    auto atmoFrag = internal::loadShaderModule(info.device, dir + "/planet_atmosphere.frag.spv");
+    if (!sphereVert || !sphereFrag || !atmoVert || !atmoFrag)
     {
         renderer.destroy();
-        return std::unexpected("PlanetRenderer: missing shader artifacts");
+        const auto& err = !sphereVert ? sphereVert.error() : !sphereFrag ? sphereFrag.error()
+                          : !atmoVert   ? atmoVert.error()
+                                        : atmoFrag.error();
+        return std::unexpected(err);
     }
+    renderer.sphereVert_ = *sphereVert;
+    renderer.sphereFrag_ = *sphereFrag;
+    renderer.atmoVert_ = *atmoVert;
+    renderer.atmoFrag_ = *atmoFrag;
 
     auto sphereLayout = vulkan::createPushConstantPipelineLayout(info.device, sizeof(SpherePush));
     if (!sphereLayout)
@@ -195,6 +187,19 @@ void PlanetRenderer::render(VkCommandBuffer cmd, const PlanetRenderContext& cont
                             const PlanetParams& params) const
 {
     if (!spherePipeline_ || !atmoPipeline_) return;
+
+    const float effectiveRadius = params.radius * std::max(1.0f, params.atmosphereRatio);
+    const math::Vec4f clip = context.viewProj * math::Vec4f{params.center, 1.0f};
+    if (clip.w > 1e-4f)
+    {
+        const math::Vec3f ndc{clip.x / clip.w, clip.y / clip.w, clip.z / clip.w};
+        const float ndcRadius = internal::ndcHalfSize(context.viewProj, params.center, effectiveRadius);
+        if (ndc.x + ndcRadius < -1.0f || ndc.x - ndcRadius > 1.0f ||
+            ndc.y + ndcRadius < -1.0f || ndc.y - ndcRadius > 1.0f)
+        {
+            return;
+        }
+    }
 
     SpherePush sphere;
     writeMat(sphere.viewProj, context.viewProj);

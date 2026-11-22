@@ -22,11 +22,21 @@ std::vector<char> readFile(const std::string& path)
         return {};
     }
     const auto size = static_cast<std::size_t>(file.tellg());
-    std::vector<char> buffer(size);
+    if (size < 0)
+    {
+        return {};
+    }
+    std::vector<char> buffer(static_cast<std::size_t>(size));
     file.seekg(0);
-    file.read(buffer.data(), static_cast<std::streamsize>(size));
+    file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+    if (!file)
+    {
+        return {};
+    }
     return buffer;
 }
+
+} // namespace
 
 std::expected<VkShaderModule, std::string> loadShaderModule(VkDevice device, const std::string& path)
 {
@@ -61,6 +71,9 @@ std::expected<VkShaderModule, std::string> loadShaderModule(VkDevice device, con
     }
     return module;
 }
+
+namespace
+{
 
 struct PipelineBundle
 {

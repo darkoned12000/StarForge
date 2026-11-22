@@ -1,9 +1,11 @@
 #include <doctest/doctest.h>
 
+#include "jobs/job_scheduler.hpp"
 #include "planets/cubed_sphere.hpp"
-#include "planets/planet_patch.hpp"
+#include "planets/planet_mesh.hpp"
 #include "planets/planet_quadtree.hpp"
 #include "planets/atmosphere.hpp"
+#include "planets/terrain.hpp"
 
 #include <cmath>
 #include <vector>
@@ -172,4 +174,69 @@ TEST_CASE("Atmosphere LUT: sane range and sun-facing brightness")
     const float towardLum = towardSun[0] + towardSun[1] + towardSun[2];
     const float awayLum = awaySun[0] + awaySun[1] + awaySun[2];
     CHECK(towardLum > awayLum);
+}
+
+TEST_CASE("Atmosphere: initialize validates parameters")
+{
+    AtmosphereRenderer renderer;
+
+    AtmosphereParams bad = {};
+    bad.planetRadius = 0.0f;
+    CHECK_FALSE(renderer.initialize(bad, false));
+
+    bad = {};
+    bad.atmosphereRadius = bad.planetRadius;
+    CHECK_FALSE(renderer.initialize(bad, false));
+
+    bad = {};
+    bad.mieG = 1.0f;
+    CHECK_FALSE(renderer.initialize(bad, false));
+
+    bad = {};
+    bad.sunIrradiance = -1.0f;
+    CHECK_FALSE(renderer.initialize(bad, false));
+
+    bad = {};
+    bad.rayleighScatter[1] = -0.1f;
+    CHECK_FALSE(renderer.initialize(bad, false));
+}
+
+TEST_CASE("Atmosphere: scheduler overload matches sequential result")
+{
+    AtmosphereParams params{};
+    params.planetRadius = 6371000.0f;
+    params.atmosphereRadius = 6471000.0f;
+
+    starforge::jobs::JobScheduler scheduler(starforge::jobs::SchedulerConfig{.threadCount = 2});
+    const auto sequential = generateAtmosphereLut(params, false);
+    const auto viaScheduler = generateAtmosphereLut(params, scheduler);
+
+    REQUIRE(sequential.data.size() == viaScheduler.data.size());
+    for (std::size_t i = 0; i < sequential.data.size(); ++i)
+    {
+        CHECK(viaScheduler.data[i][0] == sequential.data[i][0]);
+        CHECK(viaScheduler.data[i][1] == sequential.data[i][1]);
+        CHECK(viaScheduler.data[i][2] == sequential.data[i][2]);
+    }
+}
+
+TEST_CASE("Terrain: scheduler overload matches sequential result")
+{
+    TerrainHeightGenerator gen(12345);
+    std::vector<Vec3d> dirs;
+    for (int i = 0; i < 256; ++i)
+    {
+        const double a = static_cast<double>(i) * 0.1;
+        dirs.push_back(Vec3d{std::cos(a), 0.5, std::sin(a)});
+    }
+
+    starforge::jobs::JobScheduler scheduler(starforge::jobs::SchedulerConfig{.threadCount = 2});
+    const auto baseline = gen.heightFractalBatch(dirs, 6, 2.0, 0.5, 1.0);
+    const auto viaScheduler = gen.heightFractalBatch(dirs, scheduler, 6, 2.0, 0.5, 1.0);
+
+    REQUIRE(baseline.size() == viaScheduler.size());
+    for (std::size_t i = 0; i < baseline.size(); ++i)
+    {
+        CHECK(viaScheduler[i] == baseline[i]);
+    }
 }

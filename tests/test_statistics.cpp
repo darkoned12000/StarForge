@@ -150,9 +150,11 @@ TEST_CASE("Statistics: percentile method (linear interpolation)")
     CHECK(approxEqual(percentile(single, 50.0), 42.0));
     CHECK(approxEqual(percentile(single, 100.0), 42.0));
 
-    // Clamp p
+    // Clamp finite p; non-finite p is invalid.
     CHECK(approxEqual(percentile(sorted, -10.0), 1.0));
     CHECK(approxEqual(percentile(sorted, 200.0), 5.0));
+    CHECK(std::isnan(percentile(sorted, -std::numeric_limits<double>::infinity())));
+    CHECK(std::isnan(percentile(sorted, std::numeric_limits<double>::infinity())));
 
     // NaN p returns NaN
     CHECK(std::isnan(percentile(sorted, std::numeric_limits<double>::quiet_NaN())));
@@ -195,4 +197,33 @@ TEST_CASE("Statistics: p95 and p99 for 100 samples")
     CHECK(approxEqual(stats.p95, 95.05, 1e-6));
     // p99: index = 0.99 * 99 = 98.01 → 99 + 0.01*(100-99) = 99.01
     CHECK(approxEqual(stats.p99, 99.01, 1e-6));
+}
+
+TEST_CASE("Statistics: computeSorted matches compute for sorted finite data")
+{
+    std::vector<double> samples = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0};
+    auto sortedStats = computeSorted(samples);
+    auto computed = compute(samples);
+
+    CHECK(sortedStats.valid);
+    CHECK(sortedStats.count == computed.count);
+    CHECK(approxEqual(sortedStats.mean, computed.mean));
+    CHECK(approxEqual(sortedStats.stddev, computed.stddev));
+    CHECK(approxEqual(sortedStats.median, computed.median));
+    CHECK(approxEqual(sortedStats.p95, computed.p95));
+    CHECK(approxEqual(sortedStats.p99, computed.p99));
+}
+
+TEST_CASE("Statistics: computeInPlace filters and sorts without extra buffer")
+{
+    std::vector<double> samples = {5.0, std::numeric_limits<double>::quiet_NaN(), 1.0, 3.0,
+                                   std::numeric_limits<double>::infinity(), 2.0, 4.0};
+    auto stats = computeInPlace(samples);
+
+    CHECK(stats.valid);
+    CHECK(stats.count == 5);
+    CHECK(approxEqual(stats.min, 1.0));
+    CHECK(approxEqual(stats.max, 5.0));
+    CHECK(approxEqual(stats.mean, 3.0));
+    CHECK(approxEqual(stats.median, 3.0));
 }

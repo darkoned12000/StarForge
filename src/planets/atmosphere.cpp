@@ -192,7 +192,10 @@ void lutBatchTrampoline(void* userData)
 
 } // namespace
 
-AtmosphereLut generateAtmosphereLut(const AtmosphereParams& params, bool parallel)
+namespace
+{
+
+AtmosphereLut generateAtmosphereLutImpl(const AtmosphereParams& params, jobs::JobScheduler* scheduler)
 {
     AtmosphereLut lut;
     lut.width = 128;
@@ -209,15 +212,18 @@ AtmosphereLut generateAtmosphereLut(const AtmosphereParams& params, bool paralle
         batches[b] = LutBatch{&params, &lut, begin, std::min(begin + kRowsPerBatch, lut.height)};
     }
 
-    if (parallel && batchCount > 1)
+    if (scheduler != nullptr && batchCount > 1 && scheduler->threadCount() > 1)
     {
         std::vector<jobs::TaskHandle> handles;
         handles.reserve(batchCount);
         for (auto& batch : batches)
         {
-            handles.push_back(jobs::submit(&lutBatchTrampoline, &batch));
+            handles.push_back(scheduler->submit(&lutBatchTrampoline, &batch));
         }
-        jobs::globalScheduler().waitAll();
+        for (const auto& handle : handles)
+        {
+            scheduler->wait(handle);
+        }
     }
     else
     {
@@ -253,25 +259,86 @@ AtmosphereLut generateAtmosphereLut(const AtmosphereParams& params, bool paralle
     return lut;
 }
 
-AtmosphereRenderer::AtmosphereRenderer()
+} // namespace
+
+AtmosphereLut generateAtmosphereLut(const AtmosphereParams& params, bool parallel)
 {
-    params_.planetRadius = 6371000.0f;  // Earth radius in meters
-    params_.atmosphereRadius = 6471000.0f;  // Atmosphere extends 100km above surface
-    params_.rayleighScatter[0] = 5.8e-6f;   // Red rayleigh coefficient
-    params_.rayleighScatter[1] = 13.5e-6f;  // Green rayleigh coefficient
-    params_.rayleighScatter[2] = 33.1e-6f;  // Blue rayleigh coefficient
-    params_.mieScatter = 2e-5f;             // Mie scattering coefficient
-    params_.mieG = 0.76f;                   // Mie phase function asymmetry
-    params_.sunDirection[0] = 0.0f;
-    params_.sunDirection[1] = 0.0f;
-    params_.sunDirection[2] = -1.0f;        // Sun from above
-    params_.sunIrradiance = 1361.0f;        // Solar irradiance W/m²
+    if (parallel)
+    {
+        return generateAtmosphereLutImpl(params, &jobs::globalScheduler());
+    }
+    return generateAtmosphereLutImpl(params, nullptr);
 }
+
+AtmosphereLut generateAtmosphereLut(const AtmosphereParams& params, jobs::JobScheduler& scheduler)
+{
+    return generateAtmosphereLutImpl(params, &scheduler);
+}
+
+AtmosphereRenderer::AtmosphereRenderer() = default;
 
 bool AtmosphereRenderer::initialize(const AtmosphereParams& params, bool parallel)
 {
+    if (!(params.planetRadius > 0.0f) || !(params.atmosphereRadius > params.planetRadius))
+    {
+        return false;
+    }
+    if (!(params.mieG > -1.0f) || !(params.mieG < 1.0f))
+    {
+        return false;
+    }
+    if (!(params.sunIrradiance >= 0.0f) || !(params.mieScatter >= 0.0f))
+    {
+        return false;
+    }
+    for (float c : params.rayleighScatter)
+    {
+        if (!(c >= 0.0f) || !std::isfinite(c))
+        {
+            return false;
+        }
+    }
+    if (!std::isfinite(params.planetRadius) || !std::isfinite(params.atmosphereRadius) ||
+        !std::isfinite(params.mieScatter) || !std::isfinite(params.mieG) || !std::isfinite(params.sunIrradiance))
+    {
+        return false;
+    }
+
     params_ = params;
     lut_ = generateAtmosphereLut(params_, parallel);
+    initialized_ = true;
+    return true;
+}
+
+bool AtmosphereRenderer::initialize(const AtmosphereParams& params, jobs::JobScheduler& scheduler)
+{
+    if (!(params.planetRadius > 0.0f) || !(params.atmosphereRadius > params.planetRadius))
+    {
+        return false;
+    }
+    if (!(params.mieG > -1.0f) || !(params.mieG < 1.0f))
+    {
+        return false;
+    }
+    if (!(params.sunIrradiance >= 0.0f) || !(params.mieScatter >= 0.0f))
+    {
+        return false;
+    }
+    for (float c : params.rayleighScatter)
+    {
+        if (!(c >= 0.0f) || !std::isfinite(c))
+        {
+            return false;
+        }
+    }
+    if (!std::isfinite(params.planetRadius) || !std::isfinite(params.atmosphereRadius) ||
+        !std::isfinite(params.mieScatter) || !std::isfinite(params.mieG) || !std::isfinite(params.sunIrradiance))
+    {
+        return false;
+    }
+
+    params_ = params;
+    lut_ = generateAtmosphereLut(params_, scheduler);
     initialized_ = true;
     return true;
 }

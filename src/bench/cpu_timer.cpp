@@ -151,25 +151,25 @@ std::vector<double> FrameTimingCollector::totalFrameSamples() const
 stats::Statistics FrameTimingCollector::framePreparationStats() const
 {
     auto samples = framePreparationSamples();
-    return stats::compute(samples);
+    return stats::computeInPlace(samples);
 }
 
 stats::Statistics FrameTimingCollector::commandRecordingStats() const
 {
     auto samples = commandRecordingSamples();
-    return stats::compute(samples);
+    return stats::computeInPlace(samples);
 }
 
 stats::Statistics FrameTimingCollector::submissionStats() const
 {
     auto samples = submissionSamples();
-    return stats::compute(samples);
+    return stats::computeInPlace(samples);
 }
 
 stats::Statistics FrameTimingCollector::totalFrameStats() const
 {
     auto samples = totalFrameSamples();
-    return stats::compute(samples);
+    return stats::computeInPlace(samples);
 }
 
 } // namespace starforge::bench

@@ -6,32 +6,100 @@
 #include <SDL3/SDL_vulkan.h>
 
 #include <format>
+#include <mutex>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace starforge::platform
 {
 
-std::expected<Window, std::string> Window::create(const WindowDesc& desc)
+namespace
 {
-    // Hint SDL to prefer native Wayland over XWayland when available.
-    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "wayland,x11");
-    // Allow libdecor for window decorations on Wayland compositors that
-    // don't support server-side decorations (e.g., GNOME).
-    SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_ALLOW_LIBDECOR, "1");
-    // Prefer libdecor when available for consistent window decorations.
-    SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_PREFER_LIBDECOR, "1");
 
-    if (!SDL_InitSubSystem(SDL_INIT_VIDEO))
+std::mutex& platformMutex()
+{
+    static std::mutex mutex;
+    return mutex;
+}
+
+unsigned int& platformRefCount()
+{
+    static unsigned int count = 0;
+    return count;
+}
+
+std::expected<void, std::string> acquirePlatform()
+{
+    std::scoped_lock lock(platformMutex());
+    auto& count = platformRefCount();
+    if (count == 0)
     {
-        return std::unexpected(std::format("SDL video init failed: {}", SDL_GetError()));
+        if (!SDL_InitSubSystem(SDL_INIT_VIDEO))
+        {
+            return std::unexpected(std::format("SDL video init failed: {}", SDL_GetError()));
+        }
+
+        if (!SDL_Vulkan_LoadLibrary(nullptr))
+        {
+            const std::string error = std::format("SDL_Vulkan_LoadLibrary failed: {}", SDL_GetError());
+            SDL_QuitSubSystem(SDL_INIT_VIDEO);
+            return std::unexpected(error);
+        }
     }
 
-    if (!SDL_Vulkan_LoadLibrary(nullptr))
+    ++count;
+    return {};
+}
+
+void releasePlatform() noexcept
+{
+    std::scoped_lock lock(platformMutex());
+    auto& count = platformRefCount();
+    if (count == 0)
     {
-        std::string error = std::format("SDL_Vulkan_LoadLibrary failed: {}", SDL_GetError());
+        return;
+    }
+
+    --count;
+    if (count == 0)
+    {
+        SDL_Vulkan_UnloadLibrary();
         SDL_QuitSubSystem(SDL_INIT_VIDEO);
-        return std::unexpected(std::move(error));
+    }
+}
+
+} // namespace
+
+std::expected<Window, std::string> Window::create(const WindowDesc& desc)
+{
+    if (desc.width <= 0 || desc.height <= 0)
+    {
+        return std::unexpected("Window dimensions must be positive");
+    }
+
+    // Respect an explicit driver selection (e.g. SDL_VIDEODRIVER=dummy in
+    // headless tests); otherwise prefer native Wayland over XWayland.
+    if (SDL_GetHint(SDL_HINT_VIDEO_DRIVER) == nullptr)
+    {
+        SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "wayland,x11");
+    }
+    // Allow libdecor for window decorations on Wayland compositors that
+    // don't support server-side decorations (e.g., GNOME).
+    if (SDL_GetHint(SDL_HINT_VIDEO_WAYLAND_ALLOW_LIBDECOR) == nullptr)
+    {
+        SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_ALLOW_LIBDECOR, "1");
+    }
+    // Prefer libdecor when available for consistent window decorations.
+    if (SDL_GetHint(SDL_HINT_VIDEO_WAYLAND_PREFER_LIBDECOR) == nullptr)
+    {
+        SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_PREFER_LIBDECOR, "1");
+    }
+
+    auto platform = acquirePlatform();
+    if (!platform.has_value())
+    {
+        return std::unexpected(platform.error());
     }
 
     SDL_WindowFlags flags = SDL_WINDOW_VULKAN;
@@ -44,8 +112,7 @@ std::expected<Window, std::string> Window::create(const WindowDesc& desc)
     if (!window)
     {
         std::string error = std::format("SDL_CreateWindow failed: {}", SDL_GetError());
-        SDL_Vulkan_UnloadLibrary();
-        SDL_QuitSubSystem(SDL_INIT_VIDEO);
+        releasePlatform();
         return std::unexpected(std::move(error));
     }
 
@@ -57,7 +124,9 @@ std::expected<Window, std::string> Window::create(const WindowDesc& desc)
     // explicitly started. The comms chat composer relies on it; the game
     // drains the accumulated characters every frame even when not chatting.
     if (!SDL_StartTextInput(window))
+    {
         core::logWarning("PLATFORM", "SDL_StartTextInput failed: {}", SDL_GetError());
+    }
 
     return Window(window);
 }
@@ -69,20 +138,21 @@ Window::~Window()
 
 Window::Window(Window&& other) noexcept
     : window_(std::exchange(other.window_, nullptr)),
-      shouldClose_(other.shouldClose_),
-      resized_(other.resized_)
+      shouldClose_(std::exchange(other.shouldClose_, false)),
+      resized_(std::exchange(other.resized_, false)),
+      mouseMotionX_(std::exchange(other.mouseMotionX_, 0.0f)),
+      mouseMotionY_(std::exchange(other.mouseMotionY_, 0.0f)),
+      mouseScrollY_(std::exchange(other.mouseScrollY_, 0.0f)),
+      textInput_(std::move(other.textInput_))
 {
     for (std::size_t i = 0; i < keyCount; ++i)
     {
-        keyDown_[i] = other.keyDown_[i];
+        keyDown_[i] = std::exchange(other.keyDown_[i], false);
     }
     for (std::size_t i = 0; i < 3; ++i)
     {
-        mouseButtonDown_[i] = other.mouseButtonDown_[i];
+        mouseButtonDown_[i] = std::exchange(other.mouseButtonDown_[i], false);
     }
-    mouseMotionX_ = other.mouseMotionX_;
-    mouseMotionY_ = other.mouseMotionY_;
-    mouseScrollY_ = other.mouseScrollY_;
 }
 
 Window& Window::operator=(Window&& other) noexcept
@@ -91,19 +161,20 @@ Window& Window::operator=(Window&& other) noexcept
     {
         destroy();
         window_ = std::exchange(other.window_, nullptr);
-        shouldClose_ = other.shouldClose_;
-        resized_ = other.resized_;
+        shouldClose_ = std::exchange(other.shouldClose_, false);
+        resized_ = std::exchange(other.resized_, false);
         for (std::size_t i = 0; i < keyCount; ++i)
         {
-            keyDown_[i] = other.keyDown_[i];
+            keyDown_[i] = std::exchange(other.keyDown_[i], false);
         }
         for (std::size_t i = 0; i < 3; ++i)
         {
-            mouseButtonDown_[i] = other.mouseButtonDown_[i];
+            mouseButtonDown_[i] = std::exchange(other.mouseButtonDown_[i], false);
         }
-        mouseMotionX_ = other.mouseMotionX_;
-        mouseMotionY_ = other.mouseMotionY_;
-        mouseScrollY_ = other.mouseScrollY_;
+        mouseMotionX_ = std::exchange(other.mouseMotionX_, 0.0f);
+        mouseMotionY_ = std::exchange(other.mouseMotionY_, 0.0f);
+        mouseScrollY_ = std::exchange(other.mouseScrollY_, 0.0f);
+        textInput_ = std::move(other.textInput_);
     }
     return *this;
 }
@@ -115,17 +186,68 @@ void Window::destroy() noexcept
         return;
     }
 
+    SDL_StopTextInput(window_);
     SDL_DestroyWindow(window_);
-    SDL_Vulkan_UnloadLibrary();
-    SDL_QuitSubSystem(SDL_INIT_VIDEO);
+    releasePlatform();
     window_ = nullptr;
 }
 
 void Window::pollEvents()
 {
+    if (!window_)
+    {
+        return;
+    }
+
+    const SDL_WindowID windowId = SDL_GetWindowID(window_);
+    std::vector<SDL_Event> deferredEvents;
+
     SDL_Event event;
     while (SDL_PollEvent(&event))
     {
+        SDL_WindowID eventWindowId = 0;
+        switch (event.type)
+        {
+        case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+        case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+        case SDL_EVENT_WINDOW_RESIZED:
+        case SDL_EVENT_WINDOW_RESTORED:
+        case SDL_EVENT_WINDOW_SHOWN:
+        case SDL_EVENT_WINDOW_FOCUS_LOST:
+            eventWindowId = event.window.windowID;
+            break;
+        case SDL_EVENT_KEY_DOWN:
+        case SDL_EVENT_KEY_UP:
+            eventWindowId = event.key.windowID;
+            break;
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        case SDL_EVENT_MOUSE_BUTTON_UP:
+            eventWindowId = event.button.windowID;
+            break;
+        case SDL_EVENT_MOUSE_MOTION:
+            eventWindowId = event.motion.windowID;
+            break;
+        case SDL_EVENT_MOUSE_WHEEL:
+            eventWindowId = event.wheel.windowID;
+            break;
+        case SDL_EVENT_TEXT_INPUT:
+            eventWindowId = event.text.windowID;
+            break;
+        default:
+            break;
+        }
+
+        if (windowId != 0 && eventWindowId != 0 && eventWindowId != windowId)
+        {
+            // Keep events for other live windows in the queue so their
+            // owners can process them. Drop events for unknown windows.
+            if (SDL_GetWindowFromID(eventWindowId) != nullptr)
+            {
+                deferredEvents.push_back(event);
+            }
+            continue;
+        }
+
         switch (event.type)
         {
         case SDL_EVENT_QUIT:
@@ -262,6 +384,11 @@ void Window::pollEvents()
             break;
         }
     }
+
+    for (const SDL_Event& deferred : deferredEvents)
+    {
+        SDL_PushEvent(const_cast<SDL_Event*>(&deferred));
+    }
 }
 
 void Window::setRelativeMouseMode(bool enabled) noexcept
@@ -303,18 +430,46 @@ void Window::takeTextInput(std::string& out)
 
 void Window::mousePosition(float& xOut, float& yOut) const noexcept
 {
-    float x = 0.0f;
-    float y = 0.0f;
-    SDL_GetMouseState(&x, &y);
-    xOut = x;
-    yOut = y;
+    if (!window_)
+    {
+        xOut = 0.0f;
+        yOut = 0.0f;
+        return;
+    }
+
+    // Compute window-relative coordinates from global mouse state so the
+    // result is tied to this window, not whichever window has focus.
+    float globalX = 0.0f;
+    float globalY = 0.0f;
+    SDL_GetGlobalMouseState(&globalX, &globalY);
+
+    int windowX = 0;
+    int windowY = 0;
+    if (SDL_GetWindowPosition(window_, &windowX, &windowY))
+    {
+        xOut = globalX - static_cast<float>(windowX);
+        yOut = globalY - static_cast<float>(windowY);
+        return;
+    }
+
+    // Fallback when window position is unavailable (e.g. some Wayland
+    // environments): use focus-relative mouse state.
+    SDL_GetMouseState(&xOut, &yOut);
 }
 
 Extent2D Window::framebufferSize() const
 {
+    if (!window_)
+    {
+        return {};
+    }
+
     int width = 0;
     int height = 0;
-    SDL_GetWindowSizeInPixels(window_, &width, &height);
+    if (!SDL_GetWindowSizeInPixels(window_, &width, &height))
+    {
+        return {};
+    }
 
     return Extent2D{
         static_cast<std::uint32_t>(width > 0 ? width : 0),
@@ -324,11 +479,20 @@ Extent2D Window::framebufferSize() const
 
 bool Window::isMinimized() const
 {
+    if (!window_)
+    {
+        return true;
+    }
+
     const SDL_WindowFlags flags = SDL_GetWindowFlags(window_);
-    // On X11, minimized windows report SDL_WINDOW_MINIMIZED.
-    // On Wayland, compositors may report SDL_WINDOW_HIDDEN instead
-    // (there is no traditional minimize concept on Wayland).
-    return (flags & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN)) != 0;
+    // On X11, minimized windows report SDL_WINDOW_MINIMIZED. On Wayland,
+    // compositors may report SDL_WINDOW_HIDDEN instead (there is no
+    // traditional minimize concept). Occluded is not minimized: it means
+    // fully covered, but the window may still need to exist; callers should
+    // also check framebuffer size before rendering.
+    const bool minimized = (flags & SDL_WINDOW_MINIMIZED) != 0;
+    const bool hiddenNotOccluded = (flags & SDL_WINDOW_HIDDEN) != 0 && (flags & SDL_WINDOW_OCCLUDED) == 0;
+    return minimized || hiddenNotOccluded;
 }
 
 std::expected<std::vector<const char*>, std::string> Window::vulkanInstanceExtensions() const

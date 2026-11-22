@@ -4,6 +4,7 @@
 #include "application_impl.hpp"
 #include "shader_dir.hpp"
 #include "core/log.hpp"
+#include "vulkan/vulkan_retirement.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -316,9 +317,9 @@ std::expected<Renderer::FrameResult, std::string> Renderer::renderClearedFrame(c
         return std::unexpected("Renderer is moved-from");
     }
 
-    const VkClearColorValue clear{{clearColor.red, clearColor.green, clearColor.blue, clearColor.alpha}};
-    return mapFrameStatus(
-        impl_->frameRenderer->renderClearedFrame(*impl_->swapchain, impl_->device->graphicsQueue(), clear));
+    // Route through renderFrame so HDR-enabled renderers clear/tonemap the
+    // offscreen scene consistently with normal frames.
+    return renderFrame(clearColor, [](FrameContext&) {});
 }
 
 std::expected<Renderer::FrameResult, std::string>
@@ -542,10 +543,28 @@ std::expected<Renderer::RecreateResult, std::string> Renderer::recreate()
     }
 
     const VkFormat oldFormat = impl_->swapchain->format();
-    vkDeviceWaitIdle(impl_->device->device());
-    if (auto status = impl_->swapchain->recreate(size.width, size.height); !status)
+    if (auto status = impl_->frameRenderer->waitForAllFrames(); !status)
     {
         return std::unexpected(status.error());
+    }
+    // All frame fences are signaled; retire old swapchain resources through the
+    // retirement queue to use the deferred-recreate path.
+    vulkan::GpuRetirementQueue retirement;
+    const VkFence retireFence = impl_->frameRenderer->currentFence();
+    if (retireFence != VK_NULL_HANDLE)
+    {
+        if (auto status = impl_->swapchain->recreate(size.width, size.height, retirement, retireFence); !status)
+        {
+            return std::unexpected(status.error());
+        }
+        (void)retirement.collect(impl_->device->device());
+    }
+    else
+    {
+        if (auto status = impl_->swapchain->recreate(size.width, size.height); !status)
+        {
+            return std::unexpected(status.error());
+        }
     }
     if (auto status = impl_->frameRenderer->ensureSwapchainImageCount(
             static_cast<std::uint32_t>(impl_->swapchain->images().size()));
@@ -554,6 +573,7 @@ std::expected<Renderer::RecreateResult, std::string> Renderer::recreate()
         return std::unexpected(status.error());
     }
 
+    bool hdrModeChanged = false;
     if (impl_->hdrEnabled)
     {
         // The offscreen targets are sized to the swapchain; rebuild them on
@@ -564,10 +584,12 @@ std::expected<Renderer::RecreateResult, std::string> Renderer::recreate()
             core::logWarning("RENDERER", "HDR recreate failed, using direct path: {}", hdr.error());
             impl_->hdrEnabled = false;
             RendererInternalAccess::destroyHdrResources(*impl_);
+            hdrModeChanged = true; // scene format/specialization changed
         }
     }
 
-    return impl_->swapchain->format() != oldFormat ? RecreateResult::FormatChanged : RecreateResult::Resized;
+    const bool formatChanged = hdrModeChanged || impl_->swapchain->format() != oldFormat;
+    return formatChanged ? RecreateResult::FormatChanged : RecreateResult::Resized;
 }
 
 Size2D Renderer::extent() const noexcept

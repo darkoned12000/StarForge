@@ -1,5 +1,7 @@
 #include "nebula_optimized.hpp"
 
+#include "internal/effect_pipeline.hpp"
+
 #include "gpu_resources/allocator.hpp"
 #include "gpu_resources/buffer.hpp"
 #include "gpu_resources/image.hpp"
@@ -29,22 +31,7 @@ struct NebulaPush
 };
 static_assert(sizeof(NebulaPush) == 96, "NebulaPush must match nebula_noise3d.slang");
 
-VkShaderModule loadModule(VkDevice device, const std::string& path)
-{
-    std::ifstream file(path, std::ios::ate | std::ios::binary);
-    if (!file) return VK_NULL_HANDLE;
-    const auto size = static_cast<std::size_t>(file.tellg());
-    if (size < 20 || (size % 4) != 0) return VK_NULL_HANDLE;
-    std::vector<std::uint32_t> words(size / 4);
-    file.seekg(0);
-    file.read(reinterpret_cast<char*>(words.data()), static_cast<std::streamsize>(size));
-    VkShaderModuleCreateInfo info{};
-    info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    info.codeSize = size;
-    info.pCode = words.data();
-    VkShaderModule module = VK_NULL_HANDLE;
-    return vkCreateShaderModule(device, &info, nullptr, &module) == VK_SUCCESS ? module : VK_NULL_HANDLE;
-}
+
 
 std::uint8_t seededNoise(std::uint32_t x, std::uint32_t y, std::uint32_t z, std::uint32_t seed)
 {
@@ -224,10 +211,12 @@ std::expected<NebulaOptimized, std::string> NebulaOptimized::create(const Create
     if (vkCreatePipelineLayout(info.device, &pipelineLayoutInfo, nullptr, &impl->pipelineLayout) != VK_SUCCESS)
         return std::unexpected("NebulaOptimized: vkCreatePipelineLayout failed");
 
-    impl->vert = loadModule(info.device, info.shaderDirectory + "/nebula_noise3d.vert.spv");
-    impl->frag = loadModule(info.device, info.shaderDirectory + "/nebula_noise3d.frag.spv");
-    if (!impl->vert || !impl->frag)
-        return std::unexpected("NebulaOptimized: missing nebula_noise3d shaders");
+    auto vert = internal::loadShaderModule(info.device, info.shaderDirectory + "/nebula_noise3d.vert.spv");
+    auto frag = internal::loadShaderModule(info.device, info.shaderDirectory + "/nebula_noise3d.frag.spv");
+    if (!vert || !frag)
+        return std::unexpected(vert ? frag.error() : vert.error());
+    impl->vert = *vert;
+    impl->frag = *frag;
 
     auto pipeline = vulkan::GraphicsPipeline::create({
         .device = info.device,

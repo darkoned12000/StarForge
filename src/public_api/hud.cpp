@@ -1,6 +1,7 @@
 #include "starforge/hud.hpp"
 
 #include "hud_bridge.hpp"
+#include "convert.hpp"
 #include "renderer_impl.hpp"
 #include "shader_dir.hpp"
 
@@ -13,11 +14,7 @@ namespace starforge
 namespace
 {
 namespace bridge = public_api_bridge;
-
-bridge::RawVec4f toRaw(const math::Vec4f& value) noexcept
-{
-    return bridge::RawVec4f{value.x(), value.y(), value.z(), value.w()};
-}
+using public_api_convert::toRaw;
 
 std::string resolveShaderDirectory(const std::string& requested)
 {
@@ -46,7 +43,7 @@ std::expected<Hud, std::string> Hud::create(Renderer& renderer, const CreateInfo
         .instance = RendererInternalAccess::instance(renderer),
         .device = RendererInternalAccess::device(renderer),
         .physicalDevice = RendererInternalAccess::physicalDevice(renderer),
-        .colorFormat = RendererInternalAccess::colorFormat(renderer),
+        .colorFormat = RendererInternalAccess::uiColorFormat(renderer),
         .depthFormat = RendererInternalAccess::depthFormat(renderer),
         .shaderDirectory = shaderDirectory,
     });
@@ -88,12 +85,14 @@ void Hud::record(FrameContext& frameContext, const Params& params)
 std::expected<void, std::string> Hud::recreate(Renderer& renderer)
 {
     if (!impl_ || !impl_->backend) return std::unexpected("Hud is moved-from");
+    if (!RendererInternalAccess::isValid(renderer))
+        return std::unexpected("Hud::recreate failed: Renderer is invalid or moved-from");
     renderer.waitIdle();
     return impl_->backend->recreate({
         .instance = RendererInternalAccess::instance(renderer),
         .device = RendererInternalAccess::device(renderer),
         .physicalDevice = RendererInternalAccess::physicalDevice(renderer),
-        .colorFormat = RendererInternalAccess::colorFormat(renderer),
+        .colorFormat = RendererInternalAccess::uiColorFormat(renderer),
         .depthFormat = RendererInternalAccess::depthFormat(renderer),
         .shaderDirectory = impl_->shaderDirectory,
     });

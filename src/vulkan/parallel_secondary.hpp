@@ -20,7 +20,8 @@ struct SecondaryRecordingConfig
 {
     VkDevice device = VK_NULL_HANDLE;
     std::uint32_t queueFamily = 0;
-    VkFormat colorFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    VkFormat colorFormat = VK_FORMAT_R8G8R8A8_UNORM;
+    std::vector<VkFormat> colorFormats; // when non-empty, overrides colorFormat
     VkFormat depthFormat = VK_FORMAT_UNDEFINED;
     std::uint32_t width = 0;
     std::uint32_t height = 0;

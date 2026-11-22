@@ -68,21 +68,21 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
 {
     const char* id = data->pMessageIdName ? data->pMessageIdName : "";
 
-    auto* context = static_cast<VulkanContext*>(userData);
+    auto* state = static_cast<VulkanContext::CallbackState*>(userData);
 
     if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
     {
-        if (context)
+        if (state)
         {
-            context->errorCounter().fetch_add(1, std::memory_order_relaxed);
+            state->errors.fetch_add(1, std::memory_order_relaxed);
         }
         core::logError("VALIDATION", "{}: {}", id, data->pMessage);
     }
     else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
     {
-        if (context)
+        if (state)
         {
-            context->warningCounter().fetch_add(1, std::memory_order_relaxed);
+            state->warnings.fetch_add(1, std::memory_order_relaxed);
         }
         core::logWarning("VALIDATION", "{}: {}", id, data->pMessage);
     }
@@ -115,6 +115,11 @@ VkDebugUtilsMessengerCreateInfoEXT makeMessengerInfo(void* userData)
 }
 
 } // namespace
+
+VulkanContext::VulkanContext()
+    : callbackState_(std::make_unique<CallbackState>())
+{
+}
 
 std::expected<VulkanContext, std::string> VulkanContext::create(const ContextCreateInfo& info)
 {
@@ -181,7 +186,7 @@ std::expected<VulkanContext, std::string> VulkanContext::create(const ContextCre
     applicationInfo.apiVersion = context.instanceApiVersion_;
 
     // Chained so messages emitted during vkCreate/DestroyInstance are captured.
-    VkDebugUtilsMessengerCreateInfoEXT messengerInfo = makeMessengerInfo(&context);
+    VkDebugUtilsMessengerCreateInfoEXT messengerInfo = makeMessengerInfo(context.callbackState_.get());
 
     VkInstanceCreateInfo instanceInfo{};
     instanceInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -246,10 +251,8 @@ VulkanContext::VulkanContext(VulkanContext&& other) noexcept
       physicalDevice_(std::exchange(other.physicalDevice_, VK_NULL_HANDLE)),
       capabilities_(std::move(other.capabilities_)),
       instanceApiVersion_(other.instanceApiVersion_),
-      validationErrorCount_(other.validationErrorCount_.load(std::memory_order_relaxed)),
-      validationWarningCount_(other.validationWarningCount_.load(std::memory_order_relaxed))
+      callbackState_(std::move(other.callbackState_))
 {
-    // Counters accessed via pUserData; no global pointer update needed.
 }
 
 VulkanContext& VulkanContext::operator=(VulkanContext&& other) noexcept
@@ -262,9 +265,7 @@ VulkanContext& VulkanContext::operator=(VulkanContext&& other) noexcept
         physicalDevice_ = std::exchange(other.physicalDevice_, VK_NULL_HANDLE);
         capabilities_ = std::move(other.capabilities_);
         instanceApiVersion_ = other.instanceApiVersion_;
-        validationErrorCount_.store(other.validationErrorCount_.load(std::memory_order_relaxed), std::memory_order_relaxed);
-        validationWarningCount_.store(other.validationWarningCount_.load(std::memory_order_relaxed), std::memory_order_relaxed);
-        // Counters accessed via pUserData; no global pointer update needed.
+        callbackState_ = std::move(other.callbackState_);
     }
     return *this;
 }

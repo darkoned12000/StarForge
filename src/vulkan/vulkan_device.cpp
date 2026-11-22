@@ -249,7 +249,6 @@ VkResult VulkanDevice::submit(std::uint32_t submitCount,
                               const VkSubmitInfo2* submits,
                               VkFence fence) const
 {
-    std::lock_guard lock(submitMutex_);
     return submit2(graphicsQueue_, submitCount, submits, fence);
 }
 

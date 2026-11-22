@@ -6,6 +6,7 @@
 #include "planets/cubed_sphere.hpp"
 #include "planets/planet_mesh.hpp"
 #include "spatial/camera_relative.hpp"
+#include "internal/effect_pipeline.hpp"
 #include "vulkan/vulkan_result.hpp"
 
 #include <algorithm>
@@ -68,53 +69,7 @@ static_assert(offsetof(CoronaPushConstants, coronaRadius) == 104, "coronaRadius 
 static_assert(offsetof(CoronaPushConstants, time) == 108, "time offset must be 108");
 static_assert(offsetof(CoronaPushConstants, intensity) == 112, "intensity offset must be 112");
 
-std::vector<char> readFile(const std::string& path)
-{
-    std::ifstream file(path, std::ios::ate | std::ios::binary);
-    if (!file)
-    {
-        return {};
-    }
-    const auto size = static_cast<std::size_t>(file.tellg());
-    std::vector<char> buffer(size);
-    file.seekg(0);
-    file.read(buffer.data(), static_cast<std::streamsize>(size));
-    return buffer;
-}
 
-std::expected<VkShaderModule, std::string> loadShaderModule(VkDevice device, const std::string& path)
-{
-    const auto spv = readFile(path);
-    if (spv.empty())
-    {
-        return std::unexpected("Cannot read shader file: " + path);
-    }
-    constexpr std::size_t kSpirvHeaderBytes = 20;
-    constexpr std::uint32_t kSpirvMagic = 0x07230203u;
-    if (spv.size() < kSpirvHeaderBytes || (spv.size() % sizeof(std::uint32_t)) != 0)
-    {
-        return std::unexpected("Corrupt SPIR-V binary: invalid byte count in " + path);
-    }
-    std::uint32_t magic = 0;
-    std::memcpy(&magic, spv.data(), sizeof(magic));
-    if (magic != kSpirvMagic)
-    {
-        return std::unexpected("Corrupt SPIR-V binary: bad magic in " + path);
-    }
-    std::vector<std::uint32_t> aligned(spv.size() / sizeof(std::uint32_t));
-    std::memcpy(aligned.data(), spv.data(), spv.size());
-    VkShaderModuleCreateInfo info{};
-    info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    info.codeSize = spv.size();
-    info.pCode = aligned.data();
-    VkShaderModule module = VK_NULL_HANDLE;
-    if (const VkResult result = vkCreateShaderModule(device, &info, nullptr, &module);
-        result != VK_SUCCESS)
-    {
-        return std::unexpected(vulkan::describeFailure("vkCreateShaderModule", result));
-    }
-    return module;
-}
 
 } // namespace
 
@@ -196,13 +151,13 @@ std::expected<SunRenderer, std::string> SunRenderer::create(const CreateInfo& in
     }
 
     // Load Shaders
-    auto coreVert = loadShaderModule(info.device, info.shaderDirectory + "/sun.vert.spv");
+    auto coreVert = internal::loadShaderModule(info.device, info.shaderDirectory + "/sun.vert.spv");
     if (!coreVert)
     {
         renderer.destroy();
         return std::unexpected(coreVert.error());
     }
-    auto coreFrag = loadShaderModule(info.device, info.shaderDirectory + "/sun.frag.spv");
+    auto coreFrag = internal::loadShaderModule(info.device, info.shaderDirectory + "/sun.frag.spv");
     if (!coreFrag)
     {
         vkDestroyShaderModule(info.device, *coreVert, nullptr);
@@ -210,7 +165,7 @@ std::expected<SunRenderer, std::string> SunRenderer::create(const CreateInfo& in
         return std::unexpected(coreFrag.error());
     }
 
-    auto coronaVert = loadShaderModule(info.device, info.shaderDirectory + "/sun_corona.vert.spv");
+    auto coronaVert = internal::loadShaderModule(info.device, info.shaderDirectory + "/sun_corona.vert.spv");
     if (!coronaVert)
     {
         vkDestroyShaderModule(info.device, *coreVert, nullptr);
@@ -218,7 +173,7 @@ std::expected<SunRenderer, std::string> SunRenderer::create(const CreateInfo& in
         renderer.destroy();
         return std::unexpected(coronaVert.error());
     }
-    auto coronaFrag = loadShaderModule(info.device, info.shaderDirectory + "/sun_corona.frag.spv");
+    auto coronaFrag = internal::loadShaderModule(info.device, info.shaderDirectory + "/sun_corona.frag.spv");
     if (!coronaFrag)
     {
         vkDestroyShaderModule(info.device, *coreVert, nullptr);
@@ -313,7 +268,6 @@ SunRenderer::SunRenderer(SunRenderer&& other) noexcept
       coreVertexBuffer_(std::exchange(other.coreVertexBuffer_, nullptr)),
       coreIndexBuffer_(std::exchange(other.coreIndexBuffer_, nullptr)),
       coronaVertexBuffer_(std::exchange(other.coronaVertexBuffer_, nullptr)),
-      coronaIndexBuffer_(std::exchange(other.coronaIndexBuffer_, nullptr)),
       currentRadius_(other.currentRadius_),
       subdivisions_(other.subdivisions_),
       patchVertexCount_(other.patchVertexCount_),
@@ -336,7 +290,6 @@ SunRenderer& SunRenderer::operator=(SunRenderer&& other) noexcept
         coreVertexBuffer_ = std::exchange(other.coreVertexBuffer_, nullptr);
         coreIndexBuffer_ = std::exchange(other.coreIndexBuffer_, nullptr);
         coronaVertexBuffer_ = std::exchange(other.coronaVertexBuffer_, nullptr);
-        coronaIndexBuffer_ = std::exchange(other.coronaIndexBuffer_, nullptr);
         currentRadius_ = other.currentRadius_;
         subdivisions_ = other.subdivisions_;
         patchVertexCount_ = other.patchVertexCount_;
@@ -353,7 +306,6 @@ void SunRenderer::destroy() noexcept
     coreVertexBuffer_.reset();
     coreIndexBuffer_.reset();
     coronaVertexBuffer_.reset();
-    coronaIndexBuffer_.reset();
     allocator_.reset();
 
     if (device_ != VK_NULL_HANDLE)
@@ -501,6 +453,13 @@ std::expected<void, std::string> SunRenderer::buildGeometry(double radius, std::
     if (auto r = mapAndCopy(*coreVBuf, coreVertices.data(), vertexBytes); !r) return r;
     if (auto r = mapAndCopy(*coreIBuf, sharedIndices.data(), indexBytes); !r) return r;
     if (auto r = mapAndCopy(*coronaVBuf, coronaVertices.data(), vertexBytes); !r) return r;
+
+    // Replacing GPU buffers while command buffers may be in flight is unsafe.
+    // Radius changes are rare; wait for idle before swapping.
+    if (coreVertexBuffer_ && device_ != VK_NULL_HANDLE)
+    {
+        vkDeviceWaitIdle(device_);
+    }
 
     coreVertexBuffer_ = std::make_unique<gpu_resources::Buffer>(std::move(*coreVBuf));
     coreIndexBuffer_ = std::make_unique<gpu_resources::Buffer>(std::move(*coreIBuf));

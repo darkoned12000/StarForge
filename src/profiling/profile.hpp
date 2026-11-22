@@ -8,11 +8,11 @@
 // zones (thread + fiber + scoped zones); the built-in capture API always
 // provides a dependency-free, testable view of the same events.
 //
-// Names passed to the macros must be string literals with static lifetime
-// (the capture stores const char*).
+// Names passed to profiling APIs are copied when capture is enabled, so
+// callers do not need to keep string storage alive after the call.
 
 #include <cstdint>
-#include <string_view>
+#include <string>
 #include <vector>
 
 namespace starforge::profiling
@@ -30,7 +30,7 @@ enum class EventKind
 struct Event
 {
     EventKind   kind = EventKind::ZoneBegin;
-    const char* name = nullptr;
+    std::string name;
 };
 
 // Enable/disable event capture (default off; zero-cost when off).

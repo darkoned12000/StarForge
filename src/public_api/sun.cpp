@@ -1,5 +1,6 @@
 #include "starforge/sun.hpp"
 
+#include "convert.hpp"
 #include "renderer_impl.hpp"
 #include "shader_dir.hpp"
 #include "sun_bridge.hpp"
@@ -12,41 +13,7 @@ namespace starforge
 namespace
 {
 namespace bridge = public_api_bridge;
-
-[[nodiscard]] bridge::RawMat4f toRaw(const math::Mat4f& value) noexcept
-{
-    bridge::RawMat4f result;
-    for (std::size_t column = 0; column < 4; ++column)
-    {
-        for (std::size_t row = 0; row < 4; ++row)
-        {
-            result.columns[column][row] = value.columns[column][row];
-        }
-    }
-    return result;
-}
-
-[[nodiscard]] bridge::RawVec2f toRaw(const math::Vec2f& value) noexcept
-{
-    return bridge::RawVec2f{value.x(), value.y()};
-}
-
-[[nodiscard]] bridge::RawVec4f toRaw(const math::Vec4f& value) noexcept
-{
-    return bridge::RawVec4f{value.x(), value.y(), value.z(), value.w()};
-}
-
-[[nodiscard]] bridge::RawWorldPosition toRaw(const WorldPosition& value) noexcept
-{
-    return bridge::RawWorldPosition{
-        .cellX = value.cellX,
-        .cellY = value.cellY,
-        .cellZ = value.cellZ,
-        .offsetX = value.offsetX,
-        .offsetY = value.offsetY,
-        .offsetZ = value.offsetZ,
-    };
-}
+using public_api_convert::toRaw;
 
 [[nodiscard]] bridge::RawSun::CreateInfo makeBackendInfo(Renderer& renderer, const std::string& shaderDirectory,
                                                         double defaultRadius, std::uint32_t subdivisions)

@@ -1,7 +1,5 @@
 #pragma once
 
-#include <string>
-
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
@@ -93,9 +91,9 @@ public:
     [[nodiscard]] bool isMouseButtonDown(PlatformMouseButton button) const noexcept;
     [[nodiscard]] void takeMouseMotion(float& dxOut, float& dyOut, float& scrollOut) noexcept;
     // Absolute cursor position in window coordinates (top-left origin).
-    [[nodiscard]] void mousePosition(float& xOut, float& yOut) const noexcept;
+    void mousePosition(float& xOut, float& yOut) const noexcept;
     // Typed UTF-8 characters accumulated from SDL text-input events.
-    [[nodiscard]] void takeTextInput(std::string& out);
+    void takeTextInput(std::string& out);
     void setRelativeMouseMode(bool enabled) noexcept;
 
     // Instance extensions the windowing system needs for Vulkan presentation.

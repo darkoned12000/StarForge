@@ -11,6 +11,8 @@
 namespace starforge::vulkan
 {
 
+class GpuRetirementQueue;
+
 // Pure selection helpers (tested in T1 without a GPU or surface).
 [[nodiscard]] std::expected<VkSurfaceFormatKHR, std::string>
 chooseSurfaceFormat(std::span<const VkSurfaceFormatKHR> formats);
@@ -48,9 +50,13 @@ public:
     VulkanSwapchain(const VulkanSwapchain&) = delete;
     VulkanSwapchain& operator=(const VulkanSwapchain&) = delete;
 
-    // Recreates the swapchain in-place using `oldSwapchain` after waiting for
-    // the device to idle. Returns an error if the new extent is zero (e.g. minimized).
+    // Recreates the swapchain in-place. If retirement+lastUseFence are provided,
+    // old swapchain/depth resources are retired on that GPU fence; otherwise this
+    // waits for device idle for safety.
     [[nodiscard]] std::expected<void, std::string> recreate(std::uint32_t width, std::uint32_t height);
+    [[nodiscard]] std::expected<void, std::string> recreate(std::uint32_t width, std::uint32_t height,
+                                                           GpuRetirementQueue& retirement,
+                                                           VkFence lastUseFence);
 
     [[nodiscard]] VkSwapchainKHR swapchain() const noexcept { return swapchain_; }
     [[nodiscard]] VkFormat format() const noexcept { return format_; }
@@ -83,7 +89,7 @@ private:
     VkFormat depthFormat_ = VK_FORMAT_UNDEFINED;
     std::vector<VkImage> depthImages_;
     std::vector<VkImageView> depthViews_;
-    std::vector<VkDeviceMemory> depthMemories_;
+    VkDeviceMemory depthMemory_ = VK_NULL_HANDLE;
     CreateInfo info_;
 };
 

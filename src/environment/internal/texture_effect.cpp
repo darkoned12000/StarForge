@@ -1,7 +1,10 @@
 #include "texture_effect.hpp"
 
+#include "internal/effect_pipeline.hpp"
+
 #include "vulkan/vulkan_result.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <utility>
@@ -10,28 +13,7 @@
 namespace starforge::environment::internal
 {
 
-namespace
-{
 
-VkShaderModule loadShaderModule(VkDevice device, const std::string& path)
-{
-    std::ifstream file(path, std::ios::ate | std::ios::binary);
-    if (!file) return VK_NULL_HANDLE;
-    const auto size = static_cast<std::size_t>(file.tellg());
-    if (size < 20 || (size % 4) != 0) return VK_NULL_HANDLE;
-    std::vector<std::uint32_t> words(size / 4);
-    file.seekg(0);
-    file.read(reinterpret_cast<char*>(words.data()), static_cast<std::streamsize>(size));
-    VkShaderModuleCreateInfo info{};
-    info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    info.codeSize = size;
-    info.pCode = words.data();
-    VkShaderModule module = VK_NULL_HANDLE;
-    if (vkCreateShaderModule(device, &info, nullptr, &module) != VK_SUCCESS) return VK_NULL_HANDLE;
-    return module;
-}
-
-} // namespace
 
 std::expected<TextureEffect, std::string> TextureEffect::create(const CreateInfo& info)
 {
@@ -41,13 +23,15 @@ std::expected<TextureEffect, std::string> TextureEffect::create(const CreateInfo
     TextureEffect effect;
     effect.device_ = info.device;
     effect.pushConstantSize_ = info.pushConstantSize;
-    effect.vertexModule_ = loadShaderModule(info.device, info.shaderDirectory + "/" + info.shaderBaseName + ".vert.spv");
-    effect.fragmentModule_ = loadShaderModule(info.device, info.shaderDirectory + "/" + info.shaderBaseName + ".frag.spv");
-    if (effect.vertexModule_ == VK_NULL_HANDLE || effect.fragmentModule_ == VK_NULL_HANDLE)
+    auto vertModule = loadShaderModule(info.device, info.shaderDirectory + "/" + info.shaderBaseName + ".vert.spv");
+    auto fragModule = loadShaderModule(info.device, info.shaderDirectory + "/" + info.shaderBaseName + ".frag.spv");
+    if (!vertModule || !fragModule)
     {
         effect.destroy();
-        return std::unexpected("TextureEffect: missing shader artifacts for " + info.shaderBaseName);
+        return std::unexpected(vertModule ? fragModule.error() : vertModule.error());
     }
+    effect.vertexModule_ = *vertModule;
+    effect.fragmentModule_ = *fragModule;
 
     VkDescriptorSetLayoutBinding bindings[4]{};
     bindings[0].binding = 0;
@@ -94,9 +78,11 @@ std::expected<TextureEffect, std::string> TextureEffect::create(const CreateInfo
     VkDescriptorSetAllocateInfo allocateInfo{};
     allocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     allocateInfo.descriptorPool = effect.descriptorPool_;
-    VkDescriptorSetLayout layouts[kSetCount] = {
-        effect.descriptorSetLayout_, effect.descriptorSetLayout_,
-        effect.descriptorSetLayout_, effect.descriptorSetLayout_};
+    VkDescriptorSetLayout layouts[kSetCount]{};
+    for (std::uint32_t i = 0; i < kSetCount; ++i)
+    {
+        layouts[i] = effect.descriptorSetLayout_;
+    }
     allocateInfo.descriptorSetCount = kSetCount;
     allocateInfo.pSetLayouts = layouts;
     if (vkAllocateDescriptorSets(info.device, &allocateInfo, effect.descriptorSets_) != VK_SUCCESS)
@@ -182,6 +168,7 @@ TextureEffect::TextureEffect(TextureEffect&& other) noexcept
     {
         descriptorSets_[i] = std::exchange(other.descriptorSets_[i], VK_NULL_HANDLE);
         boundViews_[i] = std::exchange(other.boundViews_[i], VK_NULL_HANDLE);
+        boundSecondViews_[i] = std::exchange(other.boundSecondViews_[i], VK_NULL_HANDLE);
     }
 }
 TextureEffect& TextureEffect::operator=(TextureEffect&& other) noexcept
@@ -199,6 +186,7 @@ TextureEffect& TextureEffect::operator=(TextureEffect&& other) noexcept
         {
             descriptorSets_[i] = std::exchange(other.descriptorSets_[i], VK_NULL_HANDLE);
             boundViews_[i] = std::exchange(other.boundViews_[i], VK_NULL_HANDLE);
+            boundSecondViews_[i] = std::exchange(other.boundSecondViews_[i], VK_NULL_HANDLE);
         }
         sampler_ = std::exchange(other.sampler_, VK_NULL_HANDLE);
         pipelineLayout_ = std::exchange(other.pipelineLayout_, VK_NULL_HANDLE);
@@ -230,6 +218,7 @@ void TextureEffect::destroy() noexcept
     {
         descriptorSets_[i] = VK_NULL_HANDLE;
         boundViews_[i] = VK_NULL_HANDLE;
+        boundSecondViews_[i] = VK_NULL_HANDLE;
     }
     vertexModule_ = VK_NULL_HANDLE;
     fragmentModule_ = VK_NULL_HANDLE;
@@ -242,13 +231,14 @@ void TextureEffect::render(VkCommandBuffer cmd, VkImageView inputView,
     if (!pipeline_ || inputView == VK_NULL_HANDLE) return;
     const std::uint32_t slot = nextSet_++ % kSetCount;
     const VkDescriptorSet set = descriptorSets_[slot];
-    if (boundViews_[slot] != inputView)
+    const VkImageView effectiveSecondView = secondView != VK_NULL_HANDLE ? secondView : inputView;
+    if (boundViews_[slot] != inputView || boundSecondViews_[slot] != effectiveSecondView)
     {
         VkDescriptorImageInfo imageInfo{};
         imageInfo.imageView = inputView;
         imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         VkDescriptorImageInfo secondInfo{};
-        secondInfo.imageView = secondView != VK_NULL_HANDLE ? secondView : inputView;
+        secondInfo.imageView = effectiveSecondView;
         secondInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         VkDescriptorImageInfo samplerInfo{};
         samplerInfo.sampler = sampler_;
@@ -279,11 +269,15 @@ void TextureEffect::render(VkCommandBuffer cmd, VkImageView inputView,
         writes[3].pImageInfo = &samplerInfo;
         vkUpdateDescriptorSets(device_, 4, writes, 0, nullptr);
         boundViews_[slot] = inputView;
+        boundSecondViews_[slot] = effectiveSecondView;
     }
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_->handle());
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_, 0, 1, &set, 0, nullptr);
-    if (pushConstantSize_ > 0 && pushData != nullptr)
-        vkCmdPushConstants(cmd, pipelineLayout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, pushSize, pushData);
+    if (pushConstantSize_ > 0 && pushData != nullptr && pushSize > 0)
+    {
+        const std::uint32_t size = std::min(pushSize, pushConstantSize_);
+        vkCmdPushConstants(cmd, pipelineLayout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, size, pushData);
+    }
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }
 

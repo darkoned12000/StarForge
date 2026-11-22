@@ -30,10 +30,14 @@ void recordSecondaryJob(void* userData)
     ctx->threadId = std::this_thread::get_id();
     const SecondaryRecordingConfig& cfg = *ctx->config;
 
+    const std::vector<VkFormat> defaultColorFormats =
+        (cfg.colorFormat != VK_FORMAT_UNDEFINED) ? std::vector<VkFormat>{cfg.colorFormat} : std::vector<VkFormat>{};
+    const auto& colorFormats = cfg.colorFormats.empty() ? defaultColorFormats : cfg.colorFormats;
+
     VkCommandBufferInheritanceRenderingInfoKHR inheritanceRendering{};
     inheritanceRendering.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_RENDERING_INFO_KHR;
-    inheritanceRendering.colorAttachmentCount = 1;
-    inheritanceRendering.pColorAttachmentFormats = &cfg.colorFormat;
+    inheritanceRendering.colorAttachmentCount = static_cast<std::uint32_t>(colorFormats.size());
+    inheritanceRendering.pColorAttachmentFormats = colorFormats.empty() ? nullptr : colorFormats.data();
     inheritanceRendering.depthAttachmentFormat = cfg.depthFormat;
     inheritanceRendering.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 

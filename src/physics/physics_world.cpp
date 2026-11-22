@@ -12,10 +12,10 @@ namespace starforge::physics
 {
 
 PhysicsWorld::PhysicsWorld(const Config& config)
-    : config_(config), broadPhaseFilter_(broadPhaseLayers_, objectLayerFilter_), contactListener_(contactQueue_)
+    : config_(config), tempAllocator_(std::make_unique<JPH::TempAllocatorImpl>(config.tempAllocatorBytes)),
+      jobSystem_(std::make_unique<JobsAdapter>(1024)),
+      broadPhaseFilter_(broadPhaseLayers_, objectLayerFilter_), contactListener_(contactQueue_)
 {
-    tempAllocator_ = std::make_unique<JPH::TempAllocatorImpl>(config.tempAllocatorBytes);
-    jobSystem_ = std::make_unique<JobsAdapter>(1024);
     system_.Init(config.maxBodies, 0, config.maxBodyPairs, config.maxContactConstraints, broadPhaseLayers_,
                  broadPhaseFilter_, objectLayerFilter_);
     system_.SetContactListener(&contactListener_);
@@ -49,11 +49,19 @@ void PhysicsWorld::step(float dt)
 
 BodyHandle PhysicsWorld::createStaticBox(float halfX, float halfY, float halfZ, float x, float y, float z)
 {
+    if (!(halfX > 0.0f) || !(halfY > 0.0f) || !(halfZ > 0.0f))
+    {
+        return {};
+    }
     JPH::BoxShapeSettings shapeSettings(JPH::Vec3(halfX, halfY, halfZ));
     shapeSettings.SetEmbedded();
-    JPH::ShapeRefC shape = shapeSettings.Create().Get();
-    JPH::BodyCreationSettings settings(shape, JPH::RVec3(x, y, z), JPH::Quat::sIdentity(), JPH::EMotionType::Static,
-                                       Layers::NonMoving);
+    const auto shapeResult = shapeSettings.Create();
+    if (shapeResult.HasError())
+    {
+        return {};
+    }
+    JPH::BodyCreationSettings settings(shapeResult.Get(), JPH::RVec3(x, y, z), JPH::Quat::sIdentity(),
+                                       JPH::EMotionType::Static, Layers::NonMoving);
     auto& bodyInterface = system_.GetBodyInterface();
     JPH::Body* body = bodyInterface.CreateBody(settings);
     if (body == nullptr)
@@ -66,6 +74,10 @@ BodyHandle PhysicsWorld::createStaticBox(float halfX, float halfY, float halfZ, 
 
 BodyHandle PhysicsWorld::createDynamicSphere(float radius, float mass, float x, float y, float z)
 {
+    if (!(radius > 0.0f) || !(mass > 0.0f))
+    {
+        return {};
+    }
     JPH::BodyCreationSettings settings(new JPH::SphereShape(radius), JPH::RVec3(x, y, z), JPH::Quat::sIdentity(),
                                        JPH::EMotionType::Dynamic, Layers::Moving);
     settings.mMassPropertiesOverride.mMass = mass;
@@ -76,16 +88,28 @@ BodyHandle PhysicsWorld::createDynamicSphere(float radius, float mass, float x, 
 
 void PhysicsWorld::setMotionQualityLinearCast(BodyHandle body)
 {
+    if (!body.isValid())
+    {
+        return;
+    }
     system_.GetBodyInterface().SetMotionQuality(body.id, JPH::EMotionQuality::LinearCast);
 }
 
 BodyHandle PhysicsWorld::createSensorBox(float halfX, float halfY, float halfZ, float x, float y, float z)
 {
+    if (!(halfX > 0.0f) || !(halfY > 0.0f) || !(halfZ > 0.0f))
+    {
+        return {};
+    }
     JPH::BoxShapeSettings shapeSettings(JPH::Vec3(halfX, halfY, halfZ));
     shapeSettings.SetEmbedded();
-    JPH::ShapeRefC shape = shapeSettings.Create().Get();
-    JPH::BodyCreationSettings settings(shape, JPH::RVec3(x, y, z), JPH::Quat::sIdentity(), JPH::EMotionType::Static,
-                                       Layers::Sensor);
+    const auto shapeResult = shapeSettings.Create();
+    if (shapeResult.HasError())
+    {
+        return {};
+    }
+    JPH::BodyCreationSettings settings(shapeResult.Get(), JPH::RVec3(x, y, z), JPH::Quat::sIdentity(),
+                                       JPH::EMotionType::Static, Layers::Sensor);
     settings.mIsSensor = true;
     auto& bodyInterface = system_.GetBodyInterface();
     JPH::Body* body = bodyInterface.CreateBody(settings);
@@ -146,6 +170,10 @@ std::optional<PhysicsWorld::RayHit>
 PhysicsWorld::castRay(const JPH::Vec3& from, const JPH::Vec3& direction, RaycastTarget target,
                       BodyHandle ignoreBody) const
 {
+    if (direction.IsNearZero())
+    {
+        return std::nullopt;
+    }
     JPH::RRayCast ray(JPH::RVec3(from.GetX(), from.GetY(), from.GetZ()),
                       JPH::RVec3(direction.GetX(), direction.GetY(), direction.GetZ()));
     JPH::RayCastResult hit;
@@ -170,16 +198,28 @@ PhysicsWorld::castRay(const JPH::Vec3& from, const JPH::Vec3& direction, Raycast
 
 JPH::Vec3 PhysicsWorld::getPosition(BodyHandle body) const
 {
+    if (!body.isValid())
+    {
+        return JPH::Vec3::sZero();
+    }
     return system_.GetBodyInterface().GetPosition(body.id);
 }
 
 JPH::Vec3 PhysicsWorld::getLinearVelocity(BodyHandle body) const
 {
+    if (!body.isValid())
+    {
+        return JPH::Vec3::sZero();
+    }
     return system_.GetBodyInterface().GetLinearVelocity(body.id);
 }
 
 void PhysicsWorld::setLinearVelocity(BodyHandle body, JPH::Vec3 velocity)
 {
+    if (!body.isValid())
+    {
+        return;
+    }
     auto& bodyInterface = system_.GetBodyInterface();
     bodyInterface.SetLinearVelocity(body.id, velocity);
     // Velocity changes must wake sleeping bodies.
@@ -188,11 +228,19 @@ void PhysicsWorld::setLinearVelocity(BodyHandle body, JPH::Vec3 velocity)
 
 void PhysicsWorld::activateBody(BodyHandle body)
 {
+    if (!body.isValid())
+    {
+        return;
+    }
     system_.GetBodyInterface().ActivateBody(body.id);
 }
 
 void PhysicsWorld::destroyBody(BodyHandle body)
 {
+    if (!body.isValid())
+    {
+        return;
+    }
     auto& bodyInterface = system_.GetBodyInterface();
     bodyInterface.RemoveBody(body.id);
     bodyInterface.DestroyBody(body.id);

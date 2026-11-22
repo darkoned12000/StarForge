@@ -122,11 +122,23 @@ void TerrainHeightGenerator::heightFractalBatch(
     double persistence,
     double baseFrequency) const
 {
+    heightFractalBatch(dirs, outHeights, jobs::globalScheduler(), octaves, lacunarity, persistence, baseFrequency);
+}
+
+void TerrainHeightGenerator::heightFractalBatch(
+    std::span<const math::Vec3d> dirs,
+    std::span<double> outHeights,
+    jobs::JobScheduler& scheduler,
+    int octaves,
+    double lacunarity,
+    double persistence,
+    double baseFrequency) const
+{
     const std::size_t count = std::min(dirs.size(), outHeights.size());
     if (count == 0) return;
 
     // Small batch fast-path: evaluate directly on calling thread
-    if (count <= 128 || starforge::jobs::globalScheduler().threadCount() <= 1)
+    if (count <= 128 || scheduler.threadCount() <= 1)
     {
         for (std::size_t i = 0; i < count; ++i)
         {
@@ -150,7 +162,7 @@ void TerrainHeightGenerator::heightFractalBatch(
     };
 
     std::vector<BatchCtx> batches(batchCount);
-    std::vector<starforge::jobs::TaskHandle> handles;
+    std::vector<jobs::TaskHandle> handles;
     handles.reserve(batchCount);
 
     for (std::size_t b = 0; b < batchCount; ++b)
@@ -177,12 +189,12 @@ void TerrainHeightGenerator::heightFractalBatch(
             }
         };
 
-        handles.push_back(starforge::jobs::submit(fn, &batches[b]));
+        handles.push_back(scheduler.submit(fn, &batches[b]));
     }
 
     for (const auto& h : handles)
     {
-        starforge::jobs::globalScheduler().wait(h);
+        scheduler.wait(h);
     }
 }
 
@@ -195,6 +207,19 @@ std::vector<double> TerrainHeightGenerator::heightFractalBatch(
 {
     std::vector<double> results(dirs.size());
     heightFractalBatch(dirs, results, octaves, lacunarity, persistence, baseFrequency);
+    return results;
+}
+
+std::vector<double> TerrainHeightGenerator::heightFractalBatch(
+    std::span<const math::Vec3d> dirs,
+    jobs::JobScheduler& scheduler,
+    int octaves,
+    double lacunarity,
+    double persistence,
+    double baseFrequency) const
+{
+    std::vector<double> results(dirs.size());
+    heightFractalBatch(dirs, results, scheduler, octaves, lacunarity, persistence, baseFrequency);
     return results;
 }
 

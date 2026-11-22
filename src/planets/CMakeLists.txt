@@ -3,8 +3,6 @@ add_library(starforge_planets STATIC
     cubed_sphere.hpp
     planet_quadtree.cpp
     planet_quadtree.hpp
-    planet_patch.cpp
-    planet_patch.hpp
     planet_mesh.cpp
     planet_mesh.hpp
     terrain.cpp

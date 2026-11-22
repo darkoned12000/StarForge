@@ -166,6 +166,9 @@ class Mesh:
         cx, cy, cz = center
         sx, sy, sz = (s * 0.5 for s in size)
         b = min(bevel, sx * 0.4, sy * 0.4, sz * 0.4)
+        # Bevel strips/corners are too thin to carry panel patterns. Pin to a flat,
+        # ink-free interior pixel of the 256x256 hull texture (16,16).
+        flat_uv = (0.0625, 0.0625)
         # Inset face quads (y/z etc.), offset inward by b on the other axes.
         faces = [
             ((0, 0, 1),  [(-sx+b, -sy+b, sz), (sx-b, -sy+b, sz), (sx-b, sy-b, sz), (-sx+b, sy-b, sz)], size[0]-2*b, size[1]-2*b),
@@ -180,28 +183,29 @@ class Mesh:
             su, sv = faceW / tile, faceH / tile
             self.quad(pts[0], pts[1], pts[2], pts[3], (0,0), (su,0), (su,sv), (0,sv), outward_hint=normal)
 
-        # 12 edge strips bridging adjacent inset faces.
+        # 12 edge strips bridging adjacent inset faces. Hints must have a component
+        # along both adjacent face axes, otherwise quad() gets dot(normal,hint)==0.
         edges = []
         for sy_sign in (-1, 1):
             for sz_sign in (-1, 1):
                 edges.append(([(sx-b, sy_sign*sy, sz_sign*(sz-b)), (-sx+b, sy_sign*sy, sz_sign*(sz-b)),
                                (-sx+b, sy_sign*(sy-b), sz_sign*sz), (sx-b, sy_sign*(sy-b), sz_sign*sz)],
-                              (0, sy_sign, 0)))
+                              (0, sy_sign, sz_sign)))
         for sx_sign in (-1, 1):
             for sz_sign in (-1, 1):
                 edges.append(([(sx_sign*sx, sy-b, sz_sign*(sz-b)), (sx_sign*sx, -sy+b, sz_sign*(sz-b)),
                                (sx_sign*(sx-b), -sy+b, sz_sign*sz), (sx_sign*(sx-b), sy-b, sz_sign*sz)],
-                              (sx_sign, 0, 0)))
+                              (sx_sign, 0, sz_sign)))
         for sx_sign in (-1, 1):
             for sy_sign in (-1, 1):
                 edges.append(([(sx_sign*(sx-b), sy_sign*sy, -sz+b), (sx_sign*(sx-b), sy_sign*sy, sz-b),
                                (sx_sign*sx, sy_sign*(sy-b), sz-b), (sx_sign*sx, sy_sign*(sy-b), -sz+b)],
-                              (0, 0, -1)))
+                              (sx_sign, sy_sign, 0)))
         for corners, hint in edges:
             pts = [(cx + p[0], cy + p[1], cz + p[2]) for p in corners]
-            self.quad(pts[0], pts[1], pts[2], pts[3], (0,0), (1,0), (1,1), (0,1), outward_hint=hint)
+            self.quad(pts[0], pts[1], pts[2], pts[3], flat_uv, flat_uv, flat_uv, flat_uv, outward_hint=hint)
 
-        # 8 corner triangles.
+        # 8 corner triangles. Winding depends on octant handedness.
         for sx_sign in (-1, 1):
             for sy_sign in (-1, 1):
                 for sz_sign in (-1, 1):
@@ -209,7 +213,10 @@ class Mesh:
                     a = (cx + sx_sign*sx, cy + sy_sign*(sy-b), cz + sz_sign*(sz-b))
                     bpt = (cx + sx_sign*(sx-b), cy + sy_sign*sy, cz + sz_sign*(sz-b))
                     cpt = (cx + sx_sign*(sx-b), cy + sy_sign*(sy-b), cz + sz_sign*sz)
-                    self.triangle(*[self.vertex(p, v_norm(hint), (0.5, 0.5)) for p in (a, bpt, cpt)])
+                    n = v_cross(v_sub(bpt, a), v_sub(cpt, a))
+                    tri = (a, bpt, cpt) if v_dot(n, hint) >= 0.0 else (a, cpt, bpt)
+                    n = v_norm(n if v_dot(n, hint) >= 0.0 else (-n[0], -n[1], -n[2]))
+                    self.triangle(*[self.vertex(p, n, flat_uv) for p in tri])
 
     def box_rotated(self, center, size, angle):
         """Axis-aligned box rotated about Z by `angle`, keeping outward winding."""
@@ -229,19 +236,33 @@ class Mesh:
             self.indices.append(base + idx)
 
     def loft(self, rings, uv_u_scale=1.0, uv_v_scale=1.0, cap_start=True, cap_end=True):
-        """Lofts a sequence of closed 3D polygon rings along Z with outward normals."""
+        """Lofts a sequence of closed 3D polygon rings with outward normals.
+
+        V is distributed by cumulative ring-center arc length so texture density
+        stays uniform even when ring spacing varies.
+        """
         ring_count = len(rings)
         seg_count = len(rings[0])
+        # Cumulative arc length for uniform V distribution.
+        centers = []
+        for ring in rings:
+            centers.append((
+                sum(p[0] for p in ring) / seg_count,
+                sum(p[1] for p in ring) / seg_count,
+                sum(p[2] for p in ring) / seg_count,
+            ))
+        arc = [0.0]
+        for i in range(1, ring_count):
+            d = v_sub(centers[i], centers[i - 1])
+            arc.append(arc[-1] + math.sqrt(v_dot(d, d)))
+        total_arc = arc[-1] if arc[-1] > 1e-6 else 1.0
+
         for r_idx in range(ring_count - 1):
             r0 = rings[r_idx]
             r1 = rings[r_idx + 1]
-            v0 = (r_idx / (ring_count - 1)) * uv_v_scale
-            v1 = ((r_idx + 1) / (ring_count - 1)) * uv_v_scale
-            c0 = (
-                sum(p[0] for p in r0) / seg_count,
-                sum(p[1] for p in r0) / seg_count,
-                sum(p[2] for p in r0) / seg_count,
-            )
+            v0 = (arc[r_idx] / total_arc) * uv_v_scale
+            v1 = (arc[r_idx + 1] / total_arc) * uv_v_scale
+            c0 = centers[r_idx]
             for s in range(seg_count):
                 sn = (s + 1) % seg_count
                 u0 = (s / seg_count) * uv_u_scale
@@ -378,7 +399,7 @@ class GlbBuilder:
         self.buffer_views.append(view)
         return len(self.buffer_views) - 1
 
-    def float_accessor(self, values, components, target=34962) -> int:
+    def float_accessor(self, values, components, target=34962, bounds=False) -> int:
         data = struct.pack("<%df" % len(values), *values)
         view = self._view(data, target)
         accessor = {
@@ -387,6 +408,10 @@ class GlbBuilder:
             "count": len(values) // components,
             "type": {1: "SCALAR", 2: "VEC2", 3: "VEC3", 4: "VEC4"}[components],
         }
+        if bounds and values:
+            cols = [values[i::components] for i in range(components)]
+            accessor["min"] = [min(c) for c in cols]
+            accessor["max"] = [max(c) for c in cols]
         self.accessors.append(accessor)
         return len(self.accessors) - 1
 
@@ -429,7 +454,7 @@ class GlbBuilder:
         return len(self.materials) - 1
 
     def mesh(self, name, geometry: Mesh, material_index: int):
-        position = self.float_accessor(geometry.positions, 3)
+        position = self.float_accessor(geometry.positions, 3, bounds=True)
         normal = self.float_accessor(geometry.normals, 3)
         uv = self.float_accessor(geometry.uvs, 2)
         indices = self.index_accessor(geometry.indices)
@@ -462,7 +487,8 @@ class GlbBuilder:
             "bufferViews": self.buffer_views,
             "accessors": self.accessors,
             "images": self.images,
-            "textures": [{"source": i} for i in range(len(self.images))],
+            "samplers": [{"magFilter": 9729, "minFilter": 9987, "wrapS": 10497, "wrapT": 10497}],
+            "textures": [{"sampler": 0, "source": i} for i in range(len(self.images))],
             "materials": self.materials,
             "meshes": self.meshes,
         }
@@ -701,9 +727,11 @@ def build_ship() -> bytes:
     core_mat = glb.material(
         "engine-core", [0.03, 0.035, 0.045, 1.0], 0.0, 0.9, image=core_img
     )
+    # Opaque bright nav markers. Avoid emissiveFactor: the additive emissive
+    # pass skips depth writes and backface culling, which is a bad fit for
+    # geometry that should read as solid physical lamps.
     nav_mat = glb.material(
-        "nav-lights", [0.8, 0.2, 0.12, 1.0], 0.0, 0.8,
-        emissive=[0.6, 0.12, 0.06], image=hull_img
+        "nav-lights", [0.95, 0.22, 0.16, 1.0], 0.0, 0.6
     )
 
     hull = Mesh()
@@ -732,7 +760,7 @@ def build_ship() -> bytes:
     ]
     hull.loft(fuselage_rings, uv_u_scale=2.0, uv_v_scale=3.0)
 
-    hull.chamfered_box((0.0, 0.34, 0.85), (0.24, 0.14, 1.45), bevel=0.03, tile=1.0)
+    hull.chamfered_box((0.0, 0.34, 0.85), (0.24, 0.14, 1.45), bevel=0.03, tile=2.0)
     fin_rings = [
         [(-0.04, 0.38, 0.55), (0.04, 0.38, 0.55), (0.04, 0.44, 1.55), (-0.04, 0.44, 1.55)],
         [(-0.02, 0.86, 1.25), (0.02, 0.86, 1.25), (0.02, 0.88, 1.68), (-0.02, 0.88, 1.68)],
@@ -740,7 +768,7 @@ def build_ship() -> bytes:
     hull.loft(fin_rings, uv_u_scale=1.0, uv_v_scale=1.0)
 
     for side in (-1.0, 1.0):
-        hull.chamfered_box((side * 0.66, -0.02, 0.25), (0.28, 0.26, 1.35), bevel=0.04, tile=1.0)
+        hull.chamfered_box((side * 0.66, -0.02, 0.25), (0.28, 0.26, 1.35), bevel=0.04, tile=2.0)
         hull.cylinder_z(side * 0.72, -0.04, -1.15, -0.35, 0.035, 0.045, segments=8)
     glb.mesh("hero-hull", hull, hull_mat)
 
@@ -766,7 +794,7 @@ def build_ship() -> bytes:
         cx = side * 0.42
         housings.cylinder_z(cx, 0.02, 1.35, 2.08, 0.34, 0.30, segments=16, cap_end=False)
         housings.cylinder_z(cx, 0.02, 1.88, 2.08, 0.23, 0.25, segments=16, cap_start=False, cap_end=False)
-        housings.chamfered_box((cx, 0.02, 1.72), (0.64, 0.56, 0.55), bevel=0.07, tile=1.0)
+        housings.chamfered_box((cx, 0.02, 1.72), (0.64, 0.56, 0.55), bevel=0.07, tile=2.0)
     glb.mesh("hero-engine-housings", housings, housing_mat)
 
     cores = Mesh()

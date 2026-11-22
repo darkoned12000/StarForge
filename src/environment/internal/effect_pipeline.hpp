@@ -21,6 +21,9 @@
 namespace starforge::environment::internal
 {
 
+[[nodiscard]] std::expected<VkShaderModule, std::string>
+loadShaderModule(VkDevice device, const std::string& path);
+
 enum class BillboardShape : std::uint32_t
 {
     Disc = 0,

@@ -72,6 +72,7 @@ add_executable(starforge_tests
     test_audio.cpp
     test_audio_spatial.cpp
     test_audio_bridge.cpp
+    test_platform.cpp
     test_game_controls.cpp
     test_gameplay.cpp
     test_game_simulation.cpp
@@ -112,6 +113,7 @@ target_link_libraries(starforge_tests
         starforge_gameplay
         starforge_physics
         starforge_audio
+        starforge_platform
         doctest::doctest
 )
 

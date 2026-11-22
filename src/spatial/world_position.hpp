@@ -73,6 +73,10 @@ struct WorldPosition
 
     // Arithmetic: add/subtract a local offset (metres) directly on cell+offset
     // without round-tripping through toMeters().
+    //
+    // operator+=/operator-= are convenience APIs: on invalid delta or overflow,
+    // they log an error, leave the position unchanged, and assert in debug
+    // builds. Use translated() for explicit error handling.
     WorldPosition& operator+=(const math::Vec3d& delta);
     WorldPosition& operator-=(const math::Vec3d& delta);
     [[nodiscard]] WorldPosition operator+(const math::Vec3d& delta) const;
@@ -83,7 +87,13 @@ struct WorldPosition
 
     // Relative vector between two positions (in metres), computed from cell
     // differences and offset differences directly.
+    //
+    // For astronomically extreme differences the double result can overflow to
+    // +/-inf; this is an inherent double-range limit. Use checkedDifference()
+    // when callers need to detect non-finite results explicitly.
     [[nodiscard]] math::Vec3d operator-(const WorldPosition& other) const noexcept;
+    [[nodiscard]] std::expected<math::Vec3d, std::string>
+    checkedDifference(const WorldPosition& other) const noexcept;
 
     // Equality
     [[nodiscard]] bool operator==(const WorldPosition& other) const noexcept;
@@ -128,6 +138,10 @@ struct hash<starforge::spatial::WorldPosition>
     {
         std::uint64_t h = pos.cellHash();
         auto hashDouble = [&h](double v) {
+            if (v == 0.0)
+            {
+                v = 0.0; // Canonicalize -0.0 so hash matches operator==.
+            }
             std::uint64_t bits = std::bit_cast<std::uint64_t>(v);
             // SplitMix64-style mixer for better avalanche on integer sequences.
             bits += 0x9e3779b97f4a7c15ULL;

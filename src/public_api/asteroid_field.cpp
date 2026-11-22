@@ -1,6 +1,7 @@
 #include "starforge/asteroid_field.hpp"
 
 #include "asteroid_field_bridge.hpp"
+#include "convert.hpp"
 #include "renderer_impl.hpp"
 #include "shader_dir.hpp"
 
@@ -13,15 +14,7 @@ namespace starforge
 namespace
 {
 namespace bridge = public_api_bridge;
-
-[[nodiscard]] bridge::RawMat4f toRaw(const math::Mat4f& value) noexcept
-{
-    bridge::RawMat4f result;
-    for (std::size_t c = 0; c < 4; ++c)
-        for (std::size_t r = 0; r < 4; ++r)
-            result.columns[c][r] = value.columns[c][r];
-    return result;
-}
+using public_api_convert::toRaw;
 
 [[nodiscard]] std::string resolveShaderDirectory(const std::string& requested)
 {
@@ -127,6 +120,8 @@ void AsteroidField::record(FrameContext& frameContext, const RenderContext& cont
 std::expected<void, std::string> AsteroidField::recreate(Renderer& renderer)
 {
     if (!impl_ || !impl_->backend) return std::unexpected("AsteroidField is moved-from");
+    if (!RendererInternalAccess::isValid(renderer))
+        return std::unexpected("AsteroidField::recreate failed: Renderer is invalid or moved-from");
     renderer.waitIdle();
     return impl_->backend->recreate(makeBackendInfo(renderer, impl_->shaderDirectory, impl_->createInfo));
 }

@@ -3,7 +3,6 @@
 #include "math/math.hpp"
 
 #include <cstdint>
-#include <vector>
 
 namespace starforge::planets
 {
@@ -42,5 +41,17 @@ public:
 // dominant face and the face-local (u, v).
 [[nodiscard]] math::Vec3d cubeToSphere(CubeFace face, double u, double v);
 [[nodiscard]] bool sphereToCube(const math::Vec3d& position, CubeFace& outFace, double& outU, double& outV);
+
+// UV bounds for a quadtree patch on a cube face. Level 0 covers the full
+// face [-1,1]^2; each level subdivides by 2 along u and v.
+struct CubePatchUvBounds
+{
+    double uMin = -1.0;
+    double uMax = 1.0;
+    double vMin = -1.0;
+    double vMax = 1.0;
+};
+
+[[nodiscard]] CubePatchUvBounds cubePatchUvBounds(std::int32_t x, std::int32_t y, std::uint32_t level);
 
 } // namespace starforge::planets

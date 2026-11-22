@@ -6,6 +6,7 @@
 #include "vulkan/vulkan_swapchain.hpp"
 
 #include <algorithm>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -15,6 +16,26 @@ namespace starforge::vulkan
 namespace
 {
 constexpr const char* kTag = "VULKAN";
+
+void setDebugObjectName(VkDevice device, std::uint64_t handle, VkObjectType type, const char* name)
+{
+    if (device == VK_NULL_HANDLE || handle == 0 || name == nullptr || name[0] == '\0')
+    {
+        return;
+    }
+    const auto setName = reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(
+        vkGetDeviceProcAddr(device, "vkSetDebugUtilsObjectNameEXT"));
+    if (setName == nullptr)
+    {
+        return;
+    }
+    VkDebugUtilsObjectNameInfoEXT info{};
+    info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
+    info.objectType = type;
+    info.objectHandle = handle;
+    info.pObjectName = name;
+    (void)setName(device, &info);
+}
 
 // Depth-only formats must not carry the stencil aspect in barriers.
 [[nodiscard]] VkImageAspectFlags depthAspectMask(VkFormat depthFormat) noexcept
@@ -203,6 +224,11 @@ std::expected<FrameRenderer, std::string> FrameRenderer::create(const CreateInfo
         {
             return std::unexpected(starforge::vulkan::describeFailure("vkCreateCommandPool", result));
         }
+        {
+            const std::string name = "starforge.frame.cmdpool." + std::to_string(i);
+            setDebugObjectName(renderer.device_, reinterpret_cast<std::uint64_t>(renderer.commandPools_[i]),
+                               VK_OBJECT_TYPE_COMMAND_POOL, name.c_str());
+        }
 
         VkCommandBufferAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -215,6 +241,11 @@ std::expected<FrameRenderer, std::string> FrameRenderer::create(const CreateInfo
         {
             return std::unexpected(starforge::vulkan::describeFailure("vkAllocateCommandBuffers", result));
         }
+        {
+            const std::string name = "starforge.frame.cmdbuf." + std::to_string(i);
+            setDebugObjectName(renderer.device_, reinterpret_cast<std::uint64_t>(renderer.commandBuffers_[i]),
+                               VK_OBJECT_TYPE_COMMAND_BUFFER, name.c_str());
+        }
 
         VkSemaphoreCreateInfo semInfo{};
         semInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -222,6 +253,11 @@ std::expected<FrameRenderer, std::string> FrameRenderer::create(const CreateInfo
             result != VK_SUCCESS)
         {
             return std::unexpected(starforge::vulkan::describeFailure("vkCreateSemaphore", result));
+        }
+        {
+            const std::string name = "starforge.frame.image_available." + std::to_string(i);
+            setDebugObjectName(renderer.device_, reinterpret_cast<std::uint64_t>(renderer.imageAvailableSemaphores_[i]),
+                               VK_OBJECT_TYPE_SEMAPHORE, name.c_str());
         }
 
         VkFenceCreateInfo fenceInfo{};
@@ -231,6 +267,11 @@ std::expected<FrameRenderer, std::string> FrameRenderer::create(const CreateInfo
             result != VK_SUCCESS)
         {
             return std::unexpected(starforge::vulkan::describeFailure("vkCreateFence", result));
+        }
+        {
+            const std::string name = "starforge.frame.in_flight." + std::to_string(i);
+            setDebugObjectName(renderer.device_, reinterpret_cast<std::uint64_t>(renderer.inFlightFences_[i]),
+                               VK_OBJECT_TYPE_FENCE, name.c_str());
         }
     }
 
@@ -259,6 +300,10 @@ std::expected<void, std::string> FrameRenderer::ensureSwapchainImageCount(std::u
             result != VK_SUCCESS)
         {
             return std::unexpected(starforge::vulkan::describeFailure("vkCreateSemaphore", result));
+        }
+        {
+            const std::string name = "starforge.frame.render_finished." + std::to_string(renderFinishedSemaphores_.size());
+            setDebugObjectName(device_, reinterpret_cast<std::uint64_t>(sem), VK_OBJECT_TYPE_SEMAPHORE, name.c_str());
         }
         renderFinishedSemaphores_.push_back(sem);
     }
@@ -356,6 +401,33 @@ VkFence FrameRenderer::currentFence() const
 void FrameRenderer::nextFrame()
 {
     currentFrame_ = (currentFrame_ + 1) % framesInFlight_;
+}
+
+std::expected<void, std::string> FrameRenderer::waitForAllFrames() const
+{
+    if (device_ == VK_NULL_HANDLE)
+    {
+        return std::unexpected("FrameRenderer not initialized");
+    }
+    std::vector<VkFence> fences;
+    fences.reserve(inFlightFences_.size());
+    for (VkFence fence : inFlightFences_)
+    {
+        if (fence != VK_NULL_HANDLE)
+        {
+            fences.push_back(fence);
+        }
+    }
+    if (fences.empty())
+    {
+        return {};
+    }
+    if (const VkResult result = vkWaitForFences(device_, static_cast<std::uint32_t>(fences.size()), fences.data(), VK_TRUE, UINT64_MAX);
+        result != VK_SUCCESS)
+    {
+        return std::unexpected(describeFailure("vkWaitForFences (all frames)", result));
+    }
+    return {};
 }
 
 std::expected<FrameStatus, std::string>
@@ -690,46 +762,8 @@ FrameRenderer::renderFrameImpl(const VulkanSwapchain& swapchain, VkQueue queue, 
                 target->resolve(cmd, swapchain.extent(), sceneView, frameSlot);
             vkCmdEndRendering(cmd);
 
-            // Leave the HDR target in an attachment layout for the next frame.
-            VkImageMemoryBarrier2 sceneReset{};
-            sceneReset.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-            sceneReset.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-            sceneReset.srcAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
-            sceneReset.dstStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
-            sceneReset.dstAccessMask = 0;
-            sceneReset.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            sceneReset.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-            sceneReset.image = sceneColor;
-            sceneReset.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            sceneReset.subresourceRange.levelCount = 1;
-            sceneReset.subresourceRange.layerCount = 1;
-            VkDependencyInfo sceneResetDep{};
-            sceneResetDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-            sceneResetDep.imageMemoryBarrierCount = 1;
-            sceneResetDep.pImageMemoryBarriers = &sceneReset;
-            vkCmdPipelineBarrier2(cmd, &sceneResetDep);
-
-            if (sceneHasDepth)
-            {
-                VkImageMemoryBarrier2 depthReset{};
-                depthReset.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-                depthReset.srcStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
-                                          VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
-                depthReset.srcAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-                depthReset.dstStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
-                depthReset.dstAccessMask = 0;
-                depthReset.oldLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-                depthReset.newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-                depthReset.image = sceneDepth;
-                depthReset.subresourceRange.aspectMask = depthAspectMask(sceneDepthFormat);
-                depthReset.subresourceRange.levelCount = 1;
-                depthReset.subresourceRange.layerCount = 1;
-                VkDependencyInfo depthResetDep{};
-                depthResetDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-                depthResetDep.imageMemoryBarrierCount = 1;
-                depthResetDep.pImageMemoryBarriers = &depthReset;
-                vkCmdPipelineBarrier2(cmd, &depthResetDep);
-            }
+            // Scene/depth are left in their post-resolve layouts; the next frame
+            // discards contents via UNDEFINED transitions, so no reset barrier needed.
         }
         else if (hasDepth)
         {
@@ -831,7 +865,7 @@ FrameRenderer::renderFrameImpl(const VulkanSwapchain& swapchain, VkQueue queue, 
     presentInfo.pSwapchains = &swapchainHandle;
     presentInfo.pImageIndices = &imageIndex;
 
-    const VkResult presentResult = vkQueuePresentKHR(queue, &presentInfo);
+    const VkResult presentResult = present(queue, &presentInfo);
     nextFrame();
 
     if (presentResult == VK_ERROR_OUT_OF_DATE_KHR || presentResult == VK_SUBOPTIMAL_KHR || acquireResult == VK_SUBOPTIMAL_KHR)

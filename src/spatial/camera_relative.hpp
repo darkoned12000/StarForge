@@ -3,13 +3,19 @@
 #include "math/math.hpp"
 #include "spatial/world_position.hpp"
 
-#include <cstdint>
+#include <expected>
+#include <string>
 
 namespace starforge::spatial
 {
 
 // Convert a world position to camera-relative metres in double precision.
 [[nodiscard]] math::Vec3d toCameraRelative(const WorldPosition& pos, const WorldPosition& camera) noexcept;
+
+// Checked variant that returns an error when the relative vector is
+// non-finite (e.g. astronomically extreme cell differences).
+[[nodiscard]] std::expected<math::Vec3d, std::string>
+toCameraRelativeChecked(const WorldPosition& pos, const WorldPosition& camera) noexcept;
 
 // Cast a double-precision camera-relative vector to float32. This is the
 // single point where precision is reduced; the input must be camera-relative
