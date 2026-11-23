@@ -16,7 +16,6 @@ namespace starforge::environment
 struct ShieldRenderContext
 {
     math::Mat4f viewProj{};
-    math::Vec3f cameraPosition{0.0f, 0.0f, 0.0f};
     math::Vec2f resolution{1.0f, 1.0f};
 };
 
@@ -29,7 +28,7 @@ struct ShieldParams
     float time = 0.0f;
 };
 
-// Shield bubble effect (billboard ring, screen-space for now).
+// Shield bubble effect (additive billboard ring).
 class ShieldEffect
 {
 public:
@@ -53,7 +52,7 @@ public:
     ShieldEffect(ShieldEffect&& other) noexcept;
     ShieldEffect& operator=(ShieldEffect&& other) noexcept;
 
-    void render(VkCommandBuffer cmd, const ShieldRenderContext& context, const ShieldParams& params);
+    void render(VkCommandBuffer cmd, const ShieldRenderContext& context, const ShieldParams& params) const;
 
 private:
     ShieldEffect() = default;

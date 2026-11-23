@@ -28,6 +28,7 @@ enum class Key
     Minus,
     M,
     T,
+    R,
     PageUp,
     PageDown,
     Count,

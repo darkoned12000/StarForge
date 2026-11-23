@@ -36,7 +36,6 @@ struct VSOutput { float4 position : SV_Position; float3 tint : COLOR0; float fad
 VSOutput vertexMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID)
 {
     Float4BufferPtr pp = { pc.vertexAddress + uint64_t(vertexId) * 32u };
-    Float4BufferPtr np = { pc.vertexAddress + uint64_t(vertexId) * 32u + 16u };
     float3 localPos = pp.Get().xyz;
     InstanceBufferPtr ip = { pc.instanceAddress + uint64_t(instanceId) * 64u };
     InstanceData inst = ip.Get();
@@ -53,7 +52,7 @@ VSOutput vertexMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID
     // Extrude along the smooth radial direction, not the crater relief
     // normal: an inverted hull built from high-frequency normals tears
     // open at every crater rim.
-    float3 radial = normalize(scaled);
+    float3 radial = dot(scaled, scaled) > 1e-8f ? normalize(scaled) : float3(0.0f, 0.0f, 1.0f);
     worldPos += rockRotate(inst.rotation, radial) * inst.tintAndWidth.a;
 
     VSOutput out;

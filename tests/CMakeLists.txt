@@ -79,6 +79,8 @@ add_executable(starforge_tests
     test_public_input_edges.cpp
     test_ui_text.cpp
     test_ui_state.cpp
+    test_ui_targeting.cpp
+    test_combat_fx_state.cpp
     test_targeting.cpp
     test_ui_radar.cpp
     test_ui_comms.cpp
@@ -88,6 +90,7 @@ add_executable(starforge_tests
     test_ui_menu.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/game_bridge.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/game_simulation.cpp
+    ${PROJECT_SOURCE_DIR}/apps/game/combat_fx_state.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/ui_state.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/targeting.cpp
     ${PROJECT_SOURCE_DIR}/apps/game/ui_comms.cpp
@@ -210,6 +213,8 @@ add_executable(starforge_gpu_tests
     test_ui_render.cpp
     test_planet_render.cpp
     test_rock_field.cpp
+    test_combat_fx.cpp
+    test_faction_look.cpp
     test_nebula_optimized.cpp
     test_atmosphere_render.cpp
     test_vulkan_retirement.cpp

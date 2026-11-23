@@ -539,35 +539,27 @@ void ToonRenderer::renderMesh(VkCommandBuffer cmd, const ToonRenderContext& cont
             .memory = gpu_resources::MemoryPlacement::CpuToGpu,
             .name = "starforge.Toon.DrawData",
         });
-        if (newBuffer)
-        {
-            auto mapped = newBuffer->map();
-            if (mapped)
-            {
-                // The draws already recorded into THIS frame's command
-                // buffer point into the old buffer. Destroying it here
-                // leaves those draws referencing freed GPU memory, which
-                // faults the device as soon as the frame is submitted.
-                // Retire the old buffer instead and let beginFrame() free
-                // it once the device is idle.
-                if (drawDataBuffer_)
-                {
-                    retiredDrawDataBuffers_.push_back(std::move(drawDataBuffer_));
-                }
-                drawDataBuffer_ = std::make_unique<gpu_resources::Buffer>(std::move(*newBuffer));
-                mappedDrawData_ = *mapped;
-                maxDrawsPerFrame_ = newMax;
-                // The slot cursor stays monotonic on purpose: resetting it
-                // would make this frame reuse the slots the previous frame
-                // wrote, and that frame may still be in flight.
-                drawsInFrame_ = 0;
-            }
-        }
+        if (!newBuffer) return; // OOM: drawing must not continue with stale state
+        auto mapped = newBuffer->map();
+        if (!mapped) return;
+
+        // The draws already recorded into THIS frame's command buffer point
+        // into the old buffer. Destroying it here would fault the GPU, so
+        // retire it and let beginFrame() free it once the device is idle.
+        if (drawDataBuffer_)
+            retiredDrawDataBuffers_.push_back(std::move(drawDataBuffer_));
+        drawDataBuffer_ = std::make_unique<gpu_resources::Buffer>(std::move(*newBuffer));
+        mappedDrawData_ = *mapped;
+        maxDrawsPerFrame_ = newMax;
+        // The slot cursor stays monotonic on purpose: resetting it would
+        // make this frame reuse slots the previous frame may still read.
+        drawsInFrame_ = 0;
     }
 
     // Monotonic slot cursor over framesInFlight * maxDrawsPerFrame_ slots.
-    // beginFrame() resets drawsInFrame_; callers that do not call beginFrame
-    // still get safe growth on overflow.
+    // CONTRACT: callers MUST call beginFrame() once per frame. Without it
+    // drawsInFrame_ never resets, so overflow would repeatedly stall and
+    // grow the buffer until OOM.
     const std::uint32_t totalSlots = std::max(1u, framesInFlight_) * std::max(1u, maxDrawsPerFrame_);
     const std::uint32_t slot = currentDrawSlot_ % totalSlots;
     ++currentDrawSlot_;

@@ -43,7 +43,8 @@ public:
     UiRenderer(const UiRenderer&) = delete;
     UiRenderer& operator=(const UiRenderer&) = delete;
 
-    void render(VkCommandBuffer cmd, const std::vector<UiVertex>& vertices) const;
+    // Advances the per-draw slot ring, so this mutates renderer state.
+    void render(VkCommandBuffer cmd, const std::vector<UiVertex>& vertices);
 
 private:
     UiRenderer() = default;

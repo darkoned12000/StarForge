@@ -100,6 +100,26 @@ std::expected<SunRenderer, std::string> SunRenderer::create(const CreateInfo& in
         return std::unexpected("SunRenderer: shaderDirectory is empty");
     }
 
+    // Both shaders fetch vertices via Buffer Device Address (uint64_t), so
+    // the same capability gate used by the other BDA-driven renderers applies.
+    VkPhysicalDeviceProperties deviceProps{};
+    vkGetPhysicalDeviceProperties(info.physicalDevice, &deviceProps);
+    if (deviceProps.limits.maxPushConstantsSize < sizeof(CoronaPushConstants))
+    {
+        return std::unexpected("SunRenderer: device push-constant range is smaller than 128 bytes");
+    }
+
+    VkPhysicalDeviceFeatures2 deviceFeatures{};
+    deviceFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    VkPhysicalDeviceVulkan12Features features12{};
+    features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    deviceFeatures.pNext = &features12;
+    vkGetPhysicalDeviceFeatures2(info.physicalDevice, &deviceFeatures);
+    if (!features12.bufferDeviceAddress || !deviceFeatures.features.shaderInt64)
+    {
+        return std::unexpected("SunRenderer requires bufferDeviceAddress and shaderInt64");
+    }
+
     SunRenderer renderer;
     renderer.device_ = info.device;
     renderer.subdivisions_ = std::max(info.subdivisions, 2u);
@@ -239,9 +259,10 @@ std::expected<SunRenderer, std::string> SunRenderer::create(const CreateInfo& in
     renderer.corePipeline_ = std::move(*corePipeline);
     renderer.coronaPipeline_ = std::move(*coronaPipeline);
 
-    // Build geometry for default radius
+    // Build geometry for default radius/corona multiplier. The corona mesh must
+    // span the same outer radius the shader uses for its falloff window.
     const double radius = info.defaultRadius > 0.0 ? info.defaultRadius : 10000.0;
-    if (auto res = renderer.buildGeometry(radius, renderer.subdivisions_); !res)
+    if (auto res = renderer.buildGeometry(radius, renderer.subdivisions_, 6.0); !res)
     {
         renderer.destroy();
         return std::unexpected(res.error());
@@ -269,6 +290,7 @@ SunRenderer::SunRenderer(SunRenderer&& other) noexcept
       coreIndexBuffer_(std::exchange(other.coreIndexBuffer_, nullptr)),
       coronaVertexBuffer_(std::exchange(other.coronaVertexBuffer_, nullptr)),
       currentRadius_(other.currentRadius_),
+      currentCoronaMultiplier_(other.currentCoronaMultiplier_),
       subdivisions_(other.subdivisions_),
       patchVertexCount_(other.patchVertexCount_),
       patchIndexCount_(other.patchIndexCount_),
@@ -291,6 +313,7 @@ SunRenderer& SunRenderer::operator=(SunRenderer&& other) noexcept
         coreIndexBuffer_ = std::exchange(other.coreIndexBuffer_, nullptr);
         coronaVertexBuffer_ = std::exchange(other.coronaVertexBuffer_, nullptr);
         currentRadius_ = other.currentRadius_;
+        currentCoronaMultiplier_ = other.currentCoronaMultiplier_;
         subdivisions_ = other.subdivisions_;
         patchVertexCount_ = other.patchVertexCount_;
         patchIndexCount_ = other.patchIndexCount_;
@@ -324,9 +347,11 @@ void SunRenderer::destroy() noexcept
     }
 }
 
-std::expected<void, std::string> SunRenderer::buildGeometry(double radius, std::uint32_t subdivisions)
+std::expected<void, std::string> SunRenderer::buildGeometry(double radius, std::uint32_t subdivisions,
+                                                             double coronaRadiusMultiplier)
 {
     currentRadius_ = radius;
+    currentCoronaMultiplier_ = coronaRadiusMultiplier;
     subdivisions_ = subdivisions;
 
     constexpr std::array<planets::CubeFace, 6> kFaces = {
@@ -349,7 +374,10 @@ std::expected<void, std::string> SunRenderer::buildGeometry(double radius, std::
     std::vector<Vertex> coronaVertices(totalVertices);
     std::vector<std::uint32_t> sharedIndices;
 
-    const double coronaRadius = radius * 6.0;
+    // Keep the mesh shell in sync with the radius the fragment shader uses
+    // for its falloff. A hardcoded multiplier leaves a "glass bubble" edge
+    // when the shell extends past the shader corona radius.
+    const double coronaRadius = radius * coronaRadiusMultiplier;
 
     for (std::size_t f = 0; f < 6; ++f)
     {
@@ -446,6 +474,9 @@ std::expected<void, std::string> SunRenderer::buildGeometry(double radius, std::
         auto mapped = buf.map();
         if (!mapped) return std::unexpected(mapped.error());
         std::memcpy(*mapped, data, bytes);
+        // CpuToGpu allocations may not be HOST_COHERENT; flush so the GPU
+        // observes the writes before the first draw.
+        if (auto r = buf.flush(); !r) return r;
         buf.unmap();
         return {};
     };
@@ -475,10 +506,12 @@ void SunRenderer::render(VkCommandBuffer cmd, const SunRenderContext& context, c
         return;
     }
 
-    // Regenerate geometry if radius changed significantly
-    if (std::abs(params.radius - currentRadius_) > 1.0)
+    // Regenerate geometry if radius changed significantly or the corona
+    // multiplier changed (shell must track the shader falloff radius).
+    if (std::abs(params.radius - currentRadius_) > 1.0 ||
+        std::abs(params.coronaRadiusMultiplier - currentCoronaMultiplier_) > 1e-4)
     {
-        if (auto r = buildGeometry(params.radius, subdivisions_); !r)
+        if (auto r = buildGeometry(params.radius, subdivisions_, params.coronaRadiusMultiplier); !r)
         {
             core::logError("SunRenderer", "Failed to update sun geometry: {}", r.error());
             return;

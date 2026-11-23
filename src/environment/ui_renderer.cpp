@@ -30,8 +30,13 @@ struct UiRenderer::Impl
 {
     VkDevice device = VK_NULL_HANDLE;
     std::unique_ptr<gpu_resources::Allocator> allocator;
-    std::unique_ptr<gpu_resources::Buffer> vertexBuffer;
-    VkDeviceSize capacity = 0;
+    // Ring of per-draw buffers: a slot is reused only after kSlots draws,
+    // comfortably more than the two frames in flight. Writing slot 0 on
+    // frame N can never clobber the GPU read from frame N-1.
+    static constexpr std::size_t kSlots = 8;
+    std::array<std::unique_ptr<gpu_resources::Buffer>, kSlots> buffers{};
+    std::array<VkDeviceSize, kSlots> capacities{};
+    std::size_t nextSlot = 0;
     VkPipelineLayout layout = VK_NULL_HANDLE;
     VkShaderModule vert = VK_NULL_HANDLE;
     VkShaderModule frag = VK_NULL_HANDLE;
@@ -68,21 +73,24 @@ std::expected<UiRenderer, std::string> UiRenderer::create(const CreateInfo& info
     if (!allocator) return std::unexpected(allocator.error());
     impl->allocator = std::make_unique<Allocator>(std::move(*allocator));
 
-    // Capacity for thousands of glyph quads: a busy HUD (panels + bars +
-    // comms log + station buttons) can exceed 256 KB, which used to make
-    // the whole UI silently vanish until a message expired.
-    impl->capacity = 8 * 1024 * 1024;
-    auto buffer = Buffer::create(*impl->allocator, {
-        .size = impl->capacity, .usage = BufferUsage::Storage,
-        .memory = MemoryPlacement::CpuToGpu});
-    if (!buffer) return std::unexpected(buffer.error());
-    impl->vertexBuffer = std::make_unique<Buffer>(std::move(*buffer));
+    // 2 MB per slot holds tens of thousands of glyph quads; eight slots
+    // cost 16 MB total and isolate every in-flight frame.
+    for (std::size_t i = 0; i < impl->kSlots; ++i)
+    {
+        impl->capacities[i] = 2 * 1024 * 1024;
+        auto buffer = Buffer::create(*impl->allocator, {
+            .size = impl->capacities[i], .usage = BufferUsage::Storage,
+            .memory = MemoryPlacement::CpuToGpu,
+            .name = "starforge.Ui.Text"});
+        if (!buffer) return std::unexpected(buffer.error());
+        impl->buffers[i] = std::make_unique<Buffer>(std::move(*buffer));
+    }
 
     auto vert = internal::loadShaderModule(info.device, info.shaderDirectory + "/ui_text.vert.spv");
+    if (!vert) return std::unexpected(vert.error());
+    impl->vert = *vert; // own it immediately: later failures must not leak it
     auto frag = internal::loadShaderModule(info.device, info.shaderDirectory + "/ui_text.frag.spv");
-    if (!vert || !frag)
-        return std::unexpected(vert ? frag.error() : vert.error());
-    impl->vert = *vert;
+    if (!frag) return std::unexpected(frag.error());
     impl->frag = *frag;
 
     VkPushConstantRange push{};
@@ -121,32 +129,36 @@ std::expected<UiRenderer, std::string> UiRenderer::create(const CreateInfo& info
     return result;
 }
 
-void UiRenderer::render(VkCommandBuffer cmd, const std::vector<UiVertex>& vertices) const
+void UiRenderer::render(VkCommandBuffer cmd, const std::vector<UiVertex>& vertices)
 {
     if (!impl_ || !impl_->pipeline || vertices.empty()) return;
     const VkDeviceSize bytes = static_cast<VkDeviceSize>(vertices.size() * sizeof(UiVertex));
-    if (bytes > impl_->capacity)
+    const std::size_t slot = impl_->nextSlot++ % impl_->kSlots;
+    auto& buffer = impl_->buffers[slot];
+    if (bytes > impl_->capacities[slot])
     {
         // Grow rather than drop the frame: a busy HUD must never disappear.
         const VkDeviceSize needed = ((bytes / (2 * 1024 * 1024)) + 1) * 2 * 1024 * 1024;
         auto grown = gpu_resources::Buffer::create(*impl_->allocator, {
             .size = needed, .usage = gpu_resources::BufferUsage::Storage,
-            .memory = gpu_resources::MemoryPlacement::CpuToGpu});
+            .memory = gpu_resources::MemoryPlacement::CpuToGpu,
+            .name = "starforge.Ui.Text"});
         if (!grown) return;
-        // Avoid destroying a buffer still referenced by in-flight command buffers.
+        // The old buffer may be referenced by in-flight command buffers;
+        // only replace it once the device is idle.
         vkDeviceWaitIdle(impl_->device);
-        impl_->vertexBuffer = std::make_unique<gpu_resources::Buffer>(std::move(*grown));
-        impl_->capacity = needed;
+        buffer = std::make_unique<gpu_resources::Buffer>(std::move(*grown));
+        impl_->capacities[slot] = needed;
     }
 
-    auto mapped = impl_->vertexBuffer->map();
+    auto mapped = buffer->map();
     if (!mapped) return;
     std::memcpy(*mapped, vertices.data(), static_cast<std::size_t>(bytes));
-    (void)impl_->vertexBuffer->flush();
-    impl_->vertexBuffer->unmap();
+    (void)buffer->flush();
+    buffer->unmap();
 
     Push push{};
-    push.vertexAddress = impl_->vertexBuffer->deviceAddress(impl_->device);
+    push.vertexAddress = buffer->deviceAddress(impl_->device);
     vkCmdPushConstants(cmd, impl_->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(push), &push);
     impl_->pipeline->bindAndDraw(cmd, static_cast<std::uint32_t>(vertices.size()), 0, 1);
 }

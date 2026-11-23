@@ -76,6 +76,8 @@ void GameSimulation::spawnHostile()
     npcs_.clear();
     NpcState hostile;
     hostile.id = "hostile-1";
+    hostile.name = "Pirate Raider";
+    hostile.relation = gameplay::ui_relation::Relation::Hostile;
     hostile.alive = true;
     hostile.hostile = true;
     hostile.engaging = true;
@@ -95,27 +97,39 @@ void GameSimulation::spawnNpcs(int count)
     struct SpawnDef
     {
         const char* id;
+        const char* name;
+        gameplay::ui_relation::Relation relation;
         bool hostile;
         RawVec3f position;
     };
-    // A mix of hostile and neutral ships spread across the sector. Neutral
-    // ships travel but never attack, so they can be used to test targeting.
+    // A mix of hostile, allied and neutral ships spread across the sector.
+    // Only hostiles attack; the others exercise relation-aware targeting.
+    // `Relation` drives HUD colour AND shape everywhere so friend/foe is
+    // readable without relying on colour alone.
     static const SpawnDef defs[] = {
-        {"hostile-1", true, {0.0f, 30.0f, -260.0f}},
-        {"trader-1", false, {-180.0f, 30.0f, -420.0f}},
-        {"patrol-1", true, {280.0f, -40.0f, -700.0f}},
-        {"trader-2", false, {-120.0f, 90.0f, -980.0f}},
-        {"scout-1", false, {420.0f, 20.0f, -1250.0f}},
-        {"hauler-1", false, {-560.0f, -30.0f, -1500.0f}},
+        {"hostile-1", "Pirate Raider", gameplay::ui_relation::Relation::Hostile, true,
+         {0.0f, 30.0f, -260.0f}},
+        {"trader-1", "Free Trader", gameplay::ui_relation::Relation::Neutral, false,
+         {-180.0f, 30.0f, -420.0f}},
+        {"patrol-1", "Patrol Interceptor", gameplay::ui_relation::Relation::Hostile, true,
+         {280.0f, -40.0f, -700.0f}},
+        {"trader-2", "Ore Hauler", gameplay::ui_relation::Relation::Neutral, false,
+         {-120.0f, 90.0f, -980.0f}},
+        {"scout-1", "Wingman", gameplay::ui_relation::Relation::Ally, false,
+         {420.0f, 20.0f, -1250.0f}},
+        {"hauler-1", "Convoy Hauler", gameplay::ui_relation::Relation::Neutral, false,
+         {-560.0f, -30.0f, -1500.0f}},
     };
 
     npcs_.clear();
-    const int n = std::clamp(count, 1, static_cast<int>(std::size(defs)));
+    const int n = std::clamp(count, 0, static_cast<int>(std::size(defs)));
     for (int i = 0; i < n; ++i)
     {
         const auto& def = defs[i];
         NpcState npc;
         npc.id = def.id;
+        npc.name = def.name;
+        npc.relation = def.relation;
         npc.hostile = def.hostile;
         npc.alive = true;
         npc.engaging = def.hostile;
@@ -151,7 +165,9 @@ HostileInfo GameSimulation::hostile() const noexcept
 }
 
 std::vector<GameEvent> GameSimulation::step(float dt, const RawVec3f& shipForward,
-                                            bool firePrimary, bool fireSecondary)
+                                            bool firePrimary, bool fireSecondary,
+                                            const RawVec3f& aimOrigin,
+                                            const RawVec3f& aimDirection)
 {
     std::vector<GameEvent> events;
     if (dt <= 0.0f) return events;
@@ -161,8 +177,9 @@ std::vector<GameEvent> GameSimulation::step(float dt, const RawVec3f& shipForwar
     gameplay::tickDamage(player_, dt, 2.0f);
 
     // --- Advance every NPC ---
-    for (auto& npc : npcs_)
+    for (std::size_t npcIndex = 0; npcIndex < npcs_.size(); ++npcIndex)
     {
+        auto& npc = npcs_[npcIndex];
         if (!npc.alive) continue;
 
         npc.cooldown = std::max(0.0f, npc.cooldown - dt);
@@ -181,7 +198,11 @@ std::vector<GameEvent> GameSimulation::step(float dt, const RawVec3f& shipForwar
 
             const RawVec3f toward = normalized(RawVec3f{-npc.position.x, -npc.position.y,
                                                         -npc.position.z});
-            RawVec3f right{RawVec3f{toward.z, 0.0f, -toward.x}};
+            RawVec3f right{toward.z, 0.0f, -toward.x};
+            // Directly above/below the player: cross with the vertical gives
+            // a zero vector, which killed lateral motion and NaN'd heading.
+            if (right.x * right.x + right.z * right.z < 1.0e-6f)
+                right = RawVec3f{1.0f, 0.0f, 0.0f};
             right = normalized(right);
             // Slower, wider orbits so a pilot can actually line up a shot.
             const float speed = npc.engaging ? 24.0f : 32.0f;
@@ -196,7 +217,7 @@ std::vector<GameEvent> GameSimulation::step(float dt, const RawVec3f& shipForwar
             // Keep hostiles in the player's forward arc: steer gently toward
             // a standoff point ahead of the ship instead of drifting behind
             // where they cannot be seen or targeted.
-            const float sideOffset = (&npc - npcs_.data()) % 2 == 0 ? 45.0f : -45.0f;
+            const float sideOffset = npcIndex % 2 == 0 ? 45.0f : -45.0f;
             const RawVec3f desired{
                 shipForward.x * 190.0f + right.x * sideOffset,
                 shipForward.y * 190.0f + climb * 0.5f,
@@ -233,6 +254,9 @@ std::vector<GameEvent> GameSimulation::step(float dt, const RawVec3f& shipForwar
         {
             npc.cooldown = 1.5f;
             auto result = gameplay::applyDamage(player_, 8.0f, gameplay::Subsystem::Hull);
+            if (result.destroyed)
+                events.push_back(GameEvent{GameEvent::Type::PlayerDestroyed, 0.0f, "player",
+                                           npc.id});
             if (result.shieldAbsorbed > 0.0f)
                 events.push_back(GameEvent{GameEvent::Type::PlayerShieldHit,
                                            result.shieldAbsorbed, "shield", npc.id});
@@ -242,13 +266,35 @@ std::vector<GameEvent> GameSimulation::step(float dt, const RawVec3f& shipForwar
         }
     }
 
-    // --- Player weapons: aim at the selected NPC, or fall back to the
-    // nearest hostile in the forward cone when no target is locked. ---
+    // --- Player weapons -------------------------------------------------
+    // A shot ALWAYS registers (audio, tracers, recoil) while the trigger is
+    // held, even with no target or with the locked ship out of range. Damage
+    // is a separate test: the victim must be hostile, alive, inside weapon
+    // range AND physically under the reticle. A lock only prioritises which
+    // qualified ship is chosen - it never grants a hit by itself, so firing
+    // away from a locked target cannot damage it.
+    constexpr float kWeaponRange = 600.0f;
+    constexpr float kAimCos = 0.996f; // ~5 degrees of reticle tolerance
+    const auto aim = normalized(aimDirection);
+    const auto toNpc = [&](const NpcState& npc) -> RawVec3f {
+        return RawVec3f{npc.position.x - aimOrigin.x,
+                        npc.position.y - aimOrigin.y,
+                        npc.position.z - aimOrigin.z};
+    };
+    const auto qualifies = [&](const NpcState& npc) -> bool {
+        if (!npc.alive || !npc.hostile) return false; // friendlies never take fire
+        const auto offset = toNpc(npc);
+        const float d = length(offset);
+        return d <= kWeaponRange && dot(aim, normalized(offset)) > kAimCos;
+    };
+
     std::size_t target = npcs_.size();
     if (!targetId_.empty())
     {
+        // A lock narrows the candidate set to that ship; it still has to be
+        // hostile, in range and actually under the crosshair.
         for (std::size_t i = 0; i < npcs_.size(); ++i)
-            if (npcs_[i].alive && npcs_[i].id == targetId_)
+            if (npcs_[i].id == targetId_ && qualifies(npcs_[i]))
             {
                 target = i;
                 break;
@@ -260,9 +306,9 @@ std::vector<GameEvent> GameSimulation::step(float dt, const RawVec3f& shipForwar
         for (std::size_t i = 0; i < npcs_.size(); ++i)
         {
             const auto& npc = npcs_[i];
-            if (!npc.alive || !npc.hostile) continue;
-            const float d = length(npc.position);
-            if (dot(shipForward, normalized(npc.position)) > 0.72f && d < bestDistance)
+            if (!qualifies(npc)) continue;
+            const float d = length(toNpc(npc));
+            if (d < bestDistance)
             {
                 bestDistance = d;
                 target = i;
@@ -270,45 +316,26 @@ std::vector<GameEvent> GameSimulation::step(float dt, const RawVec3f& shipForwar
         }
     }
 
-    if (target < npcs_.size())
-    {
+    auto fire = [&](bool held, float& cooldown, float interval, float damage, const char* label) {
+        if (!held || cooldown > 0.0f) return;
+        cooldown = interval;
+        const char* victimId = target < npcs_.size() ? npcs_[target].id.c_str() : "";
+        events.push_back(GameEvent{GameEvent::Type::WeaponFired, damage, label, victimId});
+        if (target >= npcs_.size()) return; // shot went wide / out of range
         auto& npc = npcs_[target];
-        const float distance = length(npc.position);
-        const bool inFront = dot(shipForward, normalized(npc.position)) > 0.72f;
-        const bool inRange = distance < 600.0f;
-        auto fire = [&](bool held, float& cooldown, float interval, float damage, const char* label) {
-            if (!held || cooldown > 0.0f || !inRange || !inFront || !npc.alive) return;
-            cooldown = interval;
-            events.push_back(GameEvent{GameEvent::Type::WeaponFired, damage, label, npc.id});
-            auto result = gameplay::applyDamage(npc.damage, damage, gameplay::Subsystem::Hull);
-            const float dealt = result.shieldAbsorbed + result.hullDamage;
-            if (dealt > 0.0f) npc.evadeTimer = 2.0f; // reactive evasion
-            events.push_back(GameEvent{GameEvent::Type::HostileHit, dealt, "npc", npc.id});
-            if (result.destroyed)
-            {
-                npc.alive = false;
-                events.push_back(GameEvent{GameEvent::Type::HostileDestroyed,
-                                           0.0f, "npc", npc.id});
-            }
-        };
-        fire(firePrimary, primaryCooldown_, 0.15f, 8.0f, "primary");
-        fire(fireSecondary, secondaryCooldown_, 1.0f, 30.0f, "secondary");
-    }
-    else
-    {
-        // Weapons still register as fired even with no target in the cone,
-        // so the laser/audio feedback remains consistent.
-        if (firePrimary && primaryCooldown_ <= 0.0f)
+        auto result = gameplay::applyDamage(npc.damage, damage, gameplay::Subsystem::Hull);
+        const float dealt = result.shieldAbsorbed + result.hullDamage;
+        if (dealt > 0.0f) npc.evadeTimer = 2.0f; // reactive evasion
+        events.push_back(GameEvent{GameEvent::Type::HostileHit, dealt, "npc", npc.id});
+        if (result.destroyed)
         {
-            primaryCooldown_ = 0.15f;
-            events.push_back(GameEvent{GameEvent::Type::WeaponFired, 8.0f, "primary", ""});
+            npc.alive = false;
+            events.push_back(GameEvent{GameEvent::Type::HostileDestroyed,
+                                       0.0f, "npc", npc.id});
         }
-        if (fireSecondary && secondaryCooldown_ <= 0.0f)
-        {
-            secondaryCooldown_ = 1.0f;
-            events.push_back(GameEvent{GameEvent::Type::WeaponFired, 30.0f, "secondary", ""});
-        }
-    }
+    };
+    fire(firePrimary, primaryCooldown_, 0.15f, 8.0f, "primary");
+    fire(fireSecondary, secondaryCooldown_, 1.0f, 30.0f, "secondary");
 
     refreshNpcInfo();
     return events;

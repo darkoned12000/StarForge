@@ -4,6 +4,7 @@
 
 add_executable(starforge_game
     main.cpp
+    combat_fx_state.cpp
     game_bridge.cpp
     game_simulation.cpp
     ui_state.cpp

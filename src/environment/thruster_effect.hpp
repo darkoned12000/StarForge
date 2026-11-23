@@ -16,7 +16,6 @@ namespace starforge::environment
 struct ThrusterRenderContext
 {
     math::Mat4f viewProj{};
-    math::Vec3f cameraPosition{0.0f, 0.0f, 0.0f};
     math::Vec2f resolution{1.0f, 1.0f};
 };
 
@@ -32,7 +31,7 @@ struct ThrusterParams
     float time = 0.0f;
 };
 
-// Thruster effect system for ship engines and thrust effects (rendering pending).
+// Thruster effect system for ship engine exhaust plumes and thrust flares.
 class ThrusterEffect
 {
 public:
@@ -57,7 +56,7 @@ public:
     ThrusterEffect& operator=(ThrusterEffect&& other) noexcept;
 
     // Render a thruster effect
-    void render(VkCommandBuffer cmd, const ThrusterRenderContext& context, const ThrusterParams& params);
+    void render(VkCommandBuffer cmd, const ThrusterRenderContext& context, const ThrusterParams& params) const;
 
 private:
     ThrusterEffect() = default;

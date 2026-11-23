@@ -12,8 +12,9 @@
 namespace starforge::environment::internal
 {
 
-// Fullscreen post effect that samples one input image. One descriptor set
-// (sampler + sampled image), optional push constants, no blending/depth.
+// Fullscreen post effect that samples one or two input images through a
+// ring of descriptor sets (sampler + sampled image(s)), with optional push
+// constants and additive or alpha blending. No depth read/write.
 class TextureEffect
 {
 public:
@@ -57,8 +58,6 @@ private:
     // descriptor set still in flight on the GPU.
     static constexpr std::uint32_t kSetCount = 16;
     mutable VkDescriptorSet descriptorSets_[kSetCount] = {};
-    mutable VkImageView boundViews_[kSetCount] = {};
-    mutable VkImageView boundSecondViews_[kSetCount] = {};
     mutable std::uint32_t nextSet_ = 0;
     VkSampler sampler_ = VK_NULL_HANDLE;
     VkPipelineLayout pipelineLayout_ = VK_NULL_HANDLE;

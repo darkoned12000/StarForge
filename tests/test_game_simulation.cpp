@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <vector>
 
@@ -24,12 +25,16 @@ TEST_CASE("M15.0.5: hostile engages, player fires, shield/hull damage and destru
     sim.spawnHostile();
     REQUIRE(sim.hostileAlive());
 
-    // Player fires primary at the hostile in front; shield breaks then hull.
+    // Player keeps the reticle on the hostile; shield breaks then hull.
+    // Damage requires reticle alignment, so the test must actually aim.
     bool sawHostileHit = false;
     bool sawDestroyed = false;
     for (int i = 0; i < 600 && sim.hostileAlive(); ++i)
     {
-        auto events = sim.step(kStep, kForward, true, false);
+        const auto p = sim.npcs().front().position;
+        const float len = std::sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
+        const RawVec3f aim{p.x / len, p.y / len, p.z / len};
+        auto events = sim.step(kStep, kForward, true, false, RawVec3f{}, aim);
         for (const auto& event : events)
         {
             if (event.type == GameEvent::Type::HostileHit) sawHostileHit = true;
@@ -58,9 +63,14 @@ TEST_CASE("M15.0.5: hostile breaks off and evades when hit")
 {
     GameSimulation sim;
     sim.spawnHostile();
-    // Fire until the first hit registers.
+    // Fire with the reticle on the hostile until the first hit registers.
     for (int i = 0; i < 120 && sim.hostile().engaging; ++i)
-        (void)sim.step(kStep, kForward, true, false);
+    {
+        const auto p = sim.npcs().front().position;
+        const float len = std::sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
+        const RawVec3f aim{p.x / len, p.y / len, p.z / len};
+        (void)sim.step(kStep, kForward, true, false, RawVec3f{}, aim);
+    }
     CHECK_FALSE(sim.hostile().engaging); // reactive evade on damage
 }
 
@@ -201,7 +211,53 @@ TEST_CASE("M16 polish: spawnNpcs creates traveling hostiles and neutrals")
     CHECK(moved == before.size());
 }
 
-TEST_CASE("M16 polish: weapons can be aimed at a selected neutral NPC")
+TEST_CASE("M17.5: a locked target is only hit when it is actually under the reticle")
+{
+    GameSimulation sim;
+    sim.spawnHostile();
+    sim.setTargetId("hostile-1");
+
+    // Aim 180 degrees away from the hostile while holding fire.
+    const RawVec3f away{0.0f, 0.0f, 1.0f};
+    bool hit = false;
+    bool fired = false;
+    for (int i = 0; i < 120; ++i)
+        for (const auto& event : sim.step(kStep, kForward, true, false, RawVec3f{}, away))
+        {
+            if (event.type == GameEvent::Type::WeaponFired) fired = true;
+            if (event.type == GameEvent::Type::HostileHit) hit = true;
+        }
+    CHECK(fired);  // the gun still fires
+    CHECK_FALSE(hit); // but nothing is hit while aiming away
+    CHECK(sim.hostileAlive());
+}
+
+TEST_CASE("M17.5: guns still fire at a locked target that is out of range")
+{
+    GameSimulation sim;
+    sim.spawnHostile();
+    sim.setTargetId("hostile-1");
+
+    // Push the hostile well past the 600 m weapon range (the AI would
+    // otherwise close in), then aim exactly at it and hold fire.
+    auto& npc = const_cast<NpcInfo&>(sim.npcs().front());
+    npc.position = RawVec3f{0.0f, 0.0f, -1200.0f};
+    const RawVec3f aim{0.0f, 0.0f, -1.0f};
+
+    bool fired = false;
+    bool hit = false;
+    for (int i = 0; i < 30; ++i)
+        for (const auto& event : sim.step(kStep, kForward, true, false, RawVec3f{}, aim))
+        {
+            if (event.type == GameEvent::Type::WeaponFired) fired = true;
+            if (event.type == GameEvent::Type::HostileHit) hit = true;
+        }
+    CHECK(fired);  // trigger feedback must remain
+    CHECK_FALSE(hit); // the shot simply falls short
+    CHECK(sim.hostileAlive());
+}
+
+TEST_CASE("M17.5: selecting a neutral identifies it but never fires on it")
 {
     GameSimulation sim;
     sim.spawnNpcs(5);
@@ -211,18 +267,19 @@ TEST_CASE("M16 polish: weapons can be aimed at a selected neutral NPC")
     REQUIRE(neutral != sim.npcs().end());
     sim.setTargetId(neutral->id);
 
+    // A non-hostile contact can be locked for identification, but the
+    // friendly-fire guard keeps weapons from damaging it.
     bool hitNeutral = false;
     for (int i = 0; i < 600; ++i)
         for (const auto& event : sim.step(kStep, kForward, true, false))
             if (event.type == GameEvent::Type::HostileHit && event.sourceId == neutral->id)
                 hitNeutral = true;
-    CHECK(hitNeutral);
+    CHECK_FALSE(hitNeutral);
 
-    // The selected neutral can be destroyed just like a hostile.
     const auto now = std::find_if(sim.npcs().begin(), sim.npcs().end(),
         [&](const NpcInfo& n) { return n.id == neutral->id; });
     REQUIRE(now != sim.npcs().end());
-    CHECK_FALSE(now->alive);
+    CHECK(now->alive);
 }
 
 TEST_CASE("M16 polish: mission state is queryable for the haul quest")

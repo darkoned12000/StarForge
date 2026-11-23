@@ -325,6 +325,9 @@ void Window::pollEvents()
             case SDL_SCANCODE_T:
                 keyDown_[static_cast<std::size_t>(PlatformKey::T)] = down;
                 break;
+            case SDL_SCANCODE_R:
+                keyDown_[static_cast<std::size_t>(PlatformKey::R)] = down;
+                break;
             case SDL_SCANCODE_PAGEUP:
                 keyDown_[static_cast<std::size_t>(PlatformKey::PageUp)] = down;
                 break;
@@ -437,24 +440,28 @@ void Window::mousePosition(float& xOut, float& yOut) const noexcept
         return;
     }
 
-    // Compute window-relative coordinates from global mouse state so the
-    // result is tied to this window, not whichever window has focus.
-    float globalX = 0.0f;
-    float globalY = 0.0f;
-    SDL_GetGlobalMouseState(&globalX, &globalY);
+    // SDL_GetMouseState gives window-relative coordinates in logical points
+    // and works on Wayland; SDL_GetWindowPosition is unsupported there, so
+    // the old global-mouse subtraction mis-reported the cursor. UI hit
+    // rectangles are in framebuffer pixels, so scale from points to pixels.
+    float logicalX = 0.0f;
+    float logicalY = 0.0f;
+    SDL_GetMouseState(&logicalX, &logicalY);
 
-    int windowX = 0;
-    int windowY = 0;
-    if (SDL_GetWindowPosition(window_, &windowX, &windowY))
-    {
-        xOut = globalX - static_cast<float>(windowX);
-        yOut = globalY - static_cast<float>(windowY);
-        return;
-    }
-
-    // Fallback when window position is unavailable (e.g. some Wayland
-    // environments): use focus-relative mouse state.
-    SDL_GetMouseState(&xOut, &yOut);
+    int pointW = 0;
+    int pointH = 0;
+    int pixelW = 0;
+    int pixelH = 0;
+    SDL_GetWindowSize(window_, &pointW, &pointH);
+    SDL_GetWindowSizeInPixels(window_, &pixelW, &pixelH);
+    const float scaleX = (pointW > 0 && pixelW > 0)
+                             ? static_cast<float>(pixelW) / static_cast<float>(pointW)
+                             : 1.0f;
+    const float scaleY = (pointH > 0 && pixelH > 0)
+                             ? static_cast<float>(pixelH) / static_cast<float>(pointH)
+                             : 1.0f;
+    xOut = logicalX * scaleX;
+    yOut = logicalY * scaleY;
 }
 
 Extent2D Window::framebufferSize() const

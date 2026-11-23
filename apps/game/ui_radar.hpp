@@ -4,6 +4,7 @@
 // planar coordinates: x = right, forward = ahead. Screen y grows downward.
 #include <cmath>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace starforge::game
@@ -34,13 +35,14 @@ enum class RadarKind
     Rock,
     Hostile,
     Neutral,
+    Ally,   // M17.5a: friendly ships get their own cyan marker
     Planet,
     Station,
 };
 
 struct RadarContact
 {
-    std::string id;
+    std::string_view id;
     float x = 0.0f;      // right
     float forward = 0.0f; // ahead
     RadarKind kind = RadarKind::Rock;

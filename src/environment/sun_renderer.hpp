@@ -88,7 +88,8 @@ private:
     SunRenderer() = default;
     void destroy() noexcept;
 
-    [[nodiscard]] std::expected<void, std::string> buildGeometry(double radius, std::uint32_t subdivisions);
+    [[nodiscard]] std::expected<void, std::string> buildGeometry(double radius, std::uint32_t subdivisions,
+                                                                 double coronaRadiusMultiplier);
 
     VkDevice device_ = VK_NULL_HANDLE;
     VkPipelineLayout corePipelineLayout_ = VK_NULL_HANDLE;
@@ -102,6 +103,7 @@ private:
     std::unique_ptr<gpu_resources::Buffer> coronaVertexBuffer_;
 
     double currentRadius_ = 0.0;
+    double currentCoronaMultiplier_ = 0.0;
     std::uint32_t subdivisions_ = 16;
     std::uint32_t patchVertexCount_ = 0;
     std::uint32_t patchIndexCount_ = 0;

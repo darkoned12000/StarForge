@@ -167,8 +167,6 @@ TextureEffect::TextureEffect(TextureEffect&& other) noexcept
     for (std::uint32_t i = 0; i < kSetCount; ++i)
     {
         descriptorSets_[i] = std::exchange(other.descriptorSets_[i], VK_NULL_HANDLE);
-        boundViews_[i] = std::exchange(other.boundViews_[i], VK_NULL_HANDLE);
-        boundSecondViews_[i] = std::exchange(other.boundSecondViews_[i], VK_NULL_HANDLE);
     }
 }
 TextureEffect& TextureEffect::operator=(TextureEffect&& other) noexcept
@@ -185,8 +183,6 @@ TextureEffect& TextureEffect::operator=(TextureEffect&& other) noexcept
         for (std::uint32_t i = 0; i < kSetCount; ++i)
         {
             descriptorSets_[i] = std::exchange(other.descriptorSets_[i], VK_NULL_HANDLE);
-            boundViews_[i] = std::exchange(other.boundViews_[i], VK_NULL_HANDLE);
-            boundSecondViews_[i] = std::exchange(other.boundSecondViews_[i], VK_NULL_HANDLE);
         }
         sampler_ = std::exchange(other.sampler_, VK_NULL_HANDLE);
         pipelineLayout_ = std::exchange(other.pipelineLayout_, VK_NULL_HANDLE);
@@ -217,8 +213,6 @@ void TextureEffect::destroy() noexcept
     for (std::uint32_t i = 0; i < kSetCount; ++i)
     {
         descriptorSets_[i] = VK_NULL_HANDLE;
-        boundViews_[i] = VK_NULL_HANDLE;
-        boundSecondViews_[i] = VK_NULL_HANDLE;
     }
     vertexModule_ = VK_NULL_HANDLE;
     fragmentModule_ = VK_NULL_HANDLE;
@@ -232,45 +226,44 @@ void TextureEffect::render(VkCommandBuffer cmd, VkImageView inputView,
     const std::uint32_t slot = nextSet_++ % kSetCount;
     const VkDescriptorSet set = descriptorSets_[slot];
     const VkImageView effectiveSecondView = secondView != VK_NULL_HANDLE ? secondView : inputView;
-    if (boundViews_[slot] != inputView || boundSecondViews_[slot] != effectiveSecondView)
-    {
-        VkDescriptorImageInfo imageInfo{};
-        imageInfo.imageView = inputView;
-        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        VkDescriptorImageInfo secondInfo{};
-        secondInfo.imageView = effectiveSecondView;
-        secondInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        VkDescriptorImageInfo samplerInfo{};
-        samplerInfo.sampler = sampler_;
-        VkWriteDescriptorSet writes[4]{};
-        writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[0].dstSet = set;
-        writes[0].dstBinding = 0;
-        writes[0].descriptorCount = 1;
-        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-        writes[0].pImageInfo = &imageInfo;
-        writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[1].dstSet = set;
-        writes[1].dstBinding = 1;
-        writes[1].descriptorCount = 1;
-        writes[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-        writes[1].pImageInfo = &samplerInfo;
-        writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[2].dstSet = set;
-        writes[2].dstBinding = 2;
-        writes[2].descriptorCount = 1;
-        writes[2].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-        writes[2].pImageInfo = &secondInfo;
-        writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[3].dstSet = set;
-        writes[3].dstBinding = 3;
-        writes[3].descriptorCount = 1;
-        writes[3].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-        writes[3].pImageInfo = &samplerInfo;
-        vkUpdateDescriptorSets(device_, 4, writes, 0, nullptr);
-        boundViews_[slot] = inputView;
-        boundSecondViews_[slot] = effectiveSecondView;
-    }
+    // Always rewrite the descriptor set. A resize destroys and recreates the
+    // HDR image views; VMA/drivers routinely recycle the same numeric
+    // VkImageView handle, so caching by handle can leave a stale descriptor
+    // pointing at a destroyed view. Four writes per frame is negligible.
+    VkDescriptorImageInfo imageInfo{};
+    imageInfo.imageView = inputView;
+    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    VkDescriptorImageInfo secondInfo{};
+    secondInfo.imageView = effectiveSecondView;
+    secondInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    VkDescriptorImageInfo samplerInfo{};
+    samplerInfo.sampler = sampler_;
+    VkWriteDescriptorSet writes[4]{};
+    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[0].dstSet = set;
+    writes[0].dstBinding = 0;
+    writes[0].descriptorCount = 1;
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    writes[0].pImageInfo = &imageInfo;
+    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[1].dstSet = set;
+    writes[1].dstBinding = 1;
+    writes[1].descriptorCount = 1;
+    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+    writes[1].pImageInfo = &samplerInfo;
+    writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[2].dstSet = set;
+    writes[2].dstBinding = 2;
+    writes[2].descriptorCount = 1;
+    writes[2].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    writes[2].pImageInfo = &secondInfo;
+    writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[3].dstSet = set;
+    writes[3].dstBinding = 3;
+    writes[3].descriptorCount = 1;
+    writes[3].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+    writes[3].pImageInfo = &samplerInfo;
+    vkUpdateDescriptorSets(device_, 4, writes, 0, nullptr);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_->handle());
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_, 0, 1, &set, 0, nullptr);
     if (pushConstantSize_ > 0 && pushData != nullptr && pushSize > 0)

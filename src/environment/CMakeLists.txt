@@ -22,6 +22,7 @@ add_library(starforge_environment STATIC
     sun_renderer.cpp
     planet_renderer.cpp
     rock_field_renderer.cpp
+    combat_fx_renderer.cpp
     nebula_optimized.cpp
     ui_renderer.cpp
 )

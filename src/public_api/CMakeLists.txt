@@ -5,6 +5,8 @@ add_library(starforge_public_api STATIC
     asset.cpp
     asset_bridge.cpp
     asteroid_field.cpp
+    combat_fx.cpp
+    combat_fx_bridge.cpp
     asteroid_field_bridge.cpp
     audio.cpp
     audio_bridge.cpp

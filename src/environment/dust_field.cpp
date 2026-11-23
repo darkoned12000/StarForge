@@ -41,9 +41,30 @@ static_assert(offsetof(PushConstants, aspectTan) == 80, "Dust aspectTan offset m
     push.color = params.color;
 
     const math::Mat4f invView = glm::inverse(context.viewProj);
-    const math::Vec3f right = glm::normalize(math::Vec3f(invView[0]));
-    const math::Vec3f up = glm::normalize(math::Vec3f(invView[1]));
-    const math::Vec3f forward = -glm::normalize(math::Vec3f(invView[2]));
+    // Do NOT take basis vectors from inverse(viewProj) columns: for a
+    // perspective matrix column 2 mixes the camera translation with the
+    // forward vector (scaled by 1/near), skewing it badly for the chase
+    // camera. Unproject two NDC points instead and rebuild an orthonormal
+    // basis from the resulting view direction.
+    const auto unproject = [&](float ndcZ) -> std::optional<math::Vec3f> {
+        const auto world = invView * math::Vec4f{0.0f, 0.0f, ndcZ, 1.0f};
+        if (std::abs(world.w) < 1e-8f) return std::nullopt;
+        return math::Vec3f{world.x / world.w, world.y / world.w,
+                           world.z / world.w};
+    };
+    math::Vec3f forward{0.0f, 0.0f, -1.0f};
+    const auto nearPoint = unproject(0.0f);
+    const auto farPoint = unproject(1.0f);
+    if (nearPoint && farPoint)
+    {
+        const auto direction = *farPoint - *nearPoint;
+        if (glm::length(direction) > 1e-8f) forward = glm::normalize(direction);
+    }
+    const math::Vec3f worldUp{0.0f, 1.0f, 0.0f};
+    auto right = glm::cross(forward, worldUp);
+    if (glm::length(right) < 1e-5f) right = math::Vec3f{1.0f, 0.0f, 0.0f};
+    right = glm::normalize(right);
+    const auto up = glm::normalize(glm::cross(right, forward));
     const float projRow1Squared = context.viewProj[0][1] * context.viewProj[0][1] +
                                   context.viewProj[1][1] * context.viewProj[1][1] +
                                   context.viewProj[2][1] * context.viewProj[2][1];

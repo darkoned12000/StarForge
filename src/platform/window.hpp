@@ -50,6 +50,7 @@ enum class PlatformKey
     Minus,
     M,
     T,
+    R,
     PageUp,
     PageDown,
     Count,

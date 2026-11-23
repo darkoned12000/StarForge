@@ -1478,6 +1478,64 @@ asteroids (three demo rocks sit ahead of spawn so this is testable), dealing
 2/s shield regen for survivable combat. Station UI split into Trading and
 Missions tabs. Verification: Debug + Release CTest 12/12, zero validation errors.
 
+### M17.5 – Combat Presentation — COMPLETE (2026-11-23)
+
+Constraints for ALL steps
+- Scene effects render into the HDR scene target (sceneColorFormat). Glow values must
+  exceed 1.0 so bloom picks them up. HUD/UI draws after tonemap (colorFormat).
+- Effects are driven by simulation events (ProjectileFired, ProjectileHit, ShieldHit,
+  ShipDestroyed), never by polling. Effects are transient and must NOT be saved (M18).
+- Every dynamic GPU buffer is a fixed-capacity pool or a per-frame-slot ring (frames in
+  flight = 2). Clamp counts on the CPU; never free a buffer a frame in flight may read;
+  label buffers (BDA ledger). Caps: 256 bolts, 2048 particles, 8 explosions.
+- Deterministic RNG (seeded) so golden-image tests are stable.
+
+17.5a ✅ – Relationship + targeting HUD
+  Goal: tell friend from foe at a glance; always show where the target is.
+  Relations: Self, Ally (cyan, rounded brackets), Neutral (amber, square), Hostile
+  (red-orange, diamond). Same color+shape in world markers, radar and target panel.
+  - Markers on every NPC beyond hull-visibility range; hostiles always marked.
+  - Target key T = hostile nearest the reticle (min angle, tie-break distance);
+    second key = nearest by distance; third = cycle. Lock-on brackets converge in 0.25s.
+  - Target panel: name, faction, distance, shield/hull bars.
+  - Off-screen arrow at the screen edge toward the target (flipped if behind), with
+    distance. Crosshair turn cue (small arc/chevron toward the shortest turn).
+  - Lead pip from relative velocity and bolt speed (solve |p+vt| = st).
+  - Fix clipped HUD strings ("NO TARGET - Press T t").
+  Proof: golden screenshots with one ally, one neutral, one hostile on-screen, and one
+  off-screen/behind; unit tests for edge-arrow placement and the lead solver.
+
+17.5b ✅ – Weapons and hits
+  Bolts: world-space additive capsule along velocity, HDR white core + coloured halo,
+  depth-tested, one instanced draw. Muzzle flash, impact sparks, shield ripple at the
+  impact point (decays ~0.4s), brief white hull flash on damage.
+  Proof: golden of a bolt volley, a shield hit and a hull hit; stress test fires 256
+  bolts with no validation errors and no growth in memory.
+
+17.5c ✅ – Explosions and ship death
+  Layered: flash, fireball (noise dissolve), shockwave ring, debris from the ship's own
+  parts with ember trails, lingering smoke, camera shake by size/distance. Larger ships
+  chain several explosions over 1–3s.
+  Proof: golden frames at t = 0.05/0.3/1.0s; pool exhaustion degrades gracefully.
+
+17.5d ✅ – Engines and faction look
+  Procedural noise plume (no stair-stepping), throttle-driven length/brightness,
+  afterburner. Per-instance faction tint on outline, engine glow and nav lights.
+  Proof: golden of ally/hostile ships at 50 m and 2 km.
+
+**Status: complete (2026-11-23).** All four steps are implemented in
+`apps/game/` and its renderers: relation palette and markers, T/R/Tab targeting
+with lock convergence, off-screen arrow, lead pip and target portrait
+(including the station); pooled HDR bolts, impacts, shield ripples, layered
+explosions and debris in one instanced draw; procedural engine plumes and
+faction-tinted ships. Golden images were refreshed for the FX and faction
+looks. Playtest feedback also folded in: reticle-aligned damage (a lock no
+longer auto-hits), guns firing while out of range, a padded target-panel
+layout and a station portrait. Verification: 78/78 headless GPU tests,
+targeted CPU suites green, 60 s live run with zero GPUVM faults or device
+losses.
+
+
 ### M18 – Persistence
 
 - **Goal:** Save/load player deltas keyed by cell and object ID. Fast

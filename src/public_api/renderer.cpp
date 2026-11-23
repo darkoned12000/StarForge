@@ -162,7 +162,13 @@ std::expected<void, std::string> RendererInternalAccess::createHdrResources(Rend
 
     const auto format = impl.swapchain->format();
     if (format == VK_FORMAT_R16G16B16A16_SFLOAT)
-        return {}; // already an HDR swapchain; no offscreen target needed
+    {
+        // No offscreen pass, so there is no tonemap. Leave hdrEnabled false
+        // or facades would receive the linear HDR specialization while
+        // renderFrame skips tonemapping - un-encoded output to the screen.
+        impl.hdrEnabled = false;
+        return {};
+    }
 
     if (!impl.frameRenderer)
         return std::unexpected("HDR resources require an initialized FrameRenderer");
@@ -574,6 +580,15 @@ std::expected<Renderer::RecreateResult, std::string> Renderer::recreate()
     }
 
     bool hdrModeChanged = false;
+    const bool requestedHdr = RendererInternalAccess::hdrRequested();
+    if (requestedHdr != impl_->hdrEnabled)
+    {
+        // Env override changed, or the swapchain flipped between HDR and SDR
+        // (e.g. window moved to another monitor). Re-evaluate rather than
+        // keeping the old mode for the rest of the session.
+        impl_->hdrEnabled = requestedHdr;
+        hdrModeChanged = true;
+    }
     if (impl_->hdrEnabled)
     {
         // The offscreen targets are sized to the swapchain; rebuild them on

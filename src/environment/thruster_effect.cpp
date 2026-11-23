@@ -71,13 +71,20 @@ void ThrusterEffect::destroy() noexcept
     device_ = VK_NULL_HANDLE;
 }
 
-void ThrusterEffect::render(VkCommandBuffer cmd, const ThrusterRenderContext& context, const ThrusterParams& params)
+void ThrusterEffect::render(VkCommandBuffer cmd, const ThrusterRenderContext& context, const ThrusterParams& params) const
 {
     if (!effect_.has_value())
     {
         return;
     }
     const math::Vec3f worldPos = params.position + params.direction * (params.length * 0.5f);
+    // Skip billboards whose anchor is at or behind the eye. Without this,
+    // the perspective divide mirrors the plume across the screen.
+    const math::Vec4f clip = context.viewProj * math::Vec4f{worldPos, 1.0f};
+    if (clip.w <= 0.0f)
+    {
+        return;
+    }
     const math::Vec3f ndc = internal::projectToNdc(context.viewProj, worldPos);
     internal::BillboardPush push;
     push.centerSize = {ndc.x, ndc.y, internal::ndcHalfSize(context.viewProj, worldPos, params.width), context.resolution.x / std::max(context.resolution.y, 1.0f)};

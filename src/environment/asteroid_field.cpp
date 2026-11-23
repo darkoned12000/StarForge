@@ -110,7 +110,8 @@ struct Crater
 // Recompute per-vertex normals from the triangle mesh (area-weighted
 // face-normal accumulation). The vertex layout is interleaved
 // [pos.xyz, pos.w, normal.xyz, normal.w] with a 32-byte stride.
-void recomputeNormals(std::vector<float>& vertices, const std::vector<std::uint32_t>& indices)
+void recomputeNormals(std::vector<float>& vertices, const std::vector<std::uint32_t>& indices,
+                      std::size_t rows, std::size_t cols)
 {
     const std::size_t vertexCount = vertices.size() / 8;
     std::vector<float> accum(vertexCount * 3, 0.0f);
@@ -147,6 +148,25 @@ void recomputeNormals(std::vector<float>& vertices, const std::vector<std::uint3
         accum[ic / 8 * 3 + 1] += ny;
         accum[ic / 8 * 3 + 2] += nz;
     }
+
+    // The UV sphere duplicates the phi=0 / phi=2pi seam column and the two
+    // pole rows. Accumulate their face normals together before normalising,
+    // otherwise stepped toon lighting exposes a hard seam along phi=0.
+    const auto mergePair = [&](std::size_t a, std::size_t b) {
+        for (int k = 0; k < 3; ++k)
+        {
+            const float sum = accum[a * 3 + k] + accum[b * 3 + k];
+            accum[a * 3 + k] = sum;
+            accum[b * 3 + k] = sum;
+        }
+    };
+    if (cols >= 2)
+        for (std::size_t j = 0; j < rows; ++j) mergePair(j * cols, j * cols + cols - 1);
+    if (rows >= 2)
+        for (std::size_t poleRow : {std::size_t{0}, rows - 1})
+        {
+            for (std::size_t i = 1; i < cols; ++i) mergePair(poleRow * cols, poleRow * cols + i);
+        }
 
     for (std::size_t v = 0; v < vertexCount; ++v)
     {
@@ -342,7 +362,7 @@ AsteroidMesh generateAsteroidMesh(float radius, std::uint32_t latSegments, std::
     // Recompute normals from the displaced geometry. The old code kept the
     // untouched sphere normal, so the lumps and craters were invisible to
     // the lighting and every rock read as a flat-shaded ball.
-    recomputeNormals(mesh.vertices, mesh.indices);
+    recomputeNormals(mesh.vertices, mesh.indices, rows, cols);
 
     // Bake the signed cavity term into the unused normal.w slot so the
     // shader can darken crater interiors and brighten the raised rims

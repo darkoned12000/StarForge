@@ -12,6 +12,7 @@
 #include "starforge/asset.hpp"
 #include "starforge/asteroid_field.hpp"
 #include "starforge/audio.hpp"
+#include "starforge/combat_fx.hpp"
 #include "starforge/hud.hpp"
 #include "starforge/math.hpp"
 #include "starforge/nebula.hpp"
@@ -23,10 +24,12 @@
 #include "starforge/ui.hpp"
 #include "starforge/world.hpp"
 
+#include "combat_fx_state.hpp"
 #include "game_bridge.hpp"
 #include "game_simulation.hpp"
 #include "ship_controller.hpp"
 #include "targeting.hpp"
+#include "gameplay/ui_shapes.hpp"
 #include "ui_comms.hpp"
 #include "ui_radar.hpp"
 #include "ui_map.hpp"
@@ -38,6 +41,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <thread>
@@ -234,18 +238,21 @@ makeToonParams(const starforge::ToonMaterialDesc& desc, starforge::MaterialVaria
 // Loads an authored GLB and builds GPU meshes for it. The `screenPixels`
 // hint picks the streamed mip used for the base-colour texture.
 [[nodiscard]] bool loadAuthoredModel(starforge::Toon& toon, const std::string& path,
-                                     float screenPixels, AuthoredModel& out, std::string& error)
+                                      float screenPixels, AuthoredModel& out, std::string& error)
 {
+    // Build into a temporary and swap only on full success. The previous
+    // model stays usable if a reload fails halfway through, so a transient
+    // file error cannot blank the ship or station.
+    AuthoredModel tmp;
     auto asset = starforge::Asset::loadFromFile(path);
     if (!asset) { error = asset.error(); return false; }
-    out.path = path;
-    out.asset = std::make_unique<starforge::Asset>(std::move(*asset));
-    out.parts.clear();
-    out.selector = starforge::AssetLodSelector(
+    tmp.path = path;
+    tmp.asset = std::make_unique<starforge::Asset>(std::move(*asset));
+    tmp.selector = starforge::AssetLodSelector(
         std::vector<float>{250.0f, 1000.0f, 1.0e9f});
-    out.activeLod = 0;
+    tmp.activeLod = 0;
 
-    for (const auto& mesh : out.asset->meshes())
+    for (const auto& mesh : tmp.asset->meshes())
     {
         auto levels = starforge::generateAssetLods(mesh, std::vector<float>{0.5f, 0.25f});
         if (!levels) { error = levels.error(); return false; }
@@ -286,9 +293,10 @@ makeToonParams(const starforge::ToonMaterialDesc& desc, starforge::MaterialVaria
             if (!gpu) { error = gpu.error(); return false; }
             part.lods.push_back(std::move(*gpu));
         }
-        out.parts.push_back(std::move(part));
+        tmp.parts.push_back(std::move(part));
     }
-    out.loaded = !out.parts.empty();
+    tmp.loaded = !tmp.parts.empty();
+    out = std::move(tmp);
     return out.loaded;
 }
 
@@ -311,6 +319,7 @@ struct InputTracker
     bool prevZoomOut = false;
     bool prevMap = false;
     bool prevLock = false;
+    bool prevNearest = false;
     bool prevEscape = false;
     bool prevPageUp = false;
     bool prevPageDown = false;
@@ -365,6 +374,19 @@ struct UiTracker
     bool up = false, down = false, left = false, right = false;
     bool w = false, s = false, a = false;
 };
+
+// Sample held UI keys every frame, even when no panel is open, so opening
+// a panel with a key held does not synthesize a click on the first frame.
+void syncUiTracker(starforge::Application& app, UiTracker& tracker) noexcept
+{
+    tracker.up = app.isKeyDown(starforge::Key::Up);
+    tracker.down = app.isKeyDown(starforge::Key::Down);
+    tracker.left = app.isKeyDown(starforge::Key::Left);
+    tracker.right = app.isKeyDown(starforge::Key::Right);
+    tracker.w = app.isKeyDown(starforge::Key::W);
+    tracker.s = app.isKeyDown(starforge::Key::S);
+    tracker.a = app.isKeyDown(starforge::Key::A);
+}
 
 void handleUiActions(starforge::Application& app, UiTracker& tracker,
                      starforge::game::GameSimulation& simulation,
@@ -465,6 +487,58 @@ void handleUiActions(starforge::Application& app, UiTracker& tracker,
     }
 }
 
+// Game-layer laser one-shot: descending sawtooth sweep + noise bite,
+// wrapped as 16-bit mono PCM WAV. Kept here rather than in the public audio
+// API because no library consumer needs it yet (ADR-0009).
+[[nodiscard]] std::vector<std::uint8_t> makeLaserWav()
+{
+    constexpr std::uint32_t kRate = 22050;
+    constexpr float kDuration = 0.19f;
+    const std::size_t count = static_cast<std::size_t>(kRate * kDuration);
+    std::vector<std::int16_t> pcm(count);
+    float phase = 0.0f;
+    std::uint32_t rng = 0x5EED1234u;
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        const float t = static_cast<float>(i) / kRate;
+        const float frequency = 170.0f + 1500.0f * std::exp(-t * 13.0f);
+        phase += frequency / kRate;
+        phase -= std::floor(phase);
+        const float saw = phase * 2.0f - 1.0f;
+        rng = rng * 1664525u + 1013904223u;
+        const float noise = static_cast<float>(rng >> 16) / 32768.0f - 1.0f;
+        const float envelope = std::min(1.0f, t * 350.0f) * std::exp(-t * 16.0f);
+        const float sample = (saw * 0.75f + noise * 0.25f) * envelope * 0.55f;
+        pcm[i] = static_cast<std::int16_t>(std::clamp(sample, -1.0f, 1.0f) * 32767.0f);
+    }
+    const std::uint32_t dataBytes = static_cast<std::uint32_t>(pcm.size() * sizeof(std::int16_t));
+    std::vector<std::uint8_t> wav(44 + dataBytes, 0);
+    const auto put16 = [&](std::size_t offset, std::uint16_t value) {
+        wav[offset] = static_cast<std::uint8_t>(value & 0xFFu);
+        wav[offset + 1] = static_cast<std::uint8_t>(value >> 8);
+    };
+    const auto put32 = [&](std::size_t offset, std::uint32_t value) {
+        for (int b = 0; b < 4; ++b)
+            wav[offset + static_cast<std::size_t>(b)] =
+                static_cast<std::uint8_t>((value >> (b * 8)) & 0xFFu);
+    };
+    wav[0] = 'R'; wav[1] = 'I'; wav[2] = 'F'; wav[3] = 'F';
+    put32(4, 36 + dataBytes);
+    wav[8] = 'W'; wav[9] = 'A'; wav[10] = 'V'; wav[11] = 'E';
+    wav[12] = 'f'; wav[13] = 'm'; wav[14] = 't'; wav[15] = ' ';
+    put32(16, 16);
+    put16(20, 1); // PCM
+    put16(22, 1); // mono
+    put32(24, kRate);
+    put32(28, kRate * 2);
+    put16(32, 2);
+    put16(34, 16);
+    wav[36] = 'd'; wav[37] = 'a'; wav[38] = 't'; wav[39] = 'a';
+    put32(40, dataBytes);
+    std::memcpy(wav.data() + 44, pcm.data(), dataBytes);
+    return wav;
+}
+
 } // namespace
 
 int main()
@@ -563,6 +637,17 @@ int main()
         return EXIT_FAILURE;
     }
 
+    // M17.5: instanced HDR combat effects (bolts, impacts, explosions,
+    // engine plumes). Fixed capacity, event-driven, no per-frame allocation
+    // and no GPU buffer freed while a frame may still read it.
+    auto combatFx = starforge::CombatFx::create(*renderer,
+                                                {.shaderDirectory = {}, .capacity = 4096});
+    if (!combatFx)
+    {
+        logError(combatFx.error().c_str());
+        return EXIT_FAILURE;
+    }
+
     // M9.5 toon HUD draw + M12 audio for combat feedback.
     auto hud = starforge::Hud::create(*renderer, {});
     if (!hud)
@@ -593,8 +678,10 @@ int main()
         logError(audio.error().c_str());
         return EXIT_FAILURE;
     }
-    // Placeholder one-shots (no binary assets shipped).
-    const auto laserWav = starforge::generateToneWav(22050, 1, 880.0f, 0.09f, 0.35f);
+    // Placeholder one-shots (no binary assets shipped). The laser gets a
+    // dedicated generated WAV: a fast descending saw sweep with a short
+    // noise bite reads far more like a weapon than a plain 880 Hz sine.
+    const auto laserWav = makeLaserWav();
     const auto hitWav = starforge::generateToneWav(22050, 1, 220.0f, 0.16f, 0.5f);
     const auto boomWav = starforge::generateToneWav(22050, 1, 90.0f, 0.35f, 0.6f);
     const auto laserVoice = audio->loadFromMemory(laserWav);
@@ -654,36 +741,10 @@ int main()
     bool quitRequested = false;
     std::string selectedSystem = "sol";
     float cameraDist = 8.0f; // chase-camera distance (fixed for FOV zoom)
-    float shieldFlash = 0.0f; // seconds of remaining shield-hit visual
-    float explosionTimer = 0.0f; // hostile destruction effect
-    starforge::game::RawVec3f explosionPos{};
+    // M17.5 combat presentation: all transient effects live in fixed
+    // pools and are spawned from simulation events, never polled.
+    starforge::game::CombatFxState fxState;
     float cameraFov = kPi / 3.0f; // vertical FOV radians (wheel zoom)
-
-    // M17 polish: short-lived visual laser bolts (camera-relative world space,
-    // fired along the reticle ray). Gameplay damage is resolved by
-    // GameSimulation; these are purely cosmetic tracers.
-    struct LaserBolt
-    {
-        starforge::math::Vec3f position{};
-        starforge::math::Vec3f direction{0.0f, 0.0f, -1.0f};
-        float life = 0.0f;
-    };
-    std::vector<LaserBolt> laserBolts;
-    float boltCooldown = 0.0f;
-    // Incoming enemy fire tracers (ship-local space, attacker -> player).
-    struct IncomingShot
-    {
-        starforge::math::Vec3f from{};
-        float life = 0.0f;
-    };
-    std::vector<IncomingShot> incomingShots;
-    struct Fragment
-    {
-        starforge::math::Vec3f position{};
-        float scale = 1.0f;
-        float life = 0.0f;
-    };
-    std::vector<Fragment> fragments;
 
     while (!app->shouldClose() && !quitRequested)
     {
@@ -750,11 +811,19 @@ int main()
                     logError(r.error().c_str());
                     return EXIT_FAILURE;
                 }
+                if (auto e = combatFx->recreate(*renderer); !e)
+                {
+                    logError(e.error().c_str());
+                    return EXIT_FAILURE;
+                }
                 if (auto h = hud->recreate(*renderer); !h)
                 {
                     logError(h.error().c_str());
                     return EXIT_FAILURE;
                 }
+                // The old canvas owns GPU buffers that in-flight frames may
+                // still read; wait before letting its unique_ptr destroy them.
+                renderer->waitIdle();
                 uiCanvas = starforge::UiCanvas::create(*renderer, {});
                 if (!uiCanvas)
                 {
@@ -768,8 +837,6 @@ int main()
         if (!flight.paused)
         {
             time += frameDt;
-            shieldFlash = std::max(0.0f, shieldFlash - frameDt);
-            explosionTimer = std::max(0.0f, explosionTimer - frameDt);
         }
 
         // Station range for the proximity prompt (world-anchored outpost).
@@ -858,11 +925,20 @@ int main()
                 const bool lockKey = app->isKeyDown(starforge::Key::T);
                 if (lockKey && !inputTracker.prevLock)
                 {
-                    targeting.toggleLock();
-                    logInfo(targeting.hasSelection() ? "[TGT] locked nearest contact"
+                    targeting.toggleReticleLock();
+                    logInfo(targeting.hasSelection() ? "[TGT] locked hostile nearest reticle"
                                                       : "[TGT] target cleared");
                 }
                 inputTracker.prevLock = lockKey;
+                // R = nearest contact by distance; T = nearest the reticle.
+                const bool nearestKey = app->isKeyDown(starforge::Key::R);
+                if (nearestKey && !inputTracker.prevNearest && !flight.paused && !chatActive)
+                {
+                    targeting.lockNearest();
+                    logInfo(targeting.hasSelection() ? "[TGT] nearest contact locked"
+                                                     : "[TGT] no contacts");
+                }
+                inputTracker.prevNearest = nearestKey;
             }
             // Space frees the cursor so UI buttons (including the proximity
             // dock/chat prompt) can be clicked. It does not open the station
@@ -901,6 +977,7 @@ int main()
             const auto cursor = app->mousePosition();
             uiState.beginFrame(cursor.x, cursor.y,
                                app->mouseButtonPressed(starforge::MouseButton::Left));
+            syncUiTracker(*app, uiTracker);
         }
 
         // Proximity station prompt: register its two buttons before any other
@@ -1095,7 +1172,8 @@ int main()
                                                         stationRange);
                 }
             }
-            handleUiActions(*app, uiTracker, simulation, comms, stationRange);
+            if (stationOpen)
+                handleUiActions(*app, uiTracker, simulation, comms, stationRange);
         }
 
         // Interactive sector map: click a system to select it, then JUMP TO
@@ -1142,6 +1220,9 @@ int main()
             std::string reloadError;
             const bool isShip = changed == shipPath;
             auto& target = isShip ? shipModel : stationModel;
+            // Swapping a model destroys its old GPU meshes: wait for any
+            // in-flight frames before the buffers go away.
+            renderer->waitIdle();
             if (loadAuthoredModel(*toon, changed, isShip ? 1024.0f : 512.0f,
                                   target, reloadError))
             {
@@ -1151,78 +1232,6 @@ int main()
             }
             else
                 logError(("[ASSET] reload failed: " + reloadError).c_str());
-        }
-
-        // M17 polish: cosmetic tracers. Bolts live in camera-relative WORLD
-        // space and travel down the camera's optical axis, so the visible
-        // beam runs through the reticle instead of the ship's nose. The chase
-        // camera sits above the hull, so ship-forward rays used to appear to
-        // pass underneath a target centred in the crosshair.
-        if (!flight.paused)
-        {
-            const auto boltShip = world.shipTransform();
-            const auto boltQuat = starforge::math::Vec4f{
-                boltShip.orientation.x, boltShip.orientation.y,
-                boltShip.orientation.z, boltShip.orientation.w};
-            const auto boltFwd = toVec3f(forwardFromQuat(boltQuat));
-            const auto boltUp = toVec3f(upFromQuat(boltQuat));
-            // Match the render camera: eye behind/above the ship, looking at a
-            // point 10 m ahead at hull height. The optical axis is the reticle.
-            const auto boltEye = boltFwd * (-cameraDist) + boltUp * (0.31f * cameraDist);
-            const auto boltAim = starforge::math::normalize(
-                boltFwd * (10.0f + cameraDist) + boltUp * (-0.31f * cameraDist));
-            // Spawn on that axis near the hull: both tracers start by the ship
-            // and then travel exactly through screen centre at every range.
-            const auto boltOrigin = boltEye + boltAim * (cameraDist + 2.0f);
-            const auto boltBasis = matFromQuat(boltQuat);
-            const auto boltRight = starforge::math::Vec3f{
-                boltBasis.columns[0][0], boltBasis.columns[0][1], boltBasis.columns[0][2]};
-            boltCooldown = std::max(0.0f, boltCooldown - frameDt);
-            if (flight.firePrimary && boltCooldown <= 0.0f)
-            {
-                boltCooldown = 0.12f;
-                for (const float bx : {-0.28f, 0.28f})
-                    laserBolts.push_back({boltOrigin + boltRight * bx, boltAim, 1.2f});
-            }
-            // Test each tracer against nearby asteroids (both in world space).
-            const auto rocksInRange = world.visibleAsteroids(600.0);
-            for (auto& bolt : laserBolts)
-            {
-                bolt.position = bolt.position + bolt.direction * (600.0f * frameDt);
-                bolt.life -= frameDt;
-                for (const auto& rock : rocksInRange)
-                {
-                    const float dx = static_cast<float>(rock.position.x) - bolt.position.x();
-                    const float dy = static_cast<float>(rock.position.y) - bolt.position.y();
-                    const float dz = static_cast<float>(rock.position.z) - bolt.position.z();
-                    const float radius = rock.scale * 0.866f + 2.0f;
-                    if (dx * dx + dy * dy + dz * dz > radius * radius) continue;
-                    starforge::game::RawVec3d impact{};
-                    float rockScale = 0.0f;
-                    const bool destroyed = world.damageAsteroid(
-                        rock.seed, 12.0f, &impact, &rockScale);
-                    fragments.push_back({
-                        {static_cast<float>(impact.x), static_cast<float>(impact.y),
-                         static_cast<float>(impact.z)},
-                        destroyed ? rockScale * 0.4f : 0.5f, 0.45f});
-                    bolt.life = 0.0f;
-                    break;
-                }
-            }
-            laserBolts.erase(
-                std::remove_if(laserBolts.begin(), laserBolts.end(),
-                               [](const LaserBolt& b) { return b.life <= 0.0f; }),
-                laserBolts.end());
-            for (auto& fragment : fragments) fragment.life -= frameDt;
-            fragments.erase(
-                std::remove_if(fragments.begin(), fragments.end(),
-                               [](const Fragment& f) { return f.life <= 0.0f; }),
-                fragments.end());
-            for (auto& shot : incomingShots) shot.life -= frameDt;
-            incomingShots.erase(
-                std::remove_if(incomingShots.begin(), incomingShots.end(),
-                               [](const IncomingShot& s) { return s.life <= 0.0f; }),
-                incomingShots.end());
         }
 
         // M17: pick the station LOD from the real ship-to-station range.
@@ -1250,6 +1259,8 @@ int main()
             if (wanted == firstPart->activeMip) continue;
             for (auto& part : model->parts)
                 if (part.texture.mipCount() > 0) (void)part.texture.request(wanted);
+            // Mip change rebuilds the meshes; same GPU lifetime rule.
+            renderer->waitIdle();
             if (loadAuthoredModel(*toon, model->path,
                                   512.0f / std::max(0.4f, cameraFov), *model, assetError))
                 firstPart = &model->parts.front();
@@ -1287,43 +1298,178 @@ int main()
                 {flight.pitchRate, flight.yawRate, flight.rollRate});
             world.step(kSimStep);
 
+            const auto boltQuatShip = starforge::math::Vec4f{
+                ship.orientation.x, ship.orientation.y,
+                ship.orientation.z, ship.orientation.w};
+            const auto boltUpShip = upFromQuat(boltQuatShip);
+
+            // M17.5: reticle-aligned bolt geometry. The cosmetic tracers
+            // travel down the camera's optical axis so they pass through the
+            // crosshair rather than under the ship's nose.
+            const auto boltF = toVec3f(forward);
+            const auto boltU = toVec3f(boltUpShip);
+            const auto boltEye = boltF * (-cameraDist) + boltU * (0.31f * cameraDist);
+            const auto boltAim = starforge::math::normalize(
+                boltF * (10.0f + cameraDist) + boltU * (-0.31f * cameraDist));
+            const auto boltOrigin = boltEye + boltAim * (cameraDist + 2.0f);
+            const auto boltBasis = matFromQuat(boltQuatShip);
+            const auto boltRight = starforge::math::Vec3f{
+                boltBasis.columns[0][0], boltBasis.columns[0][1], boltBasis.columns[0][2]};
+
+            // Resolve the instant asteroid hit for a fired shot, so striking
+            // a rock still throws sparks without an unbounded bolt vector.
+            const auto applyAsteroidBeam = [&](const starforge::math::Vec3f& origin,
+                                               const starforge::math::Vec3f& aim) {
+                const auto rocksInRange = world.visibleAsteroids(600.0f);
+                const starforge::game::RawTransform* nearest = nullptr;
+                float nearestT = 1.0e9f;
+                for (const auto& rock : rocksInRange)
+                {
+                    const auto rp = starforge::math::Vec3f{
+                        static_cast<float>(rock.position.x),
+                        static_cast<float>(rock.position.y),
+                        static_cast<float>(rock.position.z)};
+                    const auto toRock = rp - origin;
+                    const float along = toRock.x() * aim.x() + toRock.y() * aim.y() +
+                                        toRock.z() * aim.z();
+                    if (along < 0.0f || along > 600.0f || along >= nearestT) continue;
+                    const auto closest = origin + aim * along;
+                    const auto miss = rp - closest;
+                    const float radius = rock.scale * 0.866f + 2.0f;
+                    if (miss.x() * miss.x() + miss.y() * miss.y() + miss.z() * miss.z() >
+                        radius * radius)
+                        continue;
+                    nearest = &rock;
+                    nearestT = along;
+                }
+                if (!nearest) return;
+                starforge::game::RawVec3d impact{};
+                float scale = 0.0f;
+                const bool destroyed = world.damageAsteroid(
+                    nearest->seed, 12.0f, &impact, &scale);
+                // Only a destroyed rock throws debris; a glancing hit must
+                // not spray sparks on every shot in a dense field.
+                if (destroyed)
+                    fxState.onImpact(
+                        {static_cast<float>(impact.x), static_cast<float>(impact.y),
+                         static_cast<float>(impact.z)},
+                        starforge::math::Vec4f{1.0f, 0.62f, 0.25f, 1.6f}, false);
+            };
+
             // M15 combat slice: advance hostile AI, weapons and damage.
             const starforge::game::RawVec3f shipForward{
                 static_cast<float>(forward.x()), static_cast<float>(forward.y()),
                 static_cast<float>(forward.z())};
+            // Docked / UI mode: the left mouse button belongs to the station
+            // panel, not the guns. Suppress weapon input at the simulation
+            // boundary rather than clearing flight state (so releasing the
+            // button after undocking still behaves normally).
+            const bool combatInput = !stationOpen && !mapVisible &&
+                                     !chatActive && !flight.paused &&
+                                     flight.mode == starforge::game::FlightMode::Flight;
+            // Damage is gated on the actual reticle ray (camera origin and
+            // optical axis), not the ship's nose. This keeps a locked target
+            // from being hit while the crosshair is pointed somewhere else.
+            const starforge::game::RawVec3f reticleOrigin{
+                boltEye.x(), boltEye.y(), boltEye.z()};
+            const starforge::game::RawVec3f reticleAim{
+                boltAim.x(), boltAim.y(), boltAim.z()};
             for (const auto& event : simulation.step(kSimStep, shipForward,
-                                                     flight.firePrimary, flight.fireSecondary))
+                                                     combatInput && flight.firePrimary,
+                                                     combatInput && flight.fireSecondary,
+                                                     reticleOrigin, reticleAim))
             {
                 switch (event.type)
                 {
                 case starforge::game::GameEvent::Type::WeaponFired:
+                {
                     if (laserVoice.has_value()) audio->play(*laserVoice, true);
+                    // Two barrels, symmetric around the reticle. HDR colour
+                    // (>1) drives the bloom pass; the shader drives the core
+                    // towards white.
+                    const bool secondary = event.text == "secondary";
+                    const auto boltColor = secondary
+                        ? starforge::math::Vec4f{1.0f, 0.72f, 0.25f, 4.5f}
+                        : starforge::math::Vec4f{0.35f, 0.85f, 1.0f, 4.0f};
+                    for (const float bx : {-0.28f, 0.28f})
+                    {
+                        const auto origin = boltOrigin + boltRight * bx;
+                        fxState.onWeaponFired(origin, boltAim, boltColor,
+                                              secondary ? 0.7f : 0.42f,
+                                              secondary ? 9.0f : 6.0f);
+                        applyAsteroidBeam(origin, boltAim);
+                    }
                     break;
+                }
                 case starforge::game::GameEvent::Type::PlayerShieldHit:
                 case starforge::game::GameEvent::Type::PlayerHullHit:
-                    shieldFlash = 0.35f;
+                {
                     toasts.push(starforge::game::CommsChannel::Combat, "", "SHIELD HIT", 2.0f);
-                    // Show the incoming tracer from the NPC that fired.
                     for (const auto& attacker : simulation.npcs())
-                        if (attacker.alive && attacker.id == event.sourceId)
-                        {
-                            incomingShots.push_back({
-                                {attacker.position.x, attacker.position.y, attacker.position.z},
-                                0.45f});
-                            break;
-                        }
+                    {
+                        if (!attacker.alive || attacker.id != event.sourceId) continue;
+                        const auto from = starforge::math::Vec3f{
+                            attacker.position.x, attacker.position.y, attacker.position.z};
+                        const auto toward = starforge::math::normalize(starforge::math::Vec3f{-from.x(), -from.y(), -from.z()});
+                        fxState.onWeaponFired(from, toward,
+                                              starforge::math::Vec4f{1.0f, 0.28f, 0.16f, 2.2f},
+                                              0.24f, 3.0f);
+                        break;
+                    }
+                    fxState.onShieldHit({}, starforge::math::Vec4f{0.3f, 0.85f, 1.0f, 1.8f},
+                                        std::max(1.0f, event.amount * 0.12f));
                     if (hitVoice.has_value()) audio->play(*hitVoice, true);
                     break;
+                }
+                case starforge::game::GameEvent::Type::PlayerDestroyed:
+                {
+                    toasts.push(starforge::game::CommsChannel::Combat, "",
+                                "SHIP DESTROYED - PRESS P TO REPAIR", 5.0f);
+                    comms.push(starforge::game::CommsChannel::Combat, "system",
+                               "Hull destroyed - use the pause menu to repair");
+                    std::array<starforge::math::Vec3f, 6> wreck{};
+                    for (std::size_t i = 0; i < wreck.size(); ++i)
+                    {
+                        const float a = static_cast<float>(i) * 1.0471976f;
+                        wreck[i] = {std::cos(a) * 2.0f, std::sin(a) * 0.8f,
+                                    std::sin(a) * 2.0f};
+                    }
+                    fxState.onShipDestroyed({}, 7.0f,
+                                            starforge::math::Vec4f{1.0f, 0.5f, 0.2f, 2.6f},
+                                            wreck, true);
+                    break;
+                }
+                case starforge::game::GameEvent::Type::HostileHit:
+                {
+                    if (event.amount <= 0.0f) break;
+                    const auto victim = npcPositionById(event.sourceId);
+                    fxState.onImpact({victim.x, victim.y, victim.z},
+                                     starforge::math::Vec4f{1.0f, 0.75f, 0.35f, 2.0f}, true);
+                    break;
+                }
                 case starforge::game::GameEvent::Type::HostileDestroyed:
+                {
                     comms.push(starforge::game::CommsChannel::Combat, "combat",
                                (event.sourceId.empty() ? std::string("NPC")
                                                        : event.sourceId + " destroyed"));
                     toasts.push(starforge::game::CommsChannel::Combat, "", "TARGET DESTROYED", 3.0f);
-                    explosionTimer = 1.0f;
-                    explosionPos = npcPositionById(event.sourceId);
+                    const auto pos = npcPositionById(event.sourceId);
+                    const auto centre = starforge::math::Vec3f{pos.x, pos.y, pos.z};
+                    std::array<starforge::math::Vec3f, 8> debris{};
+                    for (std::size_t i = 0; i < debris.size(); ++i)
+                    {
+                        const float a = static_cast<float>(i) * 0.785398f;
+                        debris[i] = centre + starforge::math::Vec3f{
+                            std::cos(a) * 2.2f, std::sin(a * 1.7f) * 1.1f,
+                            std::sin(a) * 2.2f};
+                    }
+                    fxState.onShipDestroyed(centre, 6.0f,
+                                            starforge::math::Vec4f{1.0f, 0.45f, 0.18f, 2.4f},
+                                            debris, false);
                     if (boomVoice.has_value()) audio->play(*boomVoice, true);
                     logInfo(("[COMBAT] NPC destroyed: " + event.sourceId).c_str());
                     break;
+                }
                 default:
                     break;
                 }
@@ -1400,21 +1546,86 @@ int main()
 
         // M16.5: rebuild target contacts from every live NPC each frame.
         {
+            using Relation = starforge::gameplay::ui_relation::Relation;
+            // NPC positions are camera-relative WORLD offsets. "Nearest the
+            // reticle" needs SHIP-LOCAL directions, otherwise a turn makes
+            // T lock targets behind the nose.
+            const auto contactShip = world.shipTransform();
+            const auto contactQuat = starforge::math::Vec4f{
+                contactShip.orientation.x, contactShip.orientation.y,
+                contactShip.orientation.z, contactShip.orientation.w};
+            const auto contactBasis = matFromQuat(contactQuat);
+            const auto contactRight = starforge::math::Vec3f{
+                contactBasis.columns[0][0], contactBasis.columns[0][1],
+                contactBasis.columns[0][2]};
+            const auto contactUp = starforge::math::Vec3f{
+                contactBasis.columns[1][0], contactBasis.columns[1][1],
+                contactBasis.columns[1][2]};
+            const auto contactForward = forwardFromQuat(contactQuat);
+            const auto toShipLocal = [&](const starforge::math::Vec3f& v) {
+                return starforge::math::Vec3f{
+                    v.x() * contactRight.x() + v.y() * contactRight.y() +
+                        v.z() * contactRight.z(),
+                    v.x() * contactUp.x() + v.y() * contactUp.y() + v.z() * contactUp.z(),
+                    v.x() * contactForward.x() + v.y() * contactForward.y() +
+                        v.z() * contactForward.z()};
+            };
+
             std::vector<starforge::game::TargetContact> contacts;
             for (const auto& npc : simulation.npcs())
             {
                 if (!npc.alive) continue;
-                const float dx = npc.position.x, dy = npc.position.y, dz = npc.position.z;
-                contacts.push_back({npc.id, npc.hostile,
-                                    std::sqrt(dx * dx + dy * dy + dz * dz),
-                                    npc.shield, npc.hull});
+                const auto p = starforge::gameplay::ui_targeting::Vec3{
+                    npc.position.x, npc.position.y, npc.position.z};
+                const float distance = starforge::gameplay::ui_targeting::length(p);
+                const auto local = toShipLocal({npc.position.x, npc.position.y, npc.position.z});
+                const auto direction = distance > 1e-3f
+                    ? starforge::gameplay::ui_targeting::Vec3{
+                          local.x() / distance, local.y() / distance, local.z() / distance}
+                    : starforge::gameplay::ui_targeting::Vec3{};
+                contacts.push_back({
+                    .id = npc.id,
+                    .name = npc.name.empty() ? npc.id : npc.name,
+                    .relation = npc.relation,
+                    .hostile = npc.hostile,
+                    .distance = distance,
+                    .shield = npc.shield,
+                    .hull = npc.hull,
+                    .direction = direction,
+                    .position = p,
+                    .velocity = {npc.velocity.x, npc.velocity.y, npc.velocity.z},
+                });
             }
-            contacts.push_back({"station-a", false, 1500.0f, 0.0f, 0.0f});
+            // The station is a navigational contact at its real world
+            // position, not the old hardcoded offset inside the cockpit.
+            // RawTransform::position is already in world metres.
+            const auto stationOffset = starforge::math::Vec3f{
+                static_cast<float>(kStationWorld.x - contactShip.position.x),
+                static_cast<float>(kStationWorld.y - contactShip.position.y),
+                static_cast<float>(kStationWorld.z - contactShip.position.z)};
+            const float stationDistance = starforge::gameplay::ui_targeting::length(
+                {stationOffset.x(), stationOffset.y(), stationOffset.z()});
+            const auto stationLocal = toShipLocal(stationOffset);
+            contacts.push_back({.id = "station-a", .name = "Station A",
+                                .relation = Relation::Neutral, .hostile = false,
+                                .distance = stationDistance,
+                                .direction = stationDistance > 1e-3f
+                                    ? starforge::gameplay::ui_targeting::Vec3{
+                                          stationLocal.x() / stationDistance,
+                                          stationLocal.y() / stationDistance,
+                                          stationLocal.z() / stationDistance}
+                                    : starforge::gameplay::ui_targeting::Vec3{},
+                                .position = {stationOffset.x(), stationOffset.y(),
+                                             stationOffset.z()}});
             targeting.setContacts(std::move(contacts));
-            targeting.tick(frameDt, flight.firePrimary && !flight.paused);
-            // Point the ship's weapons at whatever the player has selected.
+            targeting.tick(frameDt, flight.firePrimary && !flight.paused &&
+                                    !stationOpen && !flight.paused &&
+                                    flight.mode == starforge::game::FlightMode::Flight);
+            // Identification allows locking allies/neutrals/stations, but
+            // never hand a non-hostile id to weapons as a firing solution.
             const auto* selectedContact = targeting.selected();
-            simulation.setTargetId(selectedContact ? selectedContact->id : std::string{});
+            simulation.setTargetId(selectedContact && selectedContact->hostile
+                                       ? selectedContact->id : std::string{});
         }
 
         hudTimer += frameDt;
@@ -1482,10 +1693,14 @@ int main()
         const starforge::math::Vec3f shipForward = toVec3f(forwardFromQuat(shipQuat));
         const starforge::math::Vec3f shipUp = toVec3f(upFromQuat(shipQuat));
         // Camera-relative offsets (ship at origin); scroll wheel zooms.
-        const starforge::math::Vec3f eyeOffset = {
+        // M17.5c: explosion camera shake is scaled by size and distance and
+        // decays with the event, so it never accumulates permanently.
+        const starforge::math::Vec3f baseEyeOffset = {
             -shipForward.x() * cameraDist + shipUp.x() * (cameraDist * 0.31f),
             -shipForward.y() * cameraDist + shipUp.y() * (cameraDist * 0.31f),
             -shipForward.z() * cameraDist + shipUp.z() * (cameraDist * 0.31f)};
+        const auto shake = fxState.cameraShake(baseEyeOffset);
+        const starforge::math::Vec3f eyeOffset = baseEyeOffset + shake;
         const starforge::math::Vec3f lookAhead = {
             shipForward.x() * 10.0f, shipForward.y() * 10.0f, shipForward.z() * 10.0f};
 
@@ -1580,98 +1795,28 @@ int main()
             r.context.lightDirectionView = starforge::math::normalize(
                 starforge::math::Vec3f{npcLight4.x(), npcLight4.y(), npcLight4.z()});
             r.context.resolution = {static_cast<float>(size.width), static_cast<float>(size.height)};
-            if (npc.hostile)
-            {
-                r.params.baseColor = {1.0f, 0.38f, 0.20f, 1.0f}; // bright hostile hull
-                r.params.shadowColor = {0.35f, 0.10f, 0.05f, 1.0f};
-                r.params.emissiveColor = {0.2f, 0.05f, 0.5f, 0.6f};
-            }
-            else
-            {
-                r.params.baseColor = {0.30f, 0.95f, 1.0f, 1.0f}; // bright neutral hull
-                r.params.shadowColor = {0.06f, 0.25f, 0.30f, 1.0f};
-                r.params.emissiveColor = {0.05f, 0.2f, 0.28f, 0.4f};
-            }
+            // M17.5d: faction look. Hull, the graphic ink outline (derived
+            // from shadowColor in toon.slang), nav/emissive glow and engine
+            // colour all use the same relation palette as the HUD.
+            const auto faction = starforge::gameplay::ui_relation::color(npc.relation);
+            r.params.baseColor = {faction.r, faction.g, faction.b, 1.0f};
+            r.params.shadowColor = {faction.r * 0.22f, faction.g * 0.22f,
+                                    faction.b * 0.22f, 1.0f};
+            r.params.emissiveColor = {faction.r * 0.6f, faction.g * 0.6f,
+                                      faction.b * 0.6f, 1.4f}; // HDR nav glow
             r.params.bandCount = 3.0f;
             r.params.rimStrength = 0.7f;
             r.params.outlineWidth = 1.5f;
             r.params.capabilities = npc.shield > 0.0f ? 2u : 0u; // fresnel shield
-            r.params.fresnelColor = {0.35f, 0.8f, 1.0f, 0.45f};
+            r.params.fresnelColor = {faction.r, faction.g, faction.b, 0.45f};
             npcRenders.push_back(std::move(r));
         }
 
         // Visible combat feedback (M15.0.5): emissive muzzle flash while
         // firing and a fresnel shield bubble when the player is hit.
-        starforge::Toon::Context muzzleContext;
-        starforge::Toon::Params muzzleParams;
-        if (flight.firePrimary)
-        {
-            auto mm = starforge::math::Mat4f(1.0f);
-            mm.columns[0][0] = mm.columns[1][1] = mm.columns[2][2] = 0.45f;
-            mm.columns[3] = {shipForward.x() * 8.0f, shipForward.y() * 8.0f,
-                             shipForward.z() * 8.0f, 1.0f};
-            muzzleContext.viewProj = viewProj * mm;
-            muzzleContext.modelView = view * mm;
-            muzzleContext.lightDirectionView = toonContext.lightDirectionView;
-            muzzleContext.resolution = {static_cast<float>(size.width), static_cast<float>(size.height)};
-            muzzleParams.baseColor = {1.0f, 0.8f, 0.2f, 1.0f};
-            muzzleParams.capabilities = 1u; // emissive
-            muzzleParams.emissiveColor = {2.5f, 1.6f, 0.35f, 1.0f};
-            muzzleParams.outlineWidth = 0.0f;
-        }
-        starforge::Toon::Context flashContext;
-        starforge::Toon::Params flashParams;
-        if (shieldFlash > 0.0f)
-        {
-            auto fm = starforge::math::Mat4f(1.0f);
-            // Keep the bubble well inside the 8 m chase-camera distance.
-            const float s = 1.7f + (0.35f - shieldFlash) * 1.0f;
-            fm.columns[0][0] = fm.columns[1][1] = fm.columns[2][2] = s;
-            flashContext.viewProj = viewProj * fm;
-            flashContext.modelView = view * fm;
-            flashContext.lightDirectionView = toonContext.lightDirectionView;
-            flashContext.resolution = {static_cast<float>(size.width), static_cast<float>(size.height)};
-            // Additive glow on a spherical mesh: a soft cyan shell rather
-            // than an opaque blue cube occluding the ship.
-            const float strength = std::clamp(shieldFlash / 0.35f, 0.0f, 1.0f);
-            // Zero every diffuse term: only the faint emissive shell shows.
-            flashParams.baseColor = {0.0f, 0.0f, 0.0f, 1.0f};
-            flashParams.shadowColor = {0.0f, 0.0f, 0.0f, 1.0f};
-            flashParams.midColor = {0.0f, 0.0f, 0.0f, 0.0f};
-            flashParams.rimStrength = 0.0f;
-            flashParams.bandCount = 2.0f;
-            flashParams.capabilities = 1u; // additive glow, no depth write
-            // The bubble is only a couple of metres from the chase camera,
-            // so its near hemisphere covers a large part of the frame. The
-            // toon shader clamps the emissive alpha to 1.0, so the flash
-            // strength has to be baked into the emissive *colour* - a full
-            // strength shell washed the whole view out in cyan.
-            flashParams.emissiveColor = {0.025f * strength, 0.090f * strength,
-                                         0.240f * strength, 1.0f};
-            flashParams.outlineWidth = 0.0f;
-        }
-
-        // Stylized destruction burst: expanding emissive shells at the last
-        // hostile position.
-        starforge::Toon::Context boomContext;
-        starforge::Toon::Params boomParams;
-        if (explosionTimer > 0.0f)
-        {
-            const float progress = 1.0f - explosionTimer;
-            auto bm = starforge::math::Mat4f(1.0f);
-            const float s = 1.0f + progress * 7.0f;
-            bm.columns[0][0] = bm.columns[1][1] = bm.columns[2][2] = s;
-            bm.columns[3] = {explosionPos.x, explosionPos.y, explosionPos.z, 1.0f};
-            boomContext.viewProj = viewProj * bm;
-            boomContext.modelView = view * bm;
-            boomContext.lightDirectionView = toonContext.lightDirectionView;
-            boomContext.resolution = {static_cast<float>(size.width), static_cast<float>(size.height)};
-            boomParams.baseColor = {1.0f, 0.55f, 0.12f, 1.0f};
-            boomParams.capabilities = 1u; // emissive
-            boomParams.emissiveColor = {3.0f * explosionTimer, 1.2f * explosionTimer,
-                                        0.2f * explosionTimer, 1.0f};
-            boomParams.outlineWidth = 0.0f;
-        }
+        // M17.5: all transient combat feedback (muzzle, bolts, impacts,
+        // shield ripple and layered explosions) is now issued through the
+        // single instanced HDR effect draw below.
 
         // --- Asteroid field (M15.0.3): procedural world-space field +
         // authored near cluster, drawn as cratered toon rocks.
@@ -1886,6 +2031,26 @@ int main()
         // replacing the buffer underneath frames that are still in flight,
         // which faults the GPU.
         toon->beginFrame();
+        // M17.5: engine plumes are continuous state, not events. Derive them
+        // from the ship pose AFTER the simulation step, then advance all
+        // effect pools once so plumes, cores and event sparks share the
+        // same frame's transform (no one-frame lag during fast turns).
+        {
+            const auto shipModel = matFromQuat(shipQuat);
+            const auto toWorld = [&](float x, float y, float z) {
+                const auto v = shipModel * starforge::math::Vec4f{x, y, z, 1.0f};
+                return starforge::math::Vec3f{v.x(), v.y(), v.z()};
+            };
+            const float power = std::clamp(flight.throttle * (flight.boost ? 1.9f : 1.0f),
+                                           0.0f, 1.0f);
+            fxState.setEngines(
+                toWorld(-0.42f, 0.02f, 2.12f), toWorld(0.42f, 0.02f, 2.12f),
+                toWorld(0.0f, 0.0f, 1.0f),
+                starforge::math::Vec4f{0.12f, 0.55f, 1.0f, 1.0f},
+                power, flight.boost, time);
+        }
+        fxState.update(frameDt);
+
         auto frame = renderer->renderFrame(starContext.clearColor, [&](starforge::FrameContext& fc) {
             starfield->record(fc, starContext, sunBillboardParams);
             nebula->record(fc, nebContext, nebParams);
@@ -1965,142 +2130,154 @@ int main()
                     toon->recordMesh(fc, stationContext, params, mesh);
                 }
             }
-            // M17 polish: thrusters follow throttle level. One press of W/S
-            // raises throttle to 25%, which shows a small persistent plume;
-            // it grows with power and disappears entirely at 0%.
-            const bool thrustersEngaged = !flight.paused && flight.throttle > 0.01f;
-            if (thrustersEngaged)
+            // One instanced additive draw for every transient combat effect.
             {
-                const float power = std::clamp(flight.throttle, 0.0f, 1.0f);
-                auto drawGlow = [&](float px, float py, float pz,
-                                    float sx, float sy, float sz,
-                                    float r, float g, float b, float intensity) {
-                    auto transform = starforge::math::Mat4f(1.0f);
-                    transform.columns[0][0] = sx;
-                    transform.columns[1][1] = sy;
-                    transform.columns[2][2] = sz;
-                    transform.columns[3] = {px, py, pz, 1.0f};
-                    starforge::Toon::Context glowContext;
-                    glowContext.viewProj = viewProj * model * transform;
-                    glowContext.modelView = view * model * transform;
-                    glowContext.lightDirectionView = toonContext.lightDirectionView;
-                    glowContext.resolution = toonContext.resolution;
-                    starforge::Toon::Params glowParams;
-                    glowParams.capabilities = 1u; // additive glow
-                    glowParams.baseColor = {0.02f, 0.05f, 0.10f, 1.0f};
-                    glowParams.emissiveColor = {r, g, b, intensity};
-                    glowParams.outlineWidth = 0.0f;
-                    toon->record(fc, glowContext, glowParams);
-                };
+                starforge::CombatFx::RenderContext fxContext;
+                fxContext.viewProj = viewProj;
+                // Billboards must follow the VIEW basis, not the hull's: the
+                // chase camera sits above and behind the ship and pitches
+                // down, so its up/right differ from the ship rotation.
+                // Rows of the view matrix are the camera axes in world space.
+                fxContext.cameraRight = {view.columns[0][0], view.columns[1][0],
+                                         view.columns[2][0], 0.0f};
+                fxContext.cameraUp = {view.columns[0][1], view.columns[1][1],
+                                      view.columns[2][1], 0.0f};
+                fxContext.resolution = {static_cast<float>(size.width),
+                                        static_cast<float>(size.height)};
+                fxContext.cameraPosition = eyeOffset;
+                const auto& fxInstances = fxState.instances();
+                combatFx->record(fc, fxContext, fxInstances.data(),
+                                 static_cast<std::uint32_t>(fxInstances.size()));
+            }
 
-                // plume scale grows with throttle: short at 25%, long at 100%.
-                const float plumeLength = 0.35f + power * 2.2f;
-                const float plumeBrightness = 0.35f + power * 0.75f;
-                for (const float ex : {-0.42f, 0.42f})
-                {
-                    const float flicker = 0.92f + 0.08f * std::sin(time * 27.0f);
-                    drawGlow(ex, 0.02f, 2.12f, 0.38f, 0.38f, 0.24f,
-                              0.03f, 0.32f, 1.0f, plumeBrightness * flicker);
-                    constexpr int kSegments = 10;
-                    for (int segment = 0; segment < kSegments; ++segment)
-                    {
-                        const float t = static_cast<float>(segment) / (kSegments - 1);
-                        const float width = (0.38f * (1.0f - t) + 0.05f) * (0.6f + 0.4f * power);
-                        const float length = plumeLength / kSegments + 0.08f;
-                        const float z = 2.20f + static_cast<float>(segment) * (plumeLength / kSegments);
-                        const float intensity = (0.55f * (1.0f - t) + 0.02f) * plumeBrightness * flicker;
-                        drawGlow(ex, 0.02f, z, width, width, length,
-                                  0.02f + 0.03f * t, 0.22f + 0.10f * t, 1.0f, intensity);
-                    }
-                }
-            }
-            // Cyan player tracers, oriented along their actual flight vector.
-            auto orientBeam = [](starforge::math::Mat4f& matrix,
-                                 const starforge::math::Vec3f& direction,
-                                 const starforge::math::Vec3f& position,
-                                 float length) {
-                const auto fwd = starforge::math::normalize(direction);
-                auto right = starforge::math::cross(fwd, starforge::math::Vec3f{0.0f, 1.0f, 0.0f});
-                right = starforge::math::length(right) > 1e-4f
-                    ? starforge::math::normalize(right) : starforge::math::Vec3f{1.0f, 0.0f, 0.0f};
-                const auto up = starforge::math::cross(right, fwd);
-                matrix = starforge::math::Mat4f(1.0f);
-                matrix.columns[0] = {right.x() * 0.22f, right.y() * 0.22f, right.z() * 0.22f, 0.0f};
-                matrix.columns[1] = {up.x() * 0.22f, up.y() * 0.22f, up.z() * 0.22f, 0.0f};
-                matrix.columns[2] = {-fwd.x() * length, -fwd.y() * length, -fwd.z() * length, 0.0f};
-                matrix.columns[3] = {position.x(), position.y(), position.z(), 1.0f};
-            };
-            for (const auto& bolt : laserBolts)
-            {
-                starforge::math::Mat4f boltMatrix;
-                orientBeam(boltMatrix, bolt.direction, bolt.position, 2.0f);
-                starforge::Toon::Context boltContext;
-                // Bolts are already in world space - applying `model` here
-                // double-transformed them and pushed the beam off the reticle.
-                boltContext.viewProj = viewProj * boltMatrix;
-                boltContext.modelView = view * boltMatrix;
-                boltContext.lightDirectionView = toonContext.lightDirectionView;
-                boltContext.resolution = toonContext.resolution;
-                starforge::Toon::Params boltParams;
-                boltParams.capabilities = 1u;
-                boltParams.baseColor = {0.03f, 0.06f, 0.12f, 1.0f};
-                boltParams.emissiveColor = {0.12f, 0.6f, 1.0f, 0.55f};
-                boltParams.outlineWidth = 0.0f;
-                toon->record(fc, boltContext, boltParams);
-            }
-            // Asteroid impact / fragmentation sparks.
-            for (const auto& fragment : fragments)
-            {
-                const float shrink = std::clamp(fragment.life / 0.45f, 0.0f, 1.0f);
-                auto fm = starforge::math::Mat4f(1.0f);
-                const float size = fragment.scale * shrink;
-                fm.columns[0][0] = size;
-                fm.columns[1][1] = size;
-                fm.columns[2][2] = size;
-                fm.columns[3] = {fragment.position.x(), fragment.position.y(),
-                                 fragment.position.z(), 1.0f};
-                starforge::Toon::Context fctx;
-                fctx.viewProj = viewProj * fm;
-                fctx.modelView = view * fm;
-                fctx.lightDirectionView = toonContext.lightDirectionView;
-                fctx.resolution = toonContext.resolution;
-                starforge::Toon::Params fp;
-                fp.capabilities = 1u;
-                fp.baseColor = {0.12f, 0.08f, 0.04f, 1.0f};
-                fp.emissiveColor = {1.0f, 0.55f, 0.18f, shrink * 0.8f};
-                fp.outlineWidth = 0.0f;
-                toon->record(fc, fctx, fp);
-            }
-            // Enemy fire: red tracers from the attacker toward the player.
-            for (const auto& shot : incomingShots)
-            {
-                const auto toPlayer = starforge::math::Vec3f{
-                    -shot.from.x(), -shot.from.y(), -shot.from.z()};
-                starforge::math::Mat4f shotMatrix;
-                orientBeam(shotMatrix, toPlayer, shot.from,
-                           starforge::math::length(toPlayer));
-                starforge::Toon::Context shotContext;
-                shotContext.viewProj = viewProj * model * shotMatrix;
-                shotContext.modelView = view * model * shotMatrix;
-                shotContext.lightDirectionView = toonContext.lightDirectionView;
-                shotContext.resolution = toonContext.resolution;
-                starforge::Toon::Params shotParams;
-                shotParams.capabilities = 1u;
-                shotParams.baseColor = {0.10f, 0.02f, 0.01f, 1.0f};
-                shotParams.emissiveColor = {0.9f, 0.18f, 0.08f,
-                                            std::min(1.0f, shot.life * 4.0f)};
-                shotParams.outlineWidth = 0.0f;
-                toon->record(fc, shotContext, shotParams);
-            }
             if (npcFighter)
                 for (const auto& r : npcRenders)
                     toon->recordMesh(fc, r.context, r.params, *npcFighter);
             else
                 for (const auto& r : npcRenders) toon->record(fc, r.context, r.params);
-            if (flight.firePrimary) toon->record(fc, muzzleContext, muzzleParams);
-            if (shieldFlash > 0.0f && shieldMesh)
-                toon->recordMesh(fc, flashContext, flashParams, *shieldMesh);
-            if (explosionTimer > 0.0f) toon->record(fc, boomContext, boomParams);
+
+            // M17.5: target portrait. Render the locked contact's own mesh
+            // into a small sub-viewport of the HDR scene - NPC fighters and
+            // the station alike - so the target panel shows what you are
+            // actually looking at, not just two numbers. The sub-viewport
+            // writes a near depth so the portrait draws in front of the
+            // world; the UI panel leaves this area unfilled.
+            const auto* portraitSelection = targeting.selected();
+            if (portraitSelection)
+            {
+                const starforge::game::NpcInfo* portraitNpc = nullptr;
+                for (const auto& npc : simulation.npcs())
+                    if (npc.alive && npc.id == portraitSelection->id)
+                    {
+                        portraitNpc = &npc;
+                        break;
+                    }
+                const bool stationPortrait = portraitSelection->id == "station-a" &&
+                                             stationModel.loaded;
+                const bool fighterPortrait = portraitNpc != nullptr &&
+                                             npcFighter.has_value();
+                if (fighterPortrait || stationPortrait)
+                {
+                    const float panelX = std::max(8.0f, static_cast<float>(size.width) - 510.0f);
+                    const float panelY = 18.0f;
+                    const float portraitX = panelX + 8.0f;
+                    const float portraitY = panelY + 10.0f;
+                    const float portraitW = 130.0f;
+                    const float portraitH = 130.0f;
+                    const float screenW = static_cast<float>(size.width);
+                    const float screenH = static_cast<float>(size.height);
+                    const float sx = portraitW / screenW * 2.0f;
+                    const float sy = portraitH / screenH * 2.0f;
+                    const float ox = ((portraitX + portraitW * 0.5f) / screenW) * 2.0f - 1.0f;
+                    const float oy = 1.0f - ((portraitY + portraitH * 0.5f) / screenH) * 2.0f;
+
+                    auto subViewport = starforge::math::Mat4f(1.0f);
+                    subViewport.columns[0] = {sx, 0.0f, 0.0f, 0.0f};
+                    subViewport.columns[1] = {0.0f, sy, 0.0f, 0.0f};
+                    subViewport.columns[2] = {0.0f, 0.0f, 0.001f, 0.0f};
+                    subViewport.columns[3] = {ox, oy, 0.01f, 1.0f};
+
+                    // 3/4 view of the target. The station is roughly 2.5x
+                    // the fighter's native size, so shrink it to frame both
+                    // similarly inside the square window.
+                    const auto orbit = time * 0.6f;
+                    const auto portraitEye = starforge::math::Vec3f{
+                        std::sin(orbit) * 10.0f, 4.0f, std::cos(orbit) * 10.0f};
+                    const auto portraitView = starforge::math::lookAt(portraitEye,
+                        starforge::math::Vec3f{0.0f, 0.0f, 0.0f},
+                        starforge::math::Vec3f{0.0f, 1.0f, 0.0f});
+                    const auto portraitProj = starforge::math::perspectiveVulkan(
+                        0.8f, portraitW / portraitH, 0.1f, 100.0f);
+                    auto portraitModel = starforge::math::Mat4f(1.0f);
+                    const float modelScale = stationPortrait ? 0.42f : 1.15f;
+                    portraitModel.columns[0][0] = portraitModel.columns[1][1] =
+                        portraitModel.columns[2][2] = modelScale;
+                    const auto modelView = portraitView * portraitModel;
+
+                    starforge::Toon::Context portraitContext;
+                    portraitContext.viewProj = subViewport * portraitProj * modelView;
+                    portraitContext.modelView = modelView;
+                    const auto lightView = modelView * starforge::math::Vec4f{0.4f, 0.6f, 0.8f, 0.0f};
+                    portraitContext.lightDirectionView = starforge::math::normalize(
+                        starforge::math::Vec3f{lightView.x(), lightView.y(), lightView.z()});
+                    // Outline width is expressed in these units; using the full
+                    // screen size here would make the ink 6-10x too thick
+                    // relative to the shrunken silhouette.
+                    portraitContext.resolution = {portraitW, portraitH};
+
+                    if (fighterPortrait)
+                    {
+                        starforge::Toon::Params portraitParams;
+                        const auto faction = starforge::gameplay::ui_relation::color(
+                            portraitSelection->relation);
+                        // Render brighter than final: the UI pass lays a 50%
+                        // dark veil over the portrait window to mute the
+                        // space background, so the ship is pre-boosted.
+                        portraitParams.baseColor = {faction.r * 1.9f, faction.g * 1.9f,
+                                                     faction.b * 1.9f, 1.0f};
+                        portraitParams.shadowColor = {faction.r * 0.5f, faction.g * 0.5f,
+                                                       faction.b * 0.5f, 1.0f};
+                        portraitParams.emissiveColor = {faction.r * 1.9f, faction.g * 1.9f,
+                                                         faction.b * 1.9f, 3.4f};
+                        portraitParams.outlineWidth = 1.2f;
+                        portraitParams.bandCount = 3.0f;
+                        portraitParams.rimStrength = 0.6f;
+                        toon->recordMesh(fc, portraitContext, portraitParams, *npcFighter);
+                    }
+                    else
+                    {
+                        for (const auto& part : stationModel.parts)
+                        {
+                            auto params = makeToonParams(part.material,
+                                starforge::MaterialVariant::Default);
+                            // Same veil compensation as the fighter portrait.
+                            params.baseColor = {params.baseColor.x() * 1.9f,
+                                                params.baseColor.y() * 1.9f,
+                                                params.baseColor.z() * 1.9f, 1.0f};
+                            params.shadowColor = {params.shadowColor.x() * 0.6f,
+                                                  params.shadowColor.y() * 0.6f,
+                                                  params.shadowColor.z() * 0.6f, 1.0f};
+                            params.emissiveColor = {params.emissiveColor.x() * 1.9f,
+                                                    params.emissiveColor.y() * 1.9f,
+                                                    params.emissiveColor.z() * 1.9f,
+                                                    3.0f};
+                            if (part.material.name == "station-beacons")
+                            {
+                                // Navigation lamps stay self-lit red from
+                                // every angle, just like in the world view.
+                                const starforge::math::Vec4f lamp{1.0f, 0.10f, 0.05f, 1.0f};
+                                params.baseColor = lamp;
+                                params.shadowColor = lamp;
+                                params.midColor = lamp;
+                                params.emissiveColor = {lamp.x(), lamp.y(), lamp.z(), 2.5f};
+                                params.outlineWidth = 0.0f;
+                            }
+                            toon->recordMesh(fc, portraitContext, params,
+                                             part.lods[stationModel.activeLod]);
+                        }
+                    }
+                }
+            }
             // One instanced draw (+ outline + impostor tiers) replaces the
             // old 64 per-rock Toon draws (M15.0.9).
             rockField->record(fc, rockContext, rockInstances.data(),
@@ -2169,129 +2346,302 @@ int main()
             uiCanvas->addRect({.x = cx - 1.0f, .y = cy - 20.0f, .w = 2.0f, .h = 12.0f, .color = reticle});
             uiCanvas->addRect({.x = cx - 1.0f, .y = cy + 8.0f, .w = 2.0f, .h = 12.0f, .color = reticle});
             uiCanvas->addRect({.x = cx - 2.0f, .y = cy - 2.0f, .w = 4.0f, .h = 4.0f, .color = reticle});
-            // Target box follows the selected NPC on screen (or the nearest
-            // hostile when nothing is locked), with a direction chevron.
+            // --- M17.5a relationship + targeting HUD ---------------------
+            // Relation drives colour AND shape in world markers, radar and
+            // the target panel, so friend/foe survives colour blindness and
+            // reads when a hull is only a few pixels across.
+            using Relation = starforge::gameplay::ui_relation::Relation;
+            using namespace starforge::gameplay;
+            const auto uiColor = [](const ui_relation::Color& c, float alpha = 1.0f) {
+                return starforge::math::Vec4f{c.r, c.g, c.b, alpha};
+            };
+
+            const float hudW = static_cast<float>(size.width);
+            const float hudH = static_cast<float>(size.height);
+
+            // Project a camera-relative world point into screen pixels.
+            struct HudProjection
+            {
+                float x = 0.0f, y = 0.0f, ndcX = 0.0f, ndcY = 0.0f;
+                float w = 0.0f;
+                bool valid = false;
+            };
+            const auto projectHud = [&](const starforge::math::Vec3f& pos) {
+                HudProjection out;
+                const auto clip = viewProj * starforge::math::Vec4f{pos.x(), pos.y(), pos.z(), 1.0f};
+                out.w = clip.w();
+                if (clip.w() <= 1e-3f) return out;
+                out.ndcX = clip.x() / clip.w();
+                out.ndcY = clip.y() / clip.w();
+                out.x = (out.ndcX * 0.5f + 0.5f) * hudW;
+                out.y = (0.5f - out.ndcY * 0.5f) * hudH;
+                out.valid = true;
+                return out;
+            };
+
+            const auto drawRelationMarker = [&](float mx, float my, float half,
+                                                Relation relation, float alpha, float converge = 1.0f) {
+                const auto col = uiColor(ui_relation::color(relation), alpha);
+                for (const auto& q : ui_shapes::relationMarkerQuads(
+                         ui_relation::shape(relation), mx, my, half, converge))
+                {
+                    uiCanvas->addRect({.x = q.quad.x0, .y = q.quad.y0,
+                                       .w = q.quad.x1 - q.quad.x0,
+                                       .h = q.quad.y1 - q.quad.y0, .color = col});
+                }
+            };
+
             const auto* selectedContact = targeting.selected();
-            const starforge::game::NpcInfo* trackedNpc = nullptr;
+            // A locked contact is self-contained data, NOT an NPC lookup:
+            // stations and other non-NPC contacts must stay targetable.
+            struct TrackedTarget
+            {
+                starforge::math::Vec3f position{};
+                starforge::math::Vec3f velocity{};
+                Relation relation = Relation::Neutral;
+                bool hostile = false;
+            };
+            std::optional<TrackedTarget> tracked;
             if (selectedContact)
             {
-                for (const auto& npc : simulation.npcs())
-                    if (npc.alive && npc.id == selectedContact->id)
+                tracked = TrackedTarget{
+                    {selectedContact->position.x, selectedContact->position.y,
+                     selectedContact->position.z},
+                    {selectedContact->velocity.x, selectedContact->velocity.y,
+                     selectedContact->velocity.z},
+                    selectedContact->relation, selectedContact->hostile};
+            }
+            else
+            {
+                // No lock: cue the hostile nearest the reticle. Use the
+                // ship-local contacts (same convention as T), never the
+                // world-space -Z shortcut that broke after turning.
+                float bestAlign = 0.0f;
+                for (const auto& c : targeting.contacts())
+                {
+                    if (!c.hostile || c.direction.z <= 0.0f) continue;
+                    if (c.direction.z > bestAlign)
                     {
-                        trackedNpc = &npc;
-                        break;
+                        bestAlign = c.direction.z;
+                        tracked = TrackedTarget{
+                            {c.position.x, c.position.y, c.position.z},
+                            {c.velocity.x, c.velocity.y, c.velocity.z},
+                            c.relation, c.hostile};
                     }
-            }
-            if (!trackedNpc)
-            {
-                float best = 1e30f;
-                for (const auto& npc : simulation.npcs())
-                {
-                    if (!npc.alive || !npc.hostile) continue;
-                    const float d = std::sqrt(npc.position.x * npc.position.x +
-                                              npc.position.y * npc.position.y +
-                                              npc.position.z * npc.position.z);
-                    if (d < best) { best = d; trackedNpc = &npc; }
                 }
-            }
-            if (trackedNpc)
-            {
-                const bool lockedTarget = selectedContact &&
-                                          selectedContact->id == trackedNpc->id &&
-                                          trackedNpc->hostile;
-                const starforge::math::Vec4f hostileTc{1.0f, 0.3f, 0.2f, 1.0f};
-                const starforge::math::Vec4f neutralTc{0.3f, 1.0f, 0.85f, 1.0f};
-                const starforge::math::Vec4f tc = trackedNpc->hostile ? hostileTc : neutralTc;
-                const starforge::math::Vec4f boxColor = lockedTarget || selectedContact
-                    ? tc
-                    : starforge::math::Vec4f{tc.x(), tc.y(), tc.z(), 0.5f};
-
-                const starforge::math::Vec4f clip =
-                    // NPC positions are camera-relative WORLD offsets (ship at
-                    // origin, world axes) - the same frame the NPC mesh and
-                    // radar use. Applying `model` here double-rotates the box
-                    // away from the ship.
-                    viewProj * starforge::math::Vec4f{trackedNpc->position.x,
-                                                      trackedNpc->position.y,
-                                                      trackedNpc->position.z, 1.0f};
-                const float tw = static_cast<float>(size.width);
-                const float th = static_cast<float>(size.height);
-                bool onScreen = false;
-                float tx = cx, ty = cy;
-                if (clip.w() > 1e-3f)
-                {
-                    tx = (clip.x() / clip.w() * 0.5f + 0.5f) * tw;
-                    ty = (0.5f - clip.y() / clip.w() * 0.5f) * th;
-                    onScreen = tx > 20.0f && tx < tw - 20.0f && ty > 20.0f && ty < th - 20.0f;
-                }
-                if (onScreen)
-                {
-                    const float bx = tx - 26.0f, by = ty - 26.0f;
-                    uiCanvas->addRect({.x = bx, .y = by, .w = 12.0f, .h = 2.0f, .color = boxColor});
-                    uiCanvas->addRect({.x = bx + 40.0f, .y = by, .w = 12.0f, .h = 2.0f, .color = boxColor});
-                    uiCanvas->addRect({.x = bx, .y = by + 50.0f, .w = 12.0f, .h = 2.0f, .color = boxColor});
-                    uiCanvas->addRect({.x = bx + 40.0f, .y = by + 50.0f, .w = 12.0f, .h = 2.0f, .color = boxColor});
-                    uiCanvas->addRect({.x = bx, .y = by, .w = 2.0f, .h = 12.0f, .color = boxColor});
-                    uiCanvas->addRect({.x = bx + 50.0f, .y = by, .w = 2.0f, .h = 12.0f, .color = boxColor});
-                    uiCanvas->addRect({.x = bx, .y = by + 40.0f, .w = 2.0f, .h = 12.0f, .color = boxColor});
-                    uiCanvas->addRect({.x = bx + 50.0f, .y = by + 40.0f, .w = 2.0f, .h = 12.0f, .color = boxColor});
-                }
-                const float aimX = tx - cx, aimY = ty - cy;
-                const float aimLen = std::sqrt(aimX * aimX + aimY * aimY);
-                if (!onScreen || aimLen > 120.0f)
-                {
-                    // Prominent arrow near the screen edge pointing at the
-                    // target, so a locked ship behind you can still be found.
-                    const float ux = aimLen > 1e-3f ? aimX / aimLen : 0.0f;
-                    const float uy = aimLen > 1e-3f ? aimY / aimLen : -1.0f;
-                    const float edge = std::min(tw, th) * 0.36f;
-                    const float px = cx + ux * edge, py = cy + uy * edge;
-                    const starforge::math::Vec4f arrow{1.0f, 0.55f, 0.15f, 1.0f};
-                    uiCanvas->addRect({.x = px - 12.0f, .y = py - 4.0f, .w = 24.0f, .h = 8.0f, .color = arrow});
-                    uiCanvas->addRect({.x = px - 8.0f, .y = py - 8.0f, .w = 16.0f, .h = 16.0f, .color = arrow});
-                    char offText[64];
-                    const float range = std::sqrt(
-                        trackedNpc->position.x * trackedNpc->position.x +
-                        trackedNpc->position.y * trackedNpc->position.y +
-                        trackedNpc->position.z * trackedNpc->position.z);
-                    std::snprintf(offText, sizeof(offText), "TARGET %.0fm - TURN", range);
-                    uiCanvas->addText({.x = px - 44.0f, .y = py + 14.0f, .scale = 1.0f,
-                                       .color = arrow, .text = offText});
-                }
-                if (lockedTarget && targeting.lockProgress() > 0.0f)
-                    uiCanvas->addBar({.x = cx - 40.0f, .y = cy + 44.0f, .w = 80.0f, .h = 6.0f,
-                                      .value = targeting.lockProgress(), .fillColor = tc});
             }
 
-            // Contact markers: every live NPC gets a small diamond + range so
-            // fast-moving ships are always findable, not just the locked one.
-            const float markerW = static_cast<float>(size.width);
-            const float markerH = static_cast<float>(size.height);
+            if (tracked)
+            {
+                const Relation relation = tracked->relation;
+                const auto relationColor = ui_relation::color(relation);
+                const bool isSelected = selectedContact != nullptr;
+                const float alpha = isSelected ? 1.0f : 0.45f;
+                const auto project = projectHud({tracked->position.x(),
+                                                 tracked->position.y(),
+                                                 tracked->position.z()});
+                const auto viewDir = view * starforge::math::Vec4f{
+                    tracked->position.x(), tracked->position.y(),
+                    tracked->position.z(), 0.0f};
+                const auto arrow = ui_targeting::edgeArrow(
+                    {viewDir.x(), viewDir.y(), viewDir.z()},
+                    project.ndcX, project.ndcY, hudW, hudH, 56.0f);
+
+                if (project.valid && !arrow.behind &&
+                    project.x > 20.0f && project.x < hudW - 20.0f &&
+                    project.y > 20.0f && project.y < hudH - 20.0f)
+                {
+                    // Lock-on brackets converge over 0.25 s with a flash.
+                    const float converge = isSelected ? targeting.lockProgress() : 0.0f;
+                    drawRelationMarker(project.x, project.y, 25.0f, relation, alpha, converge);
+                    if (isSelected && converge > 0.0f && converge < 1.0f)
+                    {
+                        const float flash = std::sin(converge * 3.14159265f);
+                        drawRelationMarker(project.x, project.y, 25.0f + flash * 8.0f,
+                                           relation, flash * 0.7f, 1.0f);
+                    }
+
+                    // Lead pip: where to aim for a moving target.
+                    if (isSelected && selectedContact)
+                    {
+                        const auto p = ui_targeting::Vec3{tracked->position.x(),
+                                                          tracked->position.y(),
+                                                          tracked->position.z()};
+                        const auto v = ui_targeting::Vec3{
+                            tracked->velocity.x() - shipForward.x() * starforge::game::targetSpeed(flight),
+                            tracked->velocity.y() - shipForward.y() * starforge::game::targetSpeed(flight),
+                            tracked->velocity.z() - shipForward.z() * starforge::game::targetSpeed(flight)};
+                        const auto solution = ui_targeting::solveLead(p, v, 600.0f);
+                        if (solution.valid && solution.time < 2.0f)
+                        {
+                            const auto pip = projectHud({solution.aim.x, solution.aim.y,
+                                                         solution.aim.z});
+                            if (pip.valid)
+                            {
+                                const auto pipColor = uiColor(relationColor, 0.9f);
+                                uiCanvas->addRect({.x = pip.x - 6.0f, .y = pip.y - 1.0f,
+                                                   .w = 12.0f, .h = 2.0f, .color = pipColor});
+                                uiCanvas->addRect({.x = pip.x - 1.0f, .y = pip.y - 6.0f,
+                                                   .w = 2.0f, .h = 12.0f, .color = pipColor});
+                            }
+                        }
+                    }
+                }
+                else if (!arrow.onScreen)
+                {
+                    // Edge arrow with distance; flipped for targets behind.
+                    // Uses the same relation colour as the world marker.
+                    const auto arrowColor = uiColor(relationColor, 1.0f);
+                    const float a = arrow.angle;
+                    const float ux = std::cos(a), uy = std::sin(a);
+                    const float px = arrow.x, py = arrow.y;
+                    uiCanvas->addRect({.x = px - ux * 16.0f - 3.0f,
+                                       .y = py - uy * 16.0f - 3.0f,
+                                       .w = 6.0f, .h = 6.0f, .color = arrowColor});
+                    uiCanvas->addRect({.x = px - uy * 9.0f - 2.0f,
+                                       .y = py + ux * 9.0f - 2.0f,
+                                       .w = 4.0f, .h = 4.0f, .color = arrowColor});
+                    uiCanvas->addRect({.x = px + uy * 9.0f - 2.0f,
+                                       .y = py - ux * 9.0f - 2.0f,
+                                       .w = 4.0f, .h = 4.0f, .color = arrowColor});
+                    char edgeText[40];
+                    std::snprintf(edgeText, sizeof(edgeText), "%s %s %.0fm",
+                                  arrow.behind ? "BEHIND" : "TARGET",
+                                  ui_relation::label(relation), selectedContact
+                                      ? selectedContact->distance : 0.0f);
+                    const float textX = std::clamp(px - 80.0f, 8.0f, hudW - 168.0f);
+                    uiCanvas->addText({.x = textX, .y = std::clamp(py + 16.0f, 8.0f, hudH - 20.0f),
+                                       .scale = 1.0f, .color = arrowColor, .text = edgeText});
+                }
+
+                // Crosshair turn cue: shortest way to turn, fades on alignment.
+                if (isSelected)
+                {
+                    const auto cue = ui_targeting::turnCue(
+                        {viewDir.x(), viewDir.y(), viewDir.z()});
+                    if (cue.visible)
+                    {
+                        const float ca = cue.angle;
+                        const float rx = cx + std::cos(ca) * 34.0f;
+                        const float ry = cy - std::sin(ca) * 34.0f;
+                        const auto cueColor = uiColor(relationColor, cue.strength * 0.9f);
+                        uiCanvas->addRect({.x = rx - 3.0f, .y = ry - 3.0f,
+                                           .w = 6.0f, .h = 6.0f, .color = cueColor});
+                    }
+                }
+
+                // Target panel: a portrait of the locked contact on the left
+                // (rendered into the HDR pass) plus name/faction/range and
+                // shield/hull bars on the right. NPC ships and the station
+                // share the identical layout. The portrait area is left
+                // unfilled here so the rendered model shows through.
+                if (isSelected && selectedContact)
+                {
+                    const float px = std::max(8.0f, hudW - 510.0f);
+                    const float py = 18.0f;
+                    const bool npcPortrait = std::any_of(simulation.npcs().begin(),
+                        simulation.npcs().end(), [&](const auto& npc) {
+                            return npc.alive && npc.id == selectedContact->id;
+                        });
+                    const bool stationPortrait = selectedContact->id == "station-a" &&
+                                                 stationModel.loaded;
+                    const bool hasPortrait = npcPortrait || stationPortrait;
+                    // One geometry for every contact: portrait window on the
+                    // left, stats panel on the right.
+                    const float statsX = px + 146.0f;
+                    const float statsW = 354.0f;
+                    const float textX = statsX + 14.0f; // 14px inset from the panel rim
+                    const float barX = statsX + 12.0f;
+                    const float barW = statsW - 26.0f;
+                    uiCanvas->addPanel({.x = statsX, .y = py + 10.0f,
+                                        .w = statsW, .h = 130.0f,
+                                        .outlineWidth = 1.5f,
+                                        .fillColor = {0.04f, 0.08f, 0.14f, 0.88f},
+                                        .outlineColor = uiColor(relationColor, 0.9f),
+                                        .accentColor = uiColor(relationColor, 1.0f)});
+                    if (hasPortrait)
+                    {
+                        // Half-opaque backing mutes the space behind the
+                        // model without hiding it; the portrait was rendered
+                        // brighter in HDR to compensate for this veil.
+                        uiCanvas->addRect({.x = px + 8.0f, .y = py + 10.0f,
+                                           .w = 130.0f, .h = 130.0f,
+                                           .color = {0.02f, 0.04f, 0.07f, 0.5f}});
+                        // Four thin strokes frame the portrait.
+                        const auto frameColor = uiColor(relationColor, 0.9f);
+                        uiCanvas->addRect({.x = px + 8.0f, .y = py + 10.0f,
+                                           .w = 130.0f, .h = 1.5f, .color = frameColor});
+                        uiCanvas->addRect({.x = px + 8.0f, .y = py + 138.5f,
+                                           .w = 130.0f, .h = 1.5f, .color = frameColor});
+                        uiCanvas->addRect({.x = px + 8.0f, .y = py + 10.0f,
+                                           .w = 1.5f, .h = 130.0f, .color = frameColor});
+                        uiCanvas->addRect({.x = px + 136.5f, .y = py + 10.0f,
+                                           .w = 1.5f, .h = 130.0f, .color = frameColor});
+                        uiCanvas->addText({.x = px + 10.0f, .y = py + 144.0f,
+                                           .scale = 1.0f, .color = frameColor,
+                                           .text = "TARGET VIEW"});
+                    }
+                    char title[96];
+                    std::snprintf(title, sizeof(title), "%.20s  [%s]",
+                                  selectedContact->name.c_str(),
+                                  ui_relation::label(selectedContact->relation));
+                    // Every string is inset from the panel rim so glyphs never
+                    // touch the border (glyphs render downward from their y).
+                    uiCanvas->addText({.x = textX, .y = py + 18.0f, .scale = 1.0f,
+                                       .color = uiColor(relationColor), .text = title});
+                    char rangeText[40];
+                    std::snprintf(rangeText, sizeof(rangeText), "RANGE %.0f m%s",
+                                  selectedContact->distance,
+                                  targeting.locked() ? "  LOCKED" : "");
+                    uiCanvas->addText({.x = textX, .y = py + 42.0f, .scale = 1.0f,
+                                       .color = {0.65f, 0.82f, 0.92f, 1.0f},
+                                       .text = rangeText});
+                    uiCanvas->addBar({.x = barX, .y = py + 62.0f,
+                                      .w = barW, .h = 12.0f,
+                                      .value = std::clamp(selectedContact->shield / 100.0f, 0.0f, 1.0f),
+                                      .fillColor = {0.25f, 0.7f, 1.0f, 1.0f},
+                                      .trackColor = {0.12f, 0.18f, 0.26f, 1.0f}});
+                    uiCanvas->addText({.x = barX + 4.0f, .y = py + 63.0f, .scale = 1.0f,
+                                       .color = {0.02f, 0.05f, 0.10f, 1.0f}, .text = "SHIELD"});
+                    uiCanvas->addBar({.x = barX, .y = py + 86.0f,
+                                      .w = barW, .h = 12.0f,
+                                      .value = std::clamp(selectedContact->hull / 100.0f, 0.0f, 1.0f),
+                                      .fillColor = uiColor(relationColor),
+                                      .trackColor = {0.12f, 0.18f, 0.26f, 1.0f}});
+                    uiCanvas->addText({.x = barX + 4.0f, .y = py + 87.0f, .scale = 1.0f,
+                                       .color = {0.02f, 0.05f, 0.10f, 1.0f}, .text = "HULL"});
+                    if (targeting.lockProgress() > 0.0f)
+                        uiCanvas->addBar({.x = barX, .y = py + 118.0f,
+                                          .w = barW, .h = 6.0f,
+                                          .value = targeting.lockProgress(),
+                                          .fillColor = uiColor(relationColor)});
+                }
+            }
+
+            // Contact markers: every NPC gets a relation-shaped cue. Hostiles
+            // are always marked; friendlies/neutrals are marked beyond hull
+            // visibility range so the field is readable at a glance.
             for (const auto& npc : simulation.npcs())
             {
                 if (!npc.alive) continue;
-                const auto clip = viewProj * starforge::math::Vec4f{
-                    npc.position.x, npc.position.y, npc.position.z, 1.0f};
-                if (clip.w() <= 1e-3f) continue;
-                const float mx = (clip.x() / clip.w() * 0.5f + 0.5f) * markerW;
-                const float my = (0.5f - clip.y() / clip.w() * 0.5f) * markerH;
-                if (mx < 8.0f || mx > markerW - 8.0f || my < 8.0f || my > markerH - 8.0f) continue;
-                const bool selected = targeting.selected() &&
-                                      targeting.selected()->id == npc.id;
-                if (selected) continue; // the big target box already covers it
-                const auto mc = npc.hostile
-                    ? starforge::math::Vec4f{1.0f, 0.35f, 0.2f, 0.9f}
-                    : starforge::math::Vec4f{0.3f, 1.0f, 0.85f, 0.9f};
-                uiCanvas->addRect({.x = mx - 3.0f, .y = my - 1.0f, .w = 6.0f, .h = 2.0f, .color = mc});
-                uiCanvas->addRect({.x = mx - 1.0f, .y = my - 3.0f, .w = 2.0f, .h = 6.0f, .color = mc});
-                char contactLabel[32];
+                if (targeting.selected() && targeting.selected()->id == npc.id) continue;
+                const auto project = projectHud({npc.position.x, npc.position.y, npc.position.z});
+                if (!project.valid || project.x < 8.0f || project.x > hudW - 8.0f ||
+                    project.y < 8.0f || project.y > hudH - 8.0f) continue;
                 const float range = std::sqrt(npc.position.x * npc.position.x +
                                               npc.position.y * npc.position.y +
                                               npc.position.z * npc.position.z);
-                std::snprintf(contactLabel, sizeof(contactLabel), "%.0fm", range);
-                uiCanvas->addText({.x = mx + 6.0f, .y = my - 4.0f, .scale = 1.0f,
-                                   .color = mc, .text = contactLabel});
+                if (!npc.hostile && range < 150.0f) continue;
+                drawRelationMarker(project.x, project.y, npc.hostile ? 7.0f : 6.0f,
+                                   npc.relation, 0.9f);
+                char contactLabel[32];
+                std::snprintf(contactLabel, sizeof(contactLabel), "%s %.0fm",
+                              ui_relation::label(npc.relation), range);
+                uiCanvas->addText({.x = project.x + 10.0f, .y = project.y - 5.0f, .scale = 1.0f,
+                                   .color = uiColor(ui_relation::color(npc.relation), 0.9f),
+                                   .text = contactLabel});
             }
+
             // Proximity station prompt: appears within 1 km, above Comms.
             if (!flight.paused && !chatActive && !stationOpen &&
                 stationRangeMetres < 1000.0)
@@ -2404,11 +2754,13 @@ int main()
                     uiCanvas->addRect({.x = ccx - 1.0f, .y = ccy - r, .w = 1.0f, .h = 2.0f * r, .color = ringColor});
                     uiCanvas->addRect({.x = ccx + r - 1.0f, .y = ccy - r, .w = 1.0f, .h = 2.0f * r, .color = ringColor});
                 }
-                const auto radarColor = [](starforge::game::RadarKind kind) -> starforge::math::Vec4f {
+                const auto radarColor = [&](starforge::game::RadarKind kind) -> starforge::math::Vec4f {
+                    using Faction = starforge::gameplay::ui_relation::Relation;
                     switch (kind)
                     {
-                    case starforge::game::RadarKind::Hostile: return {1.0f, 0.25f, 0.2f, 1.0f};
-                    case starforge::game::RadarKind::Neutral: return {0.3f, 1.0f, 0.85f, 1.0f};
+                    case starforge::game::RadarKind::Hostile: return uiColor(ui_relation::color(Faction::Hostile));
+                    case starforge::game::RadarKind::Ally:    return uiColor(ui_relation::color(Faction::Ally));
+                    case starforge::game::RadarKind::Neutral: return uiColor(ui_relation::color(Faction::Neutral));
                     case starforge::game::RadarKind::Planet:  return {0.2f, 0.55f, 1.0f, 1.0f};
                     case starforge::game::RadarKind::Station: return {0.3f, 1.0f, 0.6f, 1.0f};
                     default:                                  return {0.7f, 0.7f, 0.7f, 1.0f};
@@ -2467,13 +2819,16 @@ int main()
                 };
                 plotWorld("planet", planetRel.x(), planetRel.y(), planetRel.z(),
                           starforge::game::RadarKind::Planet);
-                plotWorld("station-a", 400.0f, 0.0f, -1200.0f, starforge::game::RadarKind::Station);
+                plotWorld("station-a", stationRel.x(), stationRel.y(), stationRel.z(),
+                          starforge::game::RadarKind::Station);
                 for (const auto& npc : simulation.npcs())
                     if (npc.alive)
                         plotWorld(npc.id.c_str(), npc.position.x, npc.position.y,
                                   npc.position.z,
-                                  npc.hostile ? starforge::game::RadarKind::Hostile
-                                              : starforge::game::RadarKind::Neutral);
+                                  npc.relation == starforge::gameplay::ui_relation::Relation::Ally
+                                      ? starforge::game::RadarKind::Ally
+                                      : (npc.hostile ? starforge::game::RadarKind::Hostile
+                                                     : starforge::game::RadarKind::Neutral));
                 int radarRocks = 0;
                 for (const auto* rock : sorted)
                 {
@@ -2545,9 +2900,10 @@ int main()
                 }
                 else
                 {
-                    uiCanvas->addText({.x = rx + 4.0f, .y = ry - 26.0f, .scale = 2.0f,
+                    // Short enough to fit the radar width at scale 1.
+                    uiCanvas->addText({.x = rx + 4.0f, .y = ry - 26.0f, .scale = 1.0f,
                                        .color = {0.45f, 0.6f, 0.7f, 1.0f},
-                                       .text = "NO TARGET - press T to lock"});
+                                       .text = "T lock  R nearest  TAB cycle"});
                 }
             }
             // Station trade / mission interface (opened via dock prompt only).
@@ -2869,11 +3225,8 @@ int main()
             needRecreate = true;
         }
 
-        // Weapon flashes/pause feedback (placeholders until M15.0.5 combat).
-        if (flight.firePrimary)
-        {
-            // Primary guns held (left mouse) — no projectile yet.
-        }
+        // Weapon feedback is event-driven through CombatFxState; no
+        // polled placeholder remains here.
     }
 
     renderer->waitIdle();

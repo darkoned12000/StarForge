@@ -2,12 +2,16 @@
 
 # STARFORGE
 
-Space-focused rendering engine and game-system foundation, built on Vulkan.
+Space-focused rendering engine and a playable 3D space-game demo, built on Vulkan.
 
-STARFORGE provides the engine plumbing a large-scale 3D space game needs:
+STARFORGE provides the engine plumbing a large-scale 3D space game needs —
 precision at astronomical range, deterministic procedural worlds, GPU-driven
 object counts, scalable planetary rendering, spatial audio, physics, AI, and
-a cel-shaded art direction.
+a cel-shaded art direction — plus `starforge_game`, a flying/combat demo that
+exercises those systems end to end.
+
+This README covers both the engine and the demo: what is implemented, how to
+build and run it, and the controls.
 
 ## Project Vision
 
@@ -73,12 +77,12 @@ Configure:
 
     cmake --preset linux-debug
 
-Build:
+Build everything (engine, demo and tests):
 
     cmake --build --preset debug
     cmake --build --preset debug --target check
 
-Run the sandbox:
+Run the sandbox (public-API example):
 
     ./build/linux-debug/bin/starforge_sandbox
 
@@ -106,6 +110,67 @@ fallback code on capable hardware:
 Overridable features: `bindless`, `drawIndirectCount`,
 `multiDrawIndirect`, `shaderFloat64`, `meshShader`. Hard requirements
 cannot be disabled.
+
+## Game Demo
+
+`starforge_game` is the playable demo built from `apps/game/`. It runs the
+same 60 Hz `GameSimulation` used by the headless tests and renders through the
+public STARFORGE facades (Toon, AsteroidField, Hud, Audio, CombatFx).
+
+### Build and run
+
+    cmake --preset linux-debug
+    cmake --build --preset debug --target starforge_game
+    ./build/linux-debug/bin/starforge_game
+
+The authored ship/station GLBs are committed under `assets/models/` and their
+path is baked into the binary, so no separate asset step is needed to play.
+To regenerate them from source:
+
+    python3 tools/generate_assets.py assets/models 512
+
+A Vulkan 1.3+ GPU is required, with dynamic rendering, synchronization2 and
+buffer device address. Debug builds enable validation layers; configure with
+`-DSTARFORGE_ENABLE_VALIDATION=OFF` to disable them.
+
+### Controls
+
+| Input | Action |
+|-------|--------|
+| `W` / `S` | Increase/decrease throttle (persistent set-point) |
+| Mouse move | Steer (pitch/yaw); camera is a chase camera |
+| `A` / `D` | Barrel roll left / right |
+| Arrow keys | Held-rate steering alternative (no-mouse play) |
+| `Left Shift` | Boost |
+| `+` / `-` | Radar range zoom |
+| Left mouse | Fire primary guns |
+| Right mouse | Fire secondary weapon |
+| `T` | Lock hostile nearest the reticle; press again to clear |
+| `R` | Lock nearest contact by distance |
+| `Tab` | Cycle contacts |
+| `M` | Toggle system map |
+| `Space` | Toggle flight ↔ UI mode (frees the cursor for clicking) |
+| `P` / `Esc` | Pause menu / close overlay |
+
+Damage requires the target to be under the reticle. Shots fired out of range
+still produce the laser/audio feedback but simply fall short.
+
+### Current state
+
+- **Flight & world:** persistent throttle, roll and boost, chase camera,
+  seeded streaming asteroid field, planet, 3D sun with corona, nebula and
+  starfield, and a station fixed in the sector.
+- **Relations & targeting:** self/ally/neutral/hostile palette shared by world
+  markers, radar and the target panel; relation-shaped markers; reticle lock,
+  0.25 s lock convergence, off-screen arrow, turn cue, lead pip and a target
+  portrait (the station has one too).
+- **Combat:** reticle-aligned primary/secondary fire, pooled HDR bolts,
+  muzzle flashes, impacts, shield ripples, layered explosions, debris and
+  camera shake. Friendly fire is suppressed; guns still fire out of range.
+- **Economy & UI:** dock at the station's `<DOCK>` prompt, clickable Trade /
+  Missions / Navigation panel, comms/chat, pause menu and system map.
+- **Factions:** NPC hulls, outlines, nav lights and engine plumes tinted by
+  relation.
 
 ## Repository Layout
 
@@ -256,8 +321,9 @@ in [docs/decisions/](docs/decisions/README.md).
 
 ## Current limitations
 
-- M15 gameplay, M16 HUD/UI, M17 asset loading, and M18 persistence remain
-  future work.
+- M18 persistence remains future work.
+- Asteroid rendering is functional but stylised; closer fidelity to the
+  reference concept art is the next art pass.
 - Planet terrain-height displacement and different-LOD T-junction skirts are
   still TODO.
 - HDR bloom, true volumetric raymarching, GPU particle buffers, and GPU

@@ -88,9 +88,9 @@ std::expected<std::unique_ptr<RawSun>, std::string> RawSun::create(const CreateI
         .colorFormat = info.colorFormat,
         .depthFormat = info.depthFormat,
         .shaderDirectory = info.shaderDirectory,
+        .specializationInfo = info.specializationInfo,
         .defaultRadius = info.defaultRadius,
         .subdivisions = info.subdivisions,
-        .specializationInfo = info.specializationInfo,
     });
     if (!renderer)
     {
@@ -119,9 +119,9 @@ std::expected<void, std::string> RawSun::recreate(const CreateInfo& info)
         .colorFormat = info.colorFormat,
         .depthFormat = info.depthFormat,
         .shaderDirectory = info.shaderDirectory,
+        .specializationInfo = info.specializationInfo,
         .defaultRadius = info.defaultRadius,
         .subdivisions = info.subdivisions,
-        .specializationInfo = info.specializationInfo,
     });
     if (!renderer)
     {

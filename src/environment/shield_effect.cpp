@@ -71,9 +71,16 @@ void ShieldEffect::destroy() noexcept
     device_ = VK_NULL_HANDLE;
 }
 
-void ShieldEffect::render(VkCommandBuffer cmd, const ShieldRenderContext& context, const ShieldParams& params)
+void ShieldEffect::render(VkCommandBuffer cmd, const ShieldRenderContext& context, const ShieldParams& params) const
 {
     if (!effect_.has_value())
+    {
+        return;
+    }
+    // Skip billboards whose anchor is at or behind the eye. Without this,
+    // the perspective divide mirrors the ring across the screen.
+    const math::Vec4f clip = context.viewProj * math::Vec4f{params.position, 1.0f};
+    if (clip.w <= 0.0f)
     {
         return;
     }

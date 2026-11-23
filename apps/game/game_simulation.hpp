@@ -14,6 +14,7 @@
 #include "gameplay/jumping.hpp"
 #include "gameplay/missions.hpp"
 #include "gameplay/progression.hpp"
+#include "gameplay/ui_relation.hpp"
 
 #include <string>
 #include <vector>
@@ -30,6 +31,7 @@ struct GameEvent
         WeaponFired,
         PlayerShieldHit,
         PlayerHullHit,
+        PlayerDestroyed,
         HostileHit,
         HostileDestroyed,
         Docked,
@@ -51,7 +53,11 @@ struct GameEvent
 struct NpcInfo
 {
     std::string id;
+    std::string name;
+    gameplay::ui_relation::Relation relation =
+        gameplay::ui_relation::Relation::Neutral;
     RawVec3f position{0.0f, 0.0f, 0.0f}; // ship-relative metres
+    RawVec3f velocity{0.0f, 0.0f, 0.0f};
     bool alive = false;
     bool hostile = true;
     bool engaging = false;
@@ -89,9 +95,15 @@ public:
     [[nodiscard]] const std::string& targetId() const noexcept { return targetId_; }
 
     // One fixed simulation step. `shipForward` is in the ship-relative frame
-    // (ship at origin). Returns events produced this step.
+    // (ship at origin) and steers NPC AI. `aimOrigin`/`aimDirection` describe
+    // the player's reticle ray (also ship-relative); a locked target only
+    // takes damage when it actually lies inside that ray's narrow cone.
+    // Defaults preserve the historic headless-test behaviour (aim straight
+    // ahead from the ship). Returns events produced this step.
     std::vector<GameEvent> step(float dt, const RawVec3f& shipForward,
-                                bool firePrimary, bool fireSecondary);
+                                bool firePrimary, bool fireSecondary,
+                                const RawVec3f& aimOrigin = RawVec3f{0.0f, 0.0f, 0.0f},
+                                const RawVec3f& aimDirection = RawVec3f{0.0f, 0.0f, -1.0f});
 
     // --- M15.1 damage / shields ---
     [[nodiscard]] float playerShield() const noexcept { return player_.shield; }
@@ -138,6 +150,9 @@ private:
     struct NpcState
     {
         std::string id;
+        std::string name;
+        gameplay::ui_relation::Relation relation =
+            gameplay::ui_relation::Relation::Neutral;
         RawVec3f position{};
         RawVec3f velocity{};
         bool alive = false;
